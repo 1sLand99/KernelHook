@@ -6,6 +6,7 @@
 
 #include <hook.h>
 #include <insn.h>
+#include <pgtable.h>
 #include <export.h>
 
 typedef uint32_t inst_type_t;
@@ -305,3 +306,32 @@ hook_err_t hook_prepare(hook_t *hook)
     return HOOK_NO_ERR;
 }
 KP_EXPORT_SYMBOL(hook_prepare);
+
+void hook_install(hook_t *hook)
+{
+    uint64_t va = hook->origin_addr;
+    uint64_t *entry = pgtable_entry_kernel(va);
+    uint64_t ori_prot = *entry;
+    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
+    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
+        *((uint32_t *)hook->origin_addr + i) = hook->tramp_insts[i];
+    }
+    flush_icache_all();
+    modify_entry_kernel(va, entry, ori_prot);
+}
+KP_EXPORT_SYMBOL(hook_install);
+
+void hook_uninstall(hook_t *hook)
+{
+    uint64_t va = hook->origin_addr;
+    uint64_t *entry = pgtable_entry_kernel(va);
+    uint64_t ori_prot = *entry;
+    modify_entry_kernel(va, entry, (ori_prot | PTE_DBM) & ~PTE_RDONLY);
+    flush_tlb_kernel_page(va);
+    for (int32_t i = 0; i < hook->tramp_insts_num; i++) {
+        *((uint32_t *)hook->origin_addr + i) = hook->origin_insts[i];
+    }
+    flush_icache_all();
+    modify_entry_kernel(va, entry, ori_prot);
+}
+KP_EXPORT_SYMBOL(hook_uninstall);

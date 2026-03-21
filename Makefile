@@ -52,10 +52,17 @@ $(TARGET): $(OBJS) $(LDSCRIPT)
 
 typecheck:
 	@echo "Running typecheck (syntax-only) for ARCH=$(ARCH)..."
+ifeq ($(ARCH),arm64)
 	@for f in $(SRCS); do \
 		echo "  Checking $$f"; \
-		$(CC) $(CFLAGS) -fsyntax-only $$f || exit 1; \
+		clang --target=aarch64-linux-gnu $(CFLAGS) -fsyntax-only $$f || exit 1; \
 	done
+else ifeq ($(ARCH),x86_64)
+	@for f in $(SRCS); do \
+		echo "  Checking $$f"; \
+		clang --target=x86_64-linux-gnu $(CFLAGS) -fsyntax-only $$f || exit 1; \
+	done
+endif
 	@echo "Typecheck passed."
 
 clean:
