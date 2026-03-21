@@ -1,0 +1,24 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * Copyright (C) 2023 bmax121. All Rights Reserved.
+ */
+
+#ifndef _KP_EXPORT_H_
+#define _KP_EXPORT_H_
+
+#include <ktypes.h>
+
+typedef struct
+{
+    const char *name;
+    uint64_t addr;
+} kp_symbol_t;
+
+#define KP_EXPORT_SYMBOL(sym)                                              \
+    static const char __kp_sym_name_##sym[] __section(".rodata")           \
+        __used = #sym;                                                     \
+    static const kp_symbol_t __kp_sym_##sym __section(".kp.symbol")        \
+        __used __aligned(8) = { .name = __kp_sym_name_##sym,               \
+                                .addr = (uint64_t)&sym }
+
+#endif /* _KP_EXPORT_H_ */
