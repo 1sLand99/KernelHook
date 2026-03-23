@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# KernelHook userspace test suite
+
+# Helper: define a test executable linked against libkernelhook
+function(kh_add_test name source)
+    add_executable(${name} ${source})
+    target_include_directories(${name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/include/arch/arm64
+    )
+    target_compile_definitions(${name} PRIVATE __USERSPACE__)
+    target_compile_options(${name} PRIVATE -Wall -Wextra -Werror -Wno-unused-parameter)
+    target_link_libraries(${name} PRIVATE kernelhook)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+# --- Test executables ---
+kh_add_test(test_framework_smoke test_framework_smoke.c)
