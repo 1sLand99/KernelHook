@@ -1,0 +1,26 @@
+# Build
+build/
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+modules.order
+Module.symvers
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Ralph
+prd.json
+progress.txt
+prompts/
+scripts/
+
+# OS
+.DS_Store
+Thumbs.db
