@@ -298,6 +298,10 @@ static inline void *fp_get_origin_func(void *hook_args)
     return (void *)rox->hook.origin_fp;
 }
 
+/* ---- Transit buffer setup (userspace) ---- */
+
+void hook_chain_setup_transit(hook_chain_rox_t *rox);
+
 /* ---- Chain install/uninstall helpers ---- */
 
 static inline void hook_chain_install(hook_chain_rox_t *rox)
