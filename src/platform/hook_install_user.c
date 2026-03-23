@@ -13,41 +13,14 @@
 /* Use __builtin_memcpy for portability across freestanding and hosted. */
 #define memcpy __builtin_memcpy
 
-/* ---- Page-aligned mprotect helpers ---- */
-
-/* Return the page-aligned start address containing addr. */
-static uint64_t page_start(uint64_t addr)
-{
-    uint64_t ps = platform_page_size();
-    return addr & ~(ps - 1);
-}
-
 /*
  * Write instructions to a code page.
- *
- * 1. Make the target page(s) RW
- * 2. Copy instructions
- * 3. Flush icache
- * 4. Restore RX
- *
- * Handles the case where the instruction range spans a page boundary.
+ * Uses platform_write_code which handles W^X safely on all platforms.
  */
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
     uint64_t size = (uint64_t)count * sizeof(uint32_t);
-    uint64_t start = page_start(va);
-    uint64_t end = page_start(va + size - 1);
-
-    /* Total region to mprotect: from start of first page to end of last page */
-    uint64_t prot_size = (end - start) + platform_page_size();
-
-    platform_set_rw(start, prot_size);
-
-    for (int32_t i = 0; i < count; i++)
-        *((uint32_t *)va + i) = insts[i];
-
-    platform_flush_icache(va, size);
-    platform_set_rx(start, prot_size);
+    platform_write_code(va, insts, size);
 }
 
 /* ---- Public API ---- */
@@ -67,13 +40,8 @@ void hook_uninstall(hook_t *hook)
 /* Defined in transit.c — naked asm stub template. */
 extern uint64_t _transit(void);
 
-/*
- * _transit_end is placed by the linker immediately after _transit.
- * With userspace toolchains we compute the size from _transit_end - _transit.
- * If the linker script does not provide _transit_end (e.g. no custom linker
- * script), we fall back to TRANSIT_INST_NUM which is the buffer capacity.
- */
-extern void _transit_end(void) __attribute__((weak));
+/* Defined in transit.c right after _transit — used to compute stub size. */
+extern void _transit_end(void);
 
 static uint64_t stub_size(void *start, void *end)
 {
@@ -108,7 +76,7 @@ void hook_chain_setup_transit(hook_chain_rox_t *rox)
 /* ---- Function pointer hook transit setup ---- */
 
 extern uint64_t _fp_transit(void);
-extern void _fp_transit_end(void) __attribute__((weak));
+extern void _fp_transit_end(void);
 
 void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox)
 {

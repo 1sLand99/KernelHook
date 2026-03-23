@@ -276,11 +276,12 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
 
 static void write_fp_value(uintptr_t fp_addr, uint64_t value)
 {
-    uint64_t ps = platform_page_size();
-    uint64_t start = fp_addr & ~(ps - 1);
-    platform_set_rw(start, ps);
-    *(uint64_t *)fp_addr = value;
-    platform_set_ro(start, ps);
+    /* In userspace, function pointers typically live in writable data
+     * segments (.data / .bss).  Temporarily making the page RW then
+     * restoring to RO would break other globals on the same page.
+     * Just write directly — if the page happens to be read-only (e.g.
+     * rodata), the caller must handle protection changes. */
+    *(volatile uint64_t *)fp_addr = value;
 }
 
 /* ---- Simple function pointer hook (no chain) ---- */

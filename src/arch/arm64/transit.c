@@ -17,11 +17,20 @@
 #include <ktypes.h>
 #include <hook.h>
 
-/* Platform-appropriate section attribute for transit stubs. */
+/* Platform-appropriate section attribute for transit stubs.
+ *
+ * These stubs are never executed in-place — they are memcpy'd into
+ * transit buffers (ROX pool).  They contain embedded absolute addresses
+ * (.quad) which would create illegal text-relocations in a code section
+ * on macOS.  Placing them in a data section avoids that. */
 #ifdef __APPLE__
-#define TRANSIT_SECTION __attribute__((naked, section("__TEXT,__transit")))
+#define TRANSIT_SECTION __attribute__((naked, used, section("__DATA,__transit")))
+/* macOS Mach-O C symbols have a leading underscore. Raw asm references
+ * must include it explicitly. */
+#define ASM_SYM(name) "_" #name
 #else
-#define TRANSIT_SECTION __attribute__((naked, section(".transit.text")))
+#define TRANSIT_SECTION __attribute__((naked, used, section(".transit.data")))
+#define ASM_SYM(name) #name
 #endif
 
 /* ---- Callback iteration ---- */
@@ -175,12 +184,14 @@ uint64_t _transit(void)
         "ldp  x29, x30, [sp], #16\n\t"
         "ret\n\t"
         ".align 3\n\t"
-        "0: .quad transit_body\n\t"
+        "0: .quad " ASM_SYM(transit_body) "\n\t"
+        /* End marker: must be in the same section, immediately after the stub */
+        ".globl " ASM_SYM(_transit_end) "\n\t"
+        ASM_SYM(_transit_end) ":\n\t"
         :
         : [rwoff] "i" ((int)__builtin_offsetof(hook_chain_rox_t, rw))
     );
 }
-extern void _transit_end(void);
 
 /* ==== Function pointer hook transit ====
  *
@@ -267,9 +278,10 @@ uint64_t _fp_transit(void)
         "ldp  x29, x30, [sp], #16\n\t"
         "ret\n\t"
         ".align 3\n\t"
-        "0: .quad fp_transit_body\n\t"
+        "0: .quad " ASM_SYM(fp_transit_body) "\n\t"
+        ".globl " ASM_SYM(_fp_transit_end) "\n\t"
+        ASM_SYM(_fp_transit_end) ":\n\t"
         :
         : [rwoff] "i" ((int)__builtin_offsetof(fp_hook_chain_rox_t, rw))
     );
 }
-extern void _fp_transit_end(void);

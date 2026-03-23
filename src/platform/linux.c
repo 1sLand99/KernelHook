@@ -52,6 +52,25 @@ int platform_set_rx(uint64_t addr, uint64_t size)
     return mprotect((void *)addr, size, PROT_READ | PROT_EXEC);
 }
 
+int platform_write_code(uint64_t addr, const void *data, uint64_t size)
+{
+    uint64_t ps = platform_page_size();
+    uint64_t start = addr & ~(ps - 1);
+    uint64_t end = (addr + size - 1) & ~(ps - 1);
+    uint64_t prot_size = (end - start) + ps;
+
+    if (mprotect((void *)start, prot_size, PROT_READ | PROT_WRITE) != 0)
+        return -1;
+
+    __builtin_memcpy((void *)addr, data, size);
+    __builtin___clear_cache((char *)addr, (char *)(addr + size));
+
+    if (mprotect((void *)start, prot_size, PROT_READ | PROT_EXEC) != 0)
+        return -1;
+
+    return 0;
+}
+
 void platform_flush_icache(uint64_t addr, uint64_t size)
 {
     __builtin___clear_cache((char *)addr, (char *)(addr + size));

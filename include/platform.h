@@ -47,6 +47,11 @@ int platform_set_ro(uint64_t addr, uint64_t size);
 /* Change memory protection to read-execute. Returns 0 on success. */
 int platform_set_rx(uint64_t addr, uint64_t size);
 
+/* Write instructions to a code page.
+ * Handles platform-specific memory protection (e.g., macOS W^X).
+ * Flushes icache after writing.  Returns 0 on success. */
+int platform_write_code(uint64_t addr, const void *data, uint64_t size);
+
 /* Flush instruction cache for the given range. */
 void platform_flush_icache(uint64_t addr, uint64_t size);
 

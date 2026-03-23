@@ -35,4 +35,8 @@ void hook_mem_unregister_origin(uint64_t origin_addr);
 void *hook_mem_get_rox_from_origin(uint64_t origin_addr);
 void *hook_mem_get_rw_from_origin(uint64_t origin_addr);
 
+/* Test/debug: query pool utilisation (used blocks count). */
+uint32_t hook_mem_rox_used_blocks(void);
+uint32_t hook_mem_rw_used_blocks(void);
+
 #endif /* _KP_HMEM_H_ */

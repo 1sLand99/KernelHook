@@ -357,6 +357,16 @@ void *hook_mem_get_rw_from_origin(uint64_t origin_addr)
     return NULL;
 }
 
+uint32_t hook_mem_rox_used_blocks(void)
+{
+    return g_rox_pool.used_blocks;
+}
+
+uint32_t hook_mem_rw_used_blocks(void)
+{
+    return g_rw_pool.used_blocks;
+}
+
 KP_EXPORT_SYMBOL(hook_mem_init);
 KP_EXPORT_SYMBOL(hook_mem_cleanup);
 KP_EXPORT_SYMBOL(hook_mem_alloc_rox);
