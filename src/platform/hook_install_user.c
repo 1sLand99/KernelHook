@@ -75,11 +75,10 @@ extern uint64_t _transit(void);
  */
 extern void _transit_end(void) __attribute__((weak));
 
-static uint64_t transit_stub_size(void)
+static uint64_t stub_size(void *start, void *end)
 {
-    if (_transit_end) {
-        return (uintptr_t)_transit_end - (uintptr_t)_transit;
-    }
+    if (end)
+        return (uintptr_t)end - (uintptr_t)start;
     /* Conservative fallback: TRANSIT_INST_NUM uint32_t words minus the
      * 2-word (8-byte) self-pointer prefix = (TRANSIT_INST_NUM - 2) * 4.
      * In practice, the stub is much smaller than this capacity. */
@@ -102,7 +101,7 @@ void hook_chain_setup_transit(hook_chain_rox_t *rox)
     *(uint64_t *)&rox->transit[0] = (uint64_t)rox;
 
     /* Copy the universal asm stub template. */
-    uint64_t sz = transit_stub_size();
+    uint64_t sz = stub_size((void *)(uintptr_t)_transit, (void *)(uintptr_t)_transit_end);
     memcpy(&rox->transit[2], (void *)(uintptr_t)_transit, sz);
 }
 
@@ -111,18 +110,10 @@ void hook_chain_setup_transit(hook_chain_rox_t *rox)
 extern uint64_t _fp_transit(void);
 extern void _fp_transit_end(void) __attribute__((weak));
 
-static uint64_t fp_transit_stub_size(void)
-{
-    if (_fp_transit_end) {
-        return (uintptr_t)_fp_transit_end - (uintptr_t)_fp_transit;
-    }
-    return (TRANSIT_INST_NUM - 2) * sizeof(uint32_t);
-}
-
 void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox)
 {
     *(uint64_t *)&rox->transit[0] = (uint64_t)rox;
 
-    uint64_t sz = fp_transit_stub_size();
+    uint64_t sz = stub_size((void *)(uintptr_t)_fp_transit, (void *)(uintptr_t)_fp_transit_end);
     memcpy(&rox->transit[2], (void *)(uintptr_t)_fp_transit, sz);
 }

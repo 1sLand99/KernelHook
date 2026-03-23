@@ -123,7 +123,9 @@ static void *bitmap_alloc(bitmap_pool_t *pool, size_t size)
     pool->used_blocks += blocks_needed;
 
     void *ptr = (void *)(pool->pool_base + (uint64_t)start * pool->block_size);
-    __builtin_memset(ptr, 0, (size_t)blocks_needed * pool->block_size);
+    /* Pool memory is zeroed during pool_init. Do not memset here —
+     * ROX pool memory is read-only and callers use hook_mem_rox_write_enable
+     * before writing. RW callers memset their allocations explicitly. */
     return ptr;
 }
 
@@ -166,8 +168,19 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
         return -1;
     }
 
+    /* The pool may have been allocated as RX (e.g., Linux ROX pool).
+     * Temporarily make it writable for zeroing. */
+    if (ops->set_memory_rw) {
+        uint32_t numpages = (uint32_t)(pool_size / hmem_page_size);
+        ops->set_memory_rw((uint64_t)base, numpages);
+    }
     __builtin_memset(base, 0, pool_size);
     __builtin_memset(bitmap, 0, bitmap_size);
+    if (ops->set_memory_ro && ops->set_memory_x) {
+        uint32_t numpages = (uint32_t)(pool_size / hmem_page_size);
+        ops->set_memory_ro((uint64_t)base, numpages);
+        ops->set_memory_x((uint64_t)base, numpages);
+    }
 
     pool->pool_base = (uint64_t)base;
     pool->pool_size = pool_size;

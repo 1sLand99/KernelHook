@@ -11,7 +11,10 @@
 
 uint64_t platform_page_size(void)
 {
-    return (uint64_t)sysconf(_SC_PAGE_SIZE);
+    static uint64_t cached;
+    if (!cached)
+        cached = (uint64_t)sysconf(_SC_PAGE_SIZE);
+    return cached;
 }
 
 void *platform_alloc_rox(uint64_t size)

@@ -223,6 +223,44 @@ TEST(relo_ldr_literal_64)
     ASSERT_EQ(h.relo_insts[7], (uint32_t)(target >> 32));
 }
 
+/* ---- Test: LDR literal (SIMD 128-bit) relocation ---- */
+
+TEST(relo_ldr_literal_simd128)
+{
+    hook_t h;
+    /* LDR Q5, +0x40:
+     * imm19 = 0x40 / 4 = 0x10
+     * inst = INST_LDR_SIMD_128 | (imm19 << 5) | Rt
+     *      = 0x9C000000 | (0x10 << 5) | 5
+     *      = 0x9C000205
+     */
+    uint32_t inst = 0x9C000205;
+    setup_hook(&h, inst);
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    /* SIMD LDR relocation produces 8 instructions at index 2:
+     * [2]: STP X16, X17, [SP, -0x10]  (0xA93F47F0)
+     * [3]: LDR X17, #20              (0x580000B1)
+     * [4]: LDR Qt, [X17]             (0x3DC00220 | Rt)
+     * [5]: LDR X17, [SP, -0x8]       (0xF85F83F1)
+     * [6]: B #16                     (0x14000004)
+     * [7]: NOP
+     * [8]: addr_lo
+     * [9]: addr_hi
+     */
+    uint64_t target = (uint64_t)origin_code + 0x40;
+    ASSERT_EQ(h.relo_insts[2], (uint32_t)0xA93F47F0); /* STP X16, X17, [SP, -0x10] */
+    ASSERT_EQ(h.relo_insts[3], (uint32_t)0x580000B1); /* LDR X17, #20 */
+    ASSERT_EQ(h.relo_insts[4], (uint32_t)(0x3DC00220u | 5)); /* LDR Q5, [X17] */
+    ASSERT_EQ(h.relo_insts[5], (uint32_t)0xF85F83F1); /* LDR X17, [SP, -0x8] */
+    ASSERT_EQ(h.relo_insts[6], (uint32_t)0x14000004); /* B #16 */
+    ASSERT_EQ(h.relo_insts[7], ARM64_NOP);
+    ASSERT_EQ(h.relo_insts[8], (uint32_t)(target & 0xFFFFFFFF));
+    ASSERT_EQ(h.relo_insts[9], (uint32_t)(target >> 32));
+}
+
 /* ---- Test: CBZ relocation ---- */
 
 TEST(relo_cbz)

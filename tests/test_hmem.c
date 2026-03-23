@@ -6,6 +6,7 @@
 #include "test_framework.h"
 #include <hook_mem_user.h>
 #include <hmem.h>
+#include <hook.h>
 
 /* Block size matches hmem.c internal BLOCK_SIZE */
 #define BLOCK_SIZE 64
@@ -103,6 +104,37 @@ TEST(hmem_origin_register_lookup)
     ASSERT_NULL(gone);
 
     hook_mem_free_rox(rox, sizeof(uint64_t) * 8);
+    hmem_teardown();
+}
+
+TEST(hmem_origin_rw_lookup)
+{
+    hmem_setup();
+
+    /* Allocate ROX + RW and link them (simulating hook_wrap_pri) */
+    hook_chain_rox_t *rox =
+        (hook_chain_rox_t *)hook_mem_alloc_rox(sizeof(hook_chain_rox_t));
+    ASSERT_NOT_NULL(rox);
+
+    hook_chain_rw_t *rw =
+        (hook_chain_rw_t *)hook_mem_alloc_rw(sizeof(hook_chain_rw_t));
+    ASSERT_NOT_NULL(rw);
+
+    /* Link rox->rw (requires write-enabling ROX memory) */
+    hook_mem_rox_write_enable(rox, sizeof(hook_chain_rox_t));
+    rox->rw = rw;
+    hook_mem_rox_write_disable(rox, sizeof(hook_chain_rox_t));
+
+    uint64_t origin = 0xCAFEBABE;
+    hook_mem_register_origin(origin, rox);
+
+    /* Lookup RW via origin */
+    void *found_rw = hook_mem_get_rw_from_origin(origin);
+    ASSERT_EQ((uintptr_t)found_rw, (uintptr_t)rw);
+
+    hook_mem_unregister_origin(origin);
+    hook_mem_free_rw(rw, sizeof(hook_chain_rw_t));
+    hook_mem_free_rox(rox, sizeof(hook_chain_rox_t));
     hmem_teardown();
 }
 

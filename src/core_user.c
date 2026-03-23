@@ -13,84 +13,97 @@
 
 /* kp_log_func defined in src/platform/log_user.c */
 
-/* ---- Sorted-index rebuild (insertion sort, descending priority) ---- */
+/* ---- Generic chain operations (shared by inline and FP hooks) ----
+ *
+ * hook_chain_rw_t and fp_hook_chain_rw_t share the same field layout
+ * for chain_items_max, items[], sorted_indices[], sorted_count.
+ * Use macros to generate type-safe wrappers without code duplication.
+ */
 
-static void rebuild_sorted(hook_chain_rw_t *rw)
-{
-    int32_t count = 0;
-
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state == CHAIN_ITEM_STATE_READY)
-            rw->sorted_indices[count++] = i;
-    }
-
-    /* Insertion sort by descending priority (highest first) */
-    for (int32_t i = 1; i < count; i++) {
-        int32_t key = rw->sorted_indices[i];
-        int32_t key_pri = rw->items[key].priority;
-        int32_t j = i - 1;
-        while (j >= 0 && rw->items[rw->sorted_indices[j]].priority < key_pri) {
-            rw->sorted_indices[j + 1] = rw->sorted_indices[j];
-            j--;
-        }
-        rw->sorted_indices[j + 1] = key;
-    }
-
-    rw->sorted_count = count;
+#define DEFINE_CHAIN_OPS(PREFIX, RW_TYPE)                                       \
+                                                                                \
+static void PREFIX##_rebuild_sorted(RW_TYPE *rw)                                \
+{                                                                               \
+    int32_t count = 0;                                                          \
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
+        if (rw->items[i].state == CHAIN_ITEM_STATE_READY)                      \
+            rw->sorted_indices[count++] = i;                                    \
+    }                                                                           \
+    for (int32_t i = 1; i < count; i++) {                                      \
+        int32_t key = rw->sorted_indices[i];                                    \
+        int32_t key_pri = rw->items[key].priority;                              \
+        int32_t j = i - 1;                                                      \
+        while (j >= 0 && rw->items[rw->sorted_indices[j]].priority < key_pri) { \
+            rw->sorted_indices[j + 1] = rw->sorted_indices[j];                 \
+            j--;                                                                \
+        }                                                                       \
+        rw->sorted_indices[j + 1] = key;                                        \
+    }                                                                           \
+    rw->sorted_count = count;                                                   \
+}                                                                               \
+                                                                                \
+static hook_err_t PREFIX##_chain_add(RW_TYPE *rw, void *before, void *after,    \
+                                      void *udata, int32_t priority)            \
+{                                                                               \
+    if (!rw) return HOOK_BAD_ADDRESS;                                           \
+    int32_t slot = -1;                                                          \
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
+        if (rw->items[i].state == CHAIN_ITEM_STATE_EMPTY) { slot = i; break; } \
+    }                                                                           \
+    if (slot < 0) return HOOK_CHAIN_FULL;                                       \
+    hook_chain_item_t *item = &rw->items[slot];                                 \
+    item->state = CHAIN_ITEM_STATE_READY;                                       \
+    item->priority = priority;                                                  \
+    item->udata = udata;                                                        \
+    item->before = before;                                                      \
+    item->after = after;                                                        \
+    __builtin_memset(&item->local, 0, sizeof(hook_local_t));                    \
+    PREFIX##_rebuild_sorted(rw);                                                \
+    return HOOK_NO_ERR;                                                         \
+}                                                                               \
+                                                                                \
+static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       \
+{                                                                               \
+    if (!rw) return;                                                            \
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
+        hook_chain_item_t *item = &rw->items[i];                                \
+        if (item->state != CHAIN_ITEM_STATE_READY) continue;                   \
+        if (item->before == before && item->after == after) {                   \
+            item->state = CHAIN_ITEM_STATE_EMPTY;                               \
+            item->before = 0;                                                   \
+            item->after = 0;                                                    \
+            item->udata = 0;                                                    \
+            item->priority = 0;                                                 \
+            break;                                                              \
+        }                                                                       \
+    }                                                                           \
+    PREFIX##_rebuild_sorted(rw);                                                \
+}                                                                               \
+                                                                                \
+static int PREFIX##_chain_all_empty(RW_TYPE *rw)                                \
+{                                                                               \
+    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
+        if (rw->items[i].state != CHAIN_ITEM_STATE_EMPTY) return 0;            \
+    }                                                                           \
+    return 1;                                                                   \
 }
 
-/* ---- Hook chain add / remove ---- */
+/* Generate inline hook chain ops (il_ prefix) */
+DEFINE_CHAIN_OPS(il, hook_chain_rw_t)
 
+/* Generate FP hook chain ops (fp_ prefix) */
+DEFINE_CHAIN_OPS(fp, fp_hook_chain_rw_t)
+
+/* Public API wrappers for inline hook chain */
 hook_err_t hook_chain_add(hook_chain_rw_t *rw, void *before, void *after,
                           void *udata, int32_t priority)
 {
-    if (!rw)
-        return HOOK_BAD_ADDRESS;
-
-    /* Find empty slot */
-    int32_t slot = -1;
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state == CHAIN_ITEM_STATE_EMPTY) {
-            slot = i;
-            break;
-        }
-    }
-
-    if (slot < 0)
-        return HOOK_CHAIN_FULL;
-
-    hook_chain_item_t *item = &rw->items[slot];
-    item->state = CHAIN_ITEM_STATE_READY;
-    item->priority = priority;
-    item->udata = udata;
-    item->before = before;
-    item->after = after;
-    __builtin_memset(&item->local, 0, sizeof(hook_local_t));
-
-    rebuild_sorted(rw);
-    return HOOK_NO_ERR;
+    return il_chain_add(rw, before, after, udata, priority);
 }
 
 void hook_chain_remove(hook_chain_rw_t *rw, void *before, void *after)
 {
-    if (!rw)
-        return;
-
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        hook_chain_item_t *item = &rw->items[i];
-        if (item->state != CHAIN_ITEM_STATE_READY)
-            continue;
-        if (item->before == before && item->after == after) {
-            item->state = CHAIN_ITEM_STATE_EMPTY;
-            item->before = 0;
-            item->after = 0;
-            item->udata = 0;
-            item->priority = 0;
-            break;
-        }
-    }
-
-    rebuild_sorted(rw);
+    il_chain_remove(rw, before, after);
 }
 
 /* ---- Simple inline hook (no chain) ---- */
@@ -231,15 +244,6 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
 
 /* ---- Hook unwrap / remove ---- */
 
-static int chain_all_empty(hook_chain_rw_t *rw)
-{
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state != CHAIN_ITEM_STATE_EMPTY)
-            return 0;
-    }
-    return 1;
-}
-
 void hook_unwrap_remove(void *func, void *before, void *after, int remove)
 {
     if (!func)
@@ -256,7 +260,7 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
     hook_chain_remove(rw, before, after);
 
     /* If all chain items are empty and caller wants removal, tear down */
-    if (remove && chain_all_empty(rw)) {
+    if (remove && il_chain_all_empty(rw)) {
         hook_uninstall(&rox->hook);
         hook_mem_unregister_origin(func_addr);
         hook_mem_free_rw(rw, sizeof(hook_chain_rw_t));
@@ -276,6 +280,7 @@ static void write_fp_value(uintptr_t fp_addr, uint64_t value)
     uint64_t start = fp_addr & ~(ps - 1);
     platform_set_rw(start, ps);
     *(uint64_t *)fp_addr = value;
+    platform_set_ro(start, ps);
 }
 
 /* ---- Simple function pointer hook (no chain) ---- */
@@ -295,93 +300,6 @@ void fp_unhook(uintptr_t fp_addr, void *backup)
         return;
 
     write_fp_value(fp_addr, (uint64_t)backup);
-}
-
-/* ---- FP chain sorted-index rebuild ---- */
-
-static void fp_rebuild_sorted(fp_hook_chain_rw_t *rw)
-{
-    int32_t count = 0;
-
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state == CHAIN_ITEM_STATE_READY)
-            rw->sorted_indices[count++] = i;
-    }
-
-    for (int32_t i = 1; i < count; i++) {
-        int32_t key = rw->sorted_indices[i];
-        int32_t key_pri = rw->items[key].priority;
-        int32_t j = i - 1;
-        while (j >= 0 && rw->items[rw->sorted_indices[j]].priority < key_pri) {
-            rw->sorted_indices[j + 1] = rw->sorted_indices[j];
-            j--;
-        }
-        rw->sorted_indices[j + 1] = key;
-    }
-
-    rw->sorted_count = count;
-}
-
-/* ---- FP chain add / remove ---- */
-
-static hook_err_t fp_hook_chain_add(fp_hook_chain_rw_t *rw, void *before,
-                                     void *after, void *udata, int32_t priority)
-{
-    if (!rw)
-        return HOOK_BAD_ADDRESS;
-
-    int32_t slot = -1;
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state == CHAIN_ITEM_STATE_EMPTY) {
-            slot = i;
-            break;
-        }
-    }
-
-    if (slot < 0)
-        return HOOK_CHAIN_FULL;
-
-    hook_chain_item_t *item = &rw->items[slot];
-    item->state = CHAIN_ITEM_STATE_READY;
-    item->priority = priority;
-    item->udata = udata;
-    item->before = before;
-    item->after = after;
-    __builtin_memset(&item->local, 0, sizeof(hook_local_t));
-
-    fp_rebuild_sorted(rw);
-    return HOOK_NO_ERR;
-}
-
-static void fp_hook_chain_remove_item(fp_hook_chain_rw_t *rw, void *before, void *after)
-{
-    if (!rw)
-        return;
-
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        hook_chain_item_t *item = &rw->items[i];
-        if (item->state != CHAIN_ITEM_STATE_READY)
-            continue;
-        if (item->before == before && item->after == after) {
-            item->state = CHAIN_ITEM_STATE_EMPTY;
-            item->before = 0;
-            item->after = 0;
-            item->udata = 0;
-            item->priority = 0;
-            break;
-        }
-    }
-
-    fp_rebuild_sorted(rw);
-}
-
-static int fp_chain_all_empty(fp_hook_chain_rw_t *rw)
-{
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {
-        if (rw->items[i].state != CHAIN_ITEM_STATE_EMPTY)
-            return 0;
-    }
-    return 1;
 }
 
 /* ---- Chain-based function pointer hook ---- */
@@ -443,7 +361,7 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
             return HOOK_BAD_ADDRESS;
     }
 
-    return fp_hook_chain_add(rw, before, after, udata, priority);
+    return fp_chain_add(rw, before, after, udata, priority);
 }
 
 void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after)
@@ -458,7 +376,7 @@ void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after)
 
     fp_hook_chain_rw_t *rw = rox->rw;
 
-    fp_hook_chain_remove_item(rw, before, after);
+    fp_chain_remove(rw, before, after);
 
     /* If all chain items are empty, restore original FP and tear down */
     if (fp_chain_all_empty(rw)) {
