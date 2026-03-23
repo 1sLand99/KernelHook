@@ -6,6 +6,13 @@
 #ifndef _KP_KTYPES_H_
 #define _KP_KTYPES_H_
 
+#ifdef __USERSPACE__
+
+#include <stdint.h>
+#include <stddef.h>
+
+#else /* kernel / freestanding */
+
 typedef __UINT8_TYPE__ uint8_t;
 typedef __UINT16_TYPE__ uint16_t;
 typedef __UINT32_TYPE__ uint32_t;
@@ -22,6 +29,8 @@ typedef __SIZE_TYPE__ size_t;
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
+
+#endif /* __USERSPACE__ */
 
 #ifndef __always_inline
 #define __always_inline inline __attribute__((always_inline))
