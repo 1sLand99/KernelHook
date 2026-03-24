@@ -13,8 +13,10 @@ endif()
 # --- Platform detection ---
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(PLATFORM_SOURCE src/platform/linux.c)
+    set(REMOTE_SOURCE src/platform/remote_linux.c)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     set(PLATFORM_SOURCE src/platform/darwin.c)
+    set(REMOTE_SOURCE src/platform/remote_stub.c)
 else()
     message(FATAL_ERROR "Unsupported platform: ${CMAKE_SYSTEM_NAME}. Only Linux and macOS are supported.")
 endif()
@@ -30,6 +32,7 @@ set(LIB_SOURCES
     src/platform/hook_install_user.c
     src/platform/log_user.c
     src/core_user.c
+    ${REMOTE_SOURCE}
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
