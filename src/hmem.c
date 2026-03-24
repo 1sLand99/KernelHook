@@ -168,14 +168,12 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
         return -1;
     }
 
-    /* The pool may have been allocated as RX (e.g., Linux ROX pool).
-     * Temporarily make it writable for zeroing. */
-    if (ops->set_memory_rw) {
-        uint32_t numpages = (uint32_t)(pool_size / hmem_page_size);
-        ops->set_memory_rw((uint64_t)base, numpages);
-    }
-    __builtin_memset(base, 0, pool_size);
+    /* Pool pages from mmap(MAP_ANONYMOUS) are already zeroed.
+     * Only the bitmap needs clearing (it's a static array that may
+     * contain stale data from a previous init/cleanup cycle). */
     __builtin_memset(bitmap, 0, bitmap_size);
+
+    /* Ensure ROX pool has correct permissions (RX). */
     if (ops->set_memory_ro && ops->set_memory_x) {
         uint32_t numpages = (uint32_t)(pool_size / hmem_page_size);
         ops->set_memory_ro((uint64_t)base, numpages);
@@ -230,6 +228,7 @@ void hook_mem_cleanup(void)
 {
     pool_cleanup(&g_rox_pool);
     pool_cleanup(&g_rw_pool);
+    origin_map_count = 0;
     logki("hmem: memory manager cleaned up");
 }
 
@@ -302,27 +301,27 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     return 0;
 }
 
-void hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
+int hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
 {
     if (!origin_addr || !rox_ptr)
-        return;
+        return -1;
 
-    /* Update existing entry if origin already registered */
     for (int32_t i = 0; i < origin_map_count; i++) {
         if (origin_map[i].origin_addr == origin_addr) {
             origin_map[i].rox_ptr = rox_ptr;
-            return;
+            return 0;
         }
     }
 
     if (origin_map_count >= ORIGIN_MAP_MAX) {
         logkw("hmem: origin map full (%d entries)", ORIGIN_MAP_MAX);
-        return;
+        return -1;
     }
 
     origin_map[origin_map_count].origin_addr = origin_addr;
     origin_map[origin_map_count].rox_ptr = rox_ptr;
     origin_map_count++;
+    return 0;
 }
 
 void hook_mem_unregister_origin(uint64_t origin_addr)

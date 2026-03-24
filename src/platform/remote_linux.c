@@ -17,6 +17,7 @@
 #include <linux/elf.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <errno.h>
 
 /* ARM64 Linux syscall numbers */
@@ -234,9 +235,9 @@ int remote_hook_install(remote_hook_handle_t handle, uint64_t func_addr,
     };
 
     /* Make the target region writable first */
-    uint64_t page_mask = ~(uint64_t)0xFFF; /* 4K page alignment */
-    uint64_t page_start = func_addr & page_mask;
-    uint64_t page_end = (func_addr + transit_size + 0xFFF) & page_mask;
+    uint64_t ps = sysconf(_SC_PAGE_SIZE);
+    uint64_t page_start = func_addr & ~(ps - 1);
+    uint64_t page_end = (func_addr + transit_size + ps - 1) & ~(ps - 1);
     uint64_t page_span = page_end - page_start;
 
     /* mprotect(page_start, page_span, PROT_READ|PROT_WRITE) */

@@ -31,7 +31,6 @@ typedef int8_t chain_item_state;
 
 #define CHAIN_ITEM_STATE_EMPTY 0
 #define CHAIN_ITEM_STATE_READY 1
-#define CHAIN_ITEM_STATE_BUSY 2
 
 #define local_container_of(ptr, type, member) ({ (type *)((char *)(ptr) - offsetof(type, member)); })
 
@@ -309,18 +308,6 @@ static inline void *fp_get_origin_func(void *hook_args)
 
 void hook_chain_setup_transit(hook_chain_rox_t *rox);
 void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
-
-/* ---- Chain install/uninstall helpers ---- */
-
-static inline void hook_chain_install(hook_chain_rox_t *rox)
-{
-    hook_install(&rox->hook);
-}
-
-static inline void hook_chain_uninstall(hook_chain_rox_t *rox)
-{
-    hook_uninstall(&rox->hook);
-}
 
 /* ---- Typed convenience wrappers (generated via X-macro) ---- */
 

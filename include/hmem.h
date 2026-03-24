@@ -30,7 +30,7 @@ void hook_mem_free_rw(void *ptr, size_t size);
 int hook_mem_rox_write_enable(void *ptr, size_t size);
 int hook_mem_rox_write_disable(void *ptr, size_t size);
 
-void hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr);
+int hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr);
 void hook_mem_unregister_origin(uint64_t origin_addr);
 void *hook_mem_get_rox_from_origin(uint64_t origin_addr);
 void *hook_mem_get_rw_from_origin(uint64_t origin_addr);

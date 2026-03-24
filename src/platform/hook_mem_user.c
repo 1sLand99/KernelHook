@@ -62,23 +62,14 @@ static void rox_free(void *ptr)
         platform_free(ptr, size);
 }
 
-static int rox_set_memory_rw(uint64_t addr, int numpages)
+static int rox_set_memory(uint64_t addr, int numpages, int (*fn)(uint64_t, uint64_t))
 {
-    uint64_t size = (uint64_t)numpages * platform_page_size();
-    return platform_set_rw(addr, size);
+    return fn(addr, (uint64_t)numpages * platform_page_size());
 }
 
-static int rox_set_memory_ro(uint64_t addr, int numpages)
-{
-    uint64_t size = (uint64_t)numpages * platform_page_size();
-    return platform_set_ro(addr, size);
-}
-
-static int rox_set_memory_x(uint64_t addr, int numpages)
-{
-    uint64_t size = (uint64_t)numpages * platform_page_size();
-    return platform_set_rx(addr, size);
-}
+static int rox_set_memory_rw(uint64_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_rw); }
+static int rox_set_memory_ro(uint64_t addr, int numpages) { return rox_set_memory(addr, numpages, platform_set_ro); }
+static int rox_set_memory_x(uint64_t addr, int numpages)  { return rox_set_memory(addr, numpages, platform_set_rx); }
 
 /* ---- RW ops wrappers ---- */
 

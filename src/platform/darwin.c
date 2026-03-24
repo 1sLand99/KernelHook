@@ -24,19 +24,17 @@ uint64_t platform_page_size(void)
     return cached;
 }
 
-void *platform_alloc_rox(uint64_t size)
+/* On Darwin, both ROX and RW start as RW; the caller transitions
+ * ROX pages to R|X after setup via platform_set_rx(). */
+static void *darwin_alloc(uint64_t size)
 {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
-void *platform_alloc_rw(uint64_t size)
-{
-    void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    return (p == MAP_FAILED) ? NULL : p;
-}
+void *platform_alloc_rox(uint64_t size) { return darwin_alloc(size); }
+void *platform_alloc_rw(uint64_t size)  { return darwin_alloc(size); }
 
 void platform_free(void *ptr, uint64_t size)
 {

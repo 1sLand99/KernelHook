@@ -11,8 +11,6 @@
 #include <platform.h>
 #include <log.h>
 
-/* kp_log_func defined in src/platform/log_user.c */
-
 /* ---- Generic chain operations (shared by inline and FP hooks) ----
  *
  * hook_chain_rw_t and fp_hook_chain_rw_t share the same field layout
@@ -74,10 +72,10 @@ static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       
             item->after = 0;                                                    \
             item->udata = 0;                                                    \
             item->priority = 0;                                                 \
-            break;                                                              \
+            PREFIX##_rebuild_sorted(rw);                                        \
+            return;                                                             \
         }                                                                       \
     }                                                                           \
-    PREFIX##_rebuild_sorted(rw);                                                \
 }                                                                               \
                                                                                 \
 static int PREFIX##_chain_all_empty(RW_TYPE *rw)                                \
@@ -115,7 +113,6 @@ hook_err_t hook(void *func, void *replace, void **backup)
 
     uint64_t func_addr = (uint64_t)func;
 
-    /* Duplicate check */
     if (hook_mem_get_rox_from_origin(func_addr))
         return HOOK_DUPLICATED;
 
@@ -146,7 +143,12 @@ hook_err_t hook(void *func, void *replace, void **backup)
     hook_mem_rox_write_disable(rox, sizeof(hook_chain_rox_t));
 
     hook_install(h);
-    hook_mem_register_origin(func_addr, rox);
+
+    if (hook_mem_register_origin(func_addr, rox) != 0) {
+        hook_uninstall(h);
+        hook_mem_free_rox(rox, sizeof(hook_chain_rox_t));
+        return HOOK_NO_MEM;
+    }
 
     *backup = (void *)h->relo_addr;
     return HOOK_NO_ERR;
@@ -223,15 +225,16 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
             return err;
         }
 
-        /* Set up transit buffer (self-pointer + asm stub copy) */
         hook_chain_setup_transit(rox);
 
         hook_mem_rox_write_disable(rox, sizeof(hook_chain_rox_t));
 
-        /* Register for lookup by func_addr */
-        hook_mem_register_origin(func_addr, rox);
+        if (hook_mem_register_origin(func_addr, rox) != 0) {
+            hook_mem_free_rox(rox, sizeof(hook_chain_rox_t));
+            hook_mem_free_rw(rw, sizeof(hook_chain_rw_t));
+            return HOOK_NO_MEM;
+        }
 
-        /* Patch the target function */
         hook_install(&rox->hook);
     } else {
         rw = rox->rw;
@@ -351,8 +354,11 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
 
         hook_mem_rox_write_disable(rox, sizeof(fp_hook_chain_rox_t));
 
-        /* Register for lookup by fp_addr */
-        hook_mem_register_origin(fp_addr, rox);
+        if (hook_mem_register_origin(fp_addr, rox) != 0) {
+            hook_mem_free_rox(rox, sizeof(fp_hook_chain_rox_t));
+            hook_mem_free_rw(rw, sizeof(fp_hook_chain_rw_t));
+            return HOOK_NO_MEM;
+        }
 
         /* Swap the function pointer to point to transit stub */
         write_fp_value(fp_addr, h->replace_addr);
