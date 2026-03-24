@@ -14,22 +14,29 @@
 
 /* ---- Target functions ---- */
 
+/* Padded with nops so each function is >= 16 bytes (the trampoline size). */
 __attribute__((noinline))
 int stress_target(int a, int b)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return a + b;
 }
 
-/* Two functions for nested hook test */
+/* Two functions for nested hook test.
+ * Padded with nops to ensure each is >= 16 bytes (the trampoline size).
+ * Without padding, Release-mode 8-byte functions cause the trampoline
+ * to overwrite the adjacent function. */
 __attribute__((noinline))
 int nested_A(int x)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return x + 1;
 }
 
 __attribute__((noinline))
 int nested_B(int x)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return x * 2;
 }
 
@@ -46,6 +53,13 @@ asm(
     "    ret\n"
 );
 int branch_prologue_func(void);
+
+/* Volatile function pointers prevent the compiler from eliminating calls
+ * via interprocedural constant propagation in Release builds. */
+static int (*volatile call_stress)(int, int) = stress_target;
+static int (*volatile call_nested_A)(int) = nested_A;
+static int (*volatile call_nested_B)(int) = nested_B;
+static int (*volatile call_branch)(void) = branch_prologue_func;
 
 /* ---- Setup/teardown ---- */
 
@@ -88,7 +102,7 @@ TEST(stress_hook_unhook_1000)
         ASSERT_EQ(rc, HOOK_NO_ERR);
 
         /* Verify function still works while hooked */
-        int result = stress_target(i, 1);
+        int result = call_stress(i, 1);
         ASSERT_EQ(result, i + 1);
 
         hook_unwrap((void *)stress_target,
@@ -190,7 +204,7 @@ static void *thread_func(void *arg)
 
     for (int i = 0; i < td->iterations; i++) {
         /* Each thread passes its thread_id as arg0 */
-        int result = stress_target(td->thread_id, i);
+        int result = call_stress(td->thread_id, i);
         if (result != td->thread_id + i)
             td->success = 0;
     }
@@ -245,7 +259,7 @@ static void before_nested_A(hook_fargs1_t *fargs, void *udata)
     (void)udata;
     nested_A_hooked = 1;
     /* Call nested_B from inside A's before callback */
-    int b_result = nested_B((int)fargs->arg0);
+    int b_result = call_nested_B((int)fargs->arg0);
     /* Store B's result for verification */
     fargs->local->data0 = (uint64_t)b_result;
 }
@@ -272,7 +286,7 @@ TEST(stress_nested_hooks)
                         (void *)before_nested_B, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = nested_A(5);
+    int result = call_nested_A(5);
 
     /* nested_A should return 5+1 = 6 */
     ASSERT_EQ(result, 6);
@@ -301,7 +315,7 @@ TEST(stress_branch_prologue)
     branch_prologue_hooked = 0;
 
     /* Verify the function works before hooking */
-    int orig = branch_prologue_func();
+    int orig = call_branch();
     ASSERT_EQ(orig, 77);
 
     hook_err_t rc = hook_wrap_pri((void *)branch_prologue_func, 0,
@@ -309,7 +323,7 @@ TEST(stress_branch_prologue)
                                    NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = branch_prologue_func();
+    int result = call_branch();
     ASSERT_EQ(result, 77);
     ASSERT_TRUE(branch_prologue_hooked);
 
@@ -317,7 +331,7 @@ TEST(stress_branch_prologue)
                 (void *)before_branch_prologue, NULL);
 
     /* Verify function works after unhooking */
-    int post = branch_prologue_func();
+    int post = call_branch();
     ASSERT_EQ(post, 77);
 
     hook_teardown();

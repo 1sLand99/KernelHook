@@ -14,9 +14,11 @@
 
 /* ---- Target functions ---- */
 
+/* Padded with nops so each function is >= 16 bytes (the trampoline size). */
 __attribute__((noinline))
 int target_func(int a, int b)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return a + b;
 }
 
@@ -24,10 +26,15 @@ int target_func(int a, int b)
 __attribute__((noinline))
 static int fp_target_impl(int a, int b)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return a * b;
 }
 
 static int (*fp_target)(int, int) = fp_target_impl;
+
+/* Volatile function pointer prevents compiler from eliminating calls
+ * via interprocedural constant propagation in Release builds. */
+static int (*volatile call_func)(int, int) = target_func;
 
 /* ---- Execution order tracking ---- */
 
@@ -152,7 +159,7 @@ TEST(chain_priority_execution_order)
                         (void *)before_id_neg5, NULL, NULL, -5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_func(3, 4);
+    int result = call_func(3, 4);
     ASSERT_EQ(result, 7);
 
     /* Verify execution order matches priority (10 first, -5 last) */
@@ -182,7 +189,7 @@ TEST(chain_unwrap_removes_one)
     /* Remove middle-priority callback */
     hook_unwrap_remove((void *)target_func, (void *)before_id0, NULL, 0);
 
-    target_func(1, 1);
+    call_func(1, 1);
 
     /* Only 10 and -5 should fire */
     ASSERT_EQ(exec_count, 2);
@@ -205,7 +212,7 @@ TEST(chain_local_persists_before_to_after)
                                    (void *)after_read_local, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    target_func(1, 2);
+    call_func(1, 2);
 
     /* After callback should see 0xBEEF set by before callback */
     ASSERT_EQ(local_from_after, (uint64_t)0xBEEF);
@@ -229,7 +236,7 @@ TEST(chain_local_isolated_between_items)
                    (void *)before_set_local_B, (void *)after_read_local_B,
                    NULL, 0);
 
-    target_func(1, 2);
+    call_func(1, 2);
 
     /* Each item should have its own local storage */
     ASSERT_NOT_NULL(local_ptr_A);
@@ -266,7 +273,7 @@ TEST(chain_wrap_get_origin_func)
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* Call to populate saved_chain */
-    target_func(5, 10);
+    call_func(5, 10);
     ASSERT_NOT_NULL(saved_chain);
 
     /* Get origin function pointer and call it directly */

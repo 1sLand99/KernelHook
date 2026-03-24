@@ -10,17 +10,22 @@
 #include <hook_mem_user.h>
 #include <string.h>
 
-/* ---- Target functions (must not be inlined) ---- */
+/* ---- Target functions (must not be inlined) ----
+ * Padded with nops so each function is >= 16 bytes (the trampoline size).
+ * Without padding, Release-mode 8-byte functions cause the trampoline
+ * to overwrite the adjacent function. */
 
 __attribute__((noinline))
 int target_add(int a, int b)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return a + b;
 }
 
 __attribute__((noinline))
 int target_nop(void)
 {
+    asm volatile("nop\n\tnop\n\tnop");
     return 42;
 }
 
@@ -28,8 +33,18 @@ __attribute__((noinline))
 uint64_t target_8args(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                        uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7)
 {
+    /* Already large enough, but pad for safety */
+    asm volatile("nop\n\tnop\n\tnop");
     return a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7;
 }
+
+/* Volatile function pointers prevent the compiler from eliminating calls
+ * via interprocedural constant propagation / dead-code elimination. */
+static int (*volatile call_add)(int, int) = target_add;
+static int (*volatile call_nop)(void) = target_nop;
+static uint64_t (*volatile call_8args)(uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t, uint64_t,
+                                        uint64_t, uint64_t) = target_8args;
 
 /* ---- Shared state for callback verification ---- */
 
@@ -137,7 +152,7 @@ TEST(hook_basic_before_captures_args)
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_add(10, 20);
+    int result = call_add(10, 20);
     ASSERT_EQ(result, 30);
     ASSERT_TRUE(before_called);
     ASSERT_EQ(captured_arg0, 10);
@@ -158,7 +173,7 @@ TEST(hook_basic_after_captures_ret)
         NULL, (void *)after_capture_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_add(7, 3);
+    int result = call_add(7, 3);
     ASSERT_EQ(result, 10);
     ASSERT_TRUE(after_called);
     ASSERT_EQ(captured_ret, 10);
@@ -178,7 +193,7 @@ TEST(hook_basic_after_modifies_ret)
         NULL, (void *)after_modify_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_add(1, 2);
+    int result = call_add(1, 2);
     /* After callback sets ret = 999 */
     ASSERT_EQ(result, 999);
     ASSERT_TRUE(after_called);
@@ -200,7 +215,7 @@ TEST(hook_basic_skip_origin)
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_add(100, 200);
+    int result = call_add(100, 200);
     /* skip_origin = 1, so original not called, ret = 777 */
     ASSERT_EQ(result, 777);
     ASSERT_TRUE(before_called);
@@ -220,7 +235,7 @@ TEST(hook_basic_nop_0args)
         (void *)before_nop, (void *)after_nop, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    int result = target_nop();
+    int result = call_nop();
     ASSERT_EQ(result, 42);
     ASSERT_TRUE(before_called);
     ASSERT_TRUE(after_called);
@@ -241,7 +256,7 @@ TEST(hook_basic_8args)
         (void *)before_8args, (void *)after_8args, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    uint64_t result = target_8args(1, 2, 3, 4, 5, 6, 7, 8);
+    uint64_t result = call_8args(1, 2, 3, 4, 5, 6, 7, 8);
     ASSERT_EQ(result, (uint64_t)36);
     ASSERT_TRUE(before_called);
     ASSERT_TRUE(after_called);

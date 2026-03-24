@@ -1,5 +1,7 @@
 # Build
 build/
+build_dbg/
+build_rel/
 *.o
 *.ko
 *.mod
