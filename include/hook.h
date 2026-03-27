@@ -45,6 +45,31 @@ enum hook_type
 #define ARM64_PACIASP 0xd503233f
 #define ARM64_PACIBSP 0xd503237f
 
+/* ---- kCFI exemption ----
+ * Kernel Control Flow Integrity (kCFI) validates indirect call targets by
+ * comparing a hash embedded before the callee's entry point against the
+ * expected type hash at the call site.  transit_body and fp_transit_body
+ * perform indirect calls to relocated code (relo_addr) and user-registered
+ * callbacks whose type signatures are intentionally heterogeneous — they
+ * cannot carry valid kCFI hashes.
+ *
+ * Using __attribute__((no_sanitize("kcfi"))) on the body functions is
+ * optimal over the alternative of embedding hash fields because:
+ *   1. Relocated code is dynamically generated — there is no compile-time
+ *      hash to embed.
+ *   2. Callbacks are registered by the user with arbitrary signatures cast
+ *      to a common type — the hash would need to match every possible
+ *      callback signature, which is infeasible.
+ *   3. The transit stubs are already in a non-standard code path (naked asm
+ *      copied into ROX buffers), so kCFI instrumentation would not apply
+ *      correctly regardless.
+ */
+#if __has_attribute(no_sanitize)
+#define KCFI_EXEMPT __attribute__((no_sanitize("kcfi")))
+#else
+#define KCFI_EXEMPT
+#endif
+
 /* ---- PAC stripping ----
  * On PAC-enabled binaries, function pointers carry signature bits in the
  * upper bytes.  Strip them at API entry so origin map lookups and address
