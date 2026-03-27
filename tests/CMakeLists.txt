@@ -29,3 +29,4 @@ endif()
 
 kh_add_test(test_remote test_remote.c)
 kh_add_test(test_pac_strip test_pac_strip.c)
+kh_add_test(test_interaction test_interaction.c)
