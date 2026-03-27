@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Kbuild for KernelHook kernel module test harness
+#
+# Usage:
+#   make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
+#   sudo insmod kh_test.ko
+#   dmesg | grep kh_test
+#   sudo rmmod kh_test
+
+obj-m := kh_test.o
+
+kh_test-y := test_main.o
+
+# Include KernelHook headers
+ccflags-y += -I$(src)/../../include
+ccflags-y += -I$(src)/../../include/arch/arm64
