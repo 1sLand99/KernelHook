@@ -45,6 +45,17 @@ enum hook_type
 #define ARM64_PACIASP 0xd503233f
 #define ARM64_PACIBSP 0xd503237f
 
+/* ---- PAC stripping ----
+ * On PAC-enabled binaries, function pointers carry signature bits in the
+ * upper bytes.  Strip them at API entry so origin map lookups and address
+ * comparisons use the raw code address. */
+#ifdef __ARM_FEATURE_PAC_DEFAULT
+#include <ptrauth.h>
+#define STRIP_PAC(ptr) ((void *)ptrauth_strip((void *)(ptr), ptrauth_key_asia))
+#else
+#define STRIP_PAC(ptr) ((void *)(ptr))
+#endif
+
 #define HOOK_LOCAL_DATA_NUM 4
 
 /* ---- Core hook_t (inline hook state) ---- */

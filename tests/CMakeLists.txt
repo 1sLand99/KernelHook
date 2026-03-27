@@ -28,3 +28,4 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 
 kh_add_test(test_remote test_remote.c)
+kh_add_test(test_pac_strip test_pac_strip.c)

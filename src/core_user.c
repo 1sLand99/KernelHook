@@ -111,6 +111,7 @@ hook_err_t hook(void *func, void *replace, void **backup)
     if (!func || !replace || !backup)
         return HOOK_BAD_ADDRESS;
 
+    func = STRIP_PAC(func);
     uint64_t func_addr = (uint64_t)func;
 
     if (hook_mem_get_rox_from_origin(func_addr))
@@ -159,6 +160,7 @@ void unhook(void *func)
     if (!func)
         return;
 
+    func = STRIP_PAC(func);
     uint64_t func_addr = (uint64_t)func;
     hook_chain_rox_t *rox =
         (hook_chain_rox_t *)hook_mem_get_rox_from_origin(func_addr);
@@ -178,6 +180,7 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
     if (!func)
         return HOOK_BAD_ADDRESS;
 
+    func = STRIP_PAC(func);
     uint64_t func_addr = (uint64_t)func;
     hook_chain_rox_t *rox;
     hook_chain_rw_t *rw;
@@ -252,6 +255,7 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
     if (!func)
         return;
 
+    func = STRIP_PAC(func);
     uint64_t func_addr = (uint64_t)func;
     hook_chain_rox_t *rox =
         (hook_chain_rox_t *)hook_mem_get_rox_from_origin(func_addr);
@@ -294,6 +298,7 @@ void fp_hook(uintptr_t fp_addr, void *replace, void **backup)
     if (!fp_addr || !replace || !backup)
         return;
 
+    fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
     *backup = *(void **)fp_addr;
     write_fp_value(fp_addr, (uint64_t)replace);
 }
@@ -303,6 +308,7 @@ void fp_unhook(uintptr_t fp_addr, void *backup)
     if (!fp_addr)
         return;
 
+    fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
     write_fp_value(fp_addr, (uint64_t)backup);
 }
 
@@ -314,6 +320,7 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
     if (!fp_addr)
         return HOOK_BAD_ADDRESS;
 
+    fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
     fp_hook_chain_rox_t *rox;
     fp_hook_chain_rw_t *rw;
 
@@ -376,6 +383,7 @@ void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after)
     if (!fp_addr)
         return;
 
+    fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
     fp_hook_chain_rox_t *rox =
         (fp_hook_chain_rox_t *)hook_mem_get_rox_from_origin(fp_addr);
     if (!rox || !rox->rw)
