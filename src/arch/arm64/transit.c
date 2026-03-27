@@ -149,9 +149,11 @@ TRANSIT_SECTION
 uint64_t _transit(void)
 {
     asm volatile(
+        /* BTI landing pad for BR-based trampoline */
+        "bti  jc\n\t"
         /* O(1) rox/rw lookup from self-pointer at transit[0..1] */
-        "adr  x16, .\n\t"                  /* x16 = &transit[2]              */
-        "sub  x16, x16, #8\n\t"            /* x16 = &transit[0]              */
+        "adr  x16, .\n\t"                  /* x16 = &transit[3] (after bti)  */
+        "sub  x16, x16, #12\n\t"           /* x16 = &transit[0]              */
         "ldr  x16, [x16]\n\t"              /* x16 = rox                      */
         "mov  x17, %[rwoff]\n\t"           /* x17 = offsetof(rox, rw)        */
         "ldr  x17, [x16, x17]\n\t"         /* x17 = rw                       */
@@ -250,8 +252,9 @@ TRANSIT_SECTION
 uint64_t _fp_transit(void)
 {
     asm volatile(
+        "bti  jc\n\t"
         "adr  x16, .\n\t"
-        "sub  x16, x16, #8\n\t"
+        "sub  x16, x16, #12\n\t"
         "ldr  x16, [x16]\n\t"
         "mov  x17, %[rwoff]\n\t"
         "ldr  x17, [x16, x17]\n\t"
