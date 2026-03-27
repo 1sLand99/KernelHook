@@ -48,7 +48,7 @@ typedef int8_t chain_item_state;
 #define ARM64_BTI_J 0xd503249f
 #define ARM64_BTI_JC 0xd50324df
 
-#define HOOK_LOCAL_DATA_NUM 8
+#define HOOK_LOCAL_DATA_NUM 4
 
 /* ---- Core hook_t (inline hook state) ---- */
 
@@ -79,10 +79,6 @@ typedef struct
             uint64_t data1;
             uint64_t data2;
             uint64_t data3;
-            uint64_t data4;
-            uint64_t data5;
-            uint64_t data6;
-            uint64_t data7;
         };
         uint64_t data[HOOK_LOCAL_DATA_NUM];
     };
