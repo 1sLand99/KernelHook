@@ -45,6 +45,25 @@ enum hook_type
 #define ARM64_PACIASP 0xd503233f
 #define ARM64_PACIBSP 0xd503237f
 
+/* ---- Shadow Call Stack (SCS) instructions ----
+ * SCS protects return addresses by maintaining a separate shadow stack in X18.
+ * SCS push/pop instructions appear in prologues/epilogues on ARM64 Linux kernels
+ * compiled with CONFIG_SHADOW_CALL_STACK or -fsanitize=shadow-call-stack.
+ *
+ * These instructions are relocated normally via relo_ignore (NOT skipped or NOP'd).
+ * SCS push/pop pairs balance naturally through the call chain:
+ *   - Relocated prologue's SCS push pairs with the original epilogue's SCS pop
+ *   - transit_body's own SCS push (if compiled with SCS) pairs with its own pop
+ * Each level maintains its own balanced pair. No intervention needed.
+ *
+ * Detection purpose: diagnostics and compatibility verification — confirming that
+ * TRAMPOLINE_MAX_NUM is large enough to cover BTI+PAC+SCS combinations.
+ *
+ * macOS/Apple Silicon does not use SCS, so these will never appear in macOS binaries.
+ */
+#define ARM64_SCS_PUSH 0xf800845e  /* str x30, [x18], #8  */
+#define ARM64_SCS_POP  0xf85f8e5e  /* ldr x30, [x18, #-8]! */
+
 /* ---- kCFI exemption ----
  * Kernel Control Flow Integrity (kCFI) validates indirect call targets by
  * comparing a hash embedded before the callee's entry point against the

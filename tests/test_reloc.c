@@ -530,6 +530,51 @@ TEST(relo_bti_pac_combo_prologue)
     ASSERT_EQ(h.relo_insts[4], ARM64_PACIASP);  /* relocated PACIASP */
 }
 
+/* ---- Test: SCS push in prologue — relocated via relo_ignore ---- */
+
+TEST(relo_scs_push_prologue)
+{
+    hook_t h;
+    /* SCS push (str x30, [x18], #8) at offset 0, NOPs for rest.
+     * SCS push is not BTI/PAC, so we get a standard 4-instruction trampoline.
+     * The SCS instruction is relocated normally via relo_ignore. */
+    setup_hook(&h, ARM64_SCS_PUSH);
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    /* Standard 4-instruction trampoline (no BTI/PAC prefix) */
+    ASSERT_EQ(h.tramp_insts_num, 4);
+    ASSERT_EQ(h.tramp_insts[0], (uint32_t)0x58000051); /* LDR X17, #8 */
+
+    /* SCS push relocated as-is via relo_ignore at relo_insts[2] */
+    ASSERT_EQ(h.relo_insts[0], ARM64_BTI_JC); /* relo BTI header */
+    ASSERT_EQ(h.relo_insts[2], ARM64_SCS_PUSH); /* relocated SCS push */
+    ASSERT_EQ(h.relo_insts[3], ARM64_NOP);      /* relo_ignore padding */
+}
+
+/* ---- Test: BTI + PAC + SCS combo prologue — all relocated ---- */
+
+TEST(relo_bti_pac_scs_prologue)
+{
+    hook_t h;
+    /* BTI JC at offset 0, PACIASP at offset 1, SCS push at offset 2, NOP at 3.
+     * BTI at offset 0 triggers 5-instruction trampoline. */
+    setup_hook_4(&h, ARM64_BTI_JC, ARM64_PACIASP, ARM64_SCS_PUSH, ARM64_NOP);
+    origin_code[4] = ARM64_NOP;
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    ASSERT_EQ(h.tramp_insts_num, 5);
+    ASSERT_EQ(h.tramp_insts[0], ARM64_BTI_JC);
+
+    /* All three security instructions relocated as-is via relo_ignore */
+    ASSERT_EQ(h.relo_insts[2], ARM64_BTI_JC);    /* relocated BTI */
+    ASSERT_EQ(h.relo_insts[4], ARM64_PACIASP);   /* relocated PACIASP */
+    ASSERT_EQ(h.relo_insts[6], ARM64_SCS_PUSH);  /* relocated SCS push */
+}
+
 /* ---- Test: No BTI/PAC prologue — unchanged 4-inst trampoline ---- */
 
 TEST(relo_no_bti_pac_prologue)
