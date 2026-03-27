@@ -38,7 +38,7 @@ TEST(chain_add_single)
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(rw.sorted_count, 1);
     ASSERT_EQ(rw.sorted_indices[0], 0);
-    ASSERT_EQ(rw.items[0].state, CHAIN_ITEM_STATE_READY);
+    ASSERT_EQ(rw.occupied_mask & 1, 1);
     ASSERT_EQ(rw.items[0].priority, 10);
     ASSERT_EQ(rw.items[0].before, (void *)before_A);
     ASSERT_EQ(rw.items[0].after, (void *)after_A);

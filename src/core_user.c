@@ -18,14 +18,16 @@
  * Use macros to generate type-safe wrappers without code duplication.
  */
 
-#define DEFINE_CHAIN_OPS(PREFIX, RW_TYPE)                                       \
+#define DEFINE_CHAIN_OPS(PREFIX, RW_TYPE, MASK_TYPE)                             \
                                                                                 \
 static void PREFIX##_rebuild_sorted(RW_TYPE *rw)                                \
 {                                                                               \
     int32_t count = 0;                                                          \
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
-        if (rw->items[i].state == CHAIN_ITEM_STATE_READY)                      \
-            rw->sorted_indices[count++] = i;                                    \
+    MASK_TYPE mask = rw->occupied_mask;                                          \
+    while (mask) {                                                              \
+        int32_t i = __builtin_ctz(mask);                                        \
+        rw->sorted_indices[count++] = i;                                        \
+        mask &= ~((MASK_TYPE)1 << i);                                           \
     }                                                                           \
     for (int32_t i = 1; i < count; i++) {                                      \
         int32_t key = rw->sorted_indices[i];                                    \
@@ -44,13 +46,12 @@ static hook_err_t PREFIX##_chain_add(RW_TYPE *rw, void *before, void *after,    
                                       void *udata, int32_t priority)            \
 {                                                                               \
     if (!rw) return HOOK_BAD_ADDRESS;                                           \
-    int32_t slot = -1;                                                          \
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
-        if (rw->items[i].state == CHAIN_ITEM_STATE_EMPTY) { slot = i; break; } \
-    }                                                                           \
-    if (slot < 0) return HOOK_CHAIN_FULL;                                       \
+    MASK_TYPE avail = ~rw->occupied_mask;                                        \
+    if (!avail) return HOOK_CHAIN_FULL;                                         \
+    int32_t slot = __builtin_ctz(avail);                                        \
+    if (slot >= rw->chain_items_max) return HOOK_CHAIN_FULL;                    \
+    rw->occupied_mask |= (MASK_TYPE)1 << slot;                                  \
     hook_chain_item_t *item = &rw->items[slot];                                 \
-    item->state = CHAIN_ITEM_STATE_READY;                                       \
     item->priority = priority;                                                  \
     item->udata = udata;                                                        \
     item->before = before;                                                      \
@@ -63,11 +64,13 @@ static hook_err_t PREFIX##_chain_add(RW_TYPE *rw, void *before, void *after,    
 static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       \
 {                                                                               \
     if (!rw) return;                                                            \
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
+    MASK_TYPE mask = rw->occupied_mask;                                          \
+    while (mask) {                                                              \
+        int32_t i = __builtin_ctz(mask);                                        \
+        mask &= ~((MASK_TYPE)1 << i);                                           \
         hook_chain_item_t *item = &rw->items[i];                                \
-        if (item->state != CHAIN_ITEM_STATE_READY) continue;                   \
         if (item->before == before && item->after == after) {                   \
-            item->state = CHAIN_ITEM_STATE_EMPTY;                               \
+            rw->occupied_mask &= ~((MASK_TYPE)1 << i);                          \
             item->before = 0;                                                   \
             item->after = 0;                                                    \
             item->udata = 0;                                                    \
@@ -80,17 +83,14 @@ static void PREFIX##_chain_remove(RW_TYPE *rw, void *before, void *after)       
                                                                                 \
 static int PREFIX##_chain_all_empty(RW_TYPE *rw)                                \
 {                                                                               \
-    for (int32_t i = 0; i < rw->chain_items_max; i++) {                        \
-        if (rw->items[i].state != CHAIN_ITEM_STATE_EMPTY) return 0;            \
-    }                                                                           \
-    return 1;                                                                   \
+    return rw->occupied_mask == 0;                                              \
 }
 
-/* Generate inline hook chain ops (il_ prefix) */
-DEFINE_CHAIN_OPS(il, hook_chain_rw_t)
+/* Generate inline hook chain ops (il_ prefix, 16 slots → uint16_t mask) */
+DEFINE_CHAIN_OPS(il, hook_chain_rw_t, uint16_t)
 
-/* Generate FP hook chain ops (fp_ prefix) */
-DEFINE_CHAIN_OPS(fp, fp_hook_chain_rw_t)
+/* Generate FP hook chain ops (fp_ prefix, 32 slots → uint32_t mask) */
+DEFINE_CHAIN_OPS(fp, fp_hook_chain_rw_t, uint32_t)
 
 /* Public API wrappers for inline hook chain */
 hook_err_t hook_chain_add(hook_chain_rw_t *rw, void *before, void *after,

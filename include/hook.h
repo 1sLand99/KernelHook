@@ -27,11 +27,6 @@ enum hook_type
     FUNCTION_POINTER_CHAIN,
 };
 
-typedef int8_t chain_item_state;
-
-#define CHAIN_ITEM_STATE_EMPTY 0
-#define CHAIN_ITEM_STATE_READY 1
-
 #define local_container_of(ptr, type, member) ({ (type *)((char *)(ptr) - offsetof(type, member)); })
 
 #define HOOK_MEM_REGION_NUM 4
@@ -169,7 +164,6 @@ _HOOK_DEFINE_CB_TYPEDEF(12)
 
 typedef struct
 {
-    chain_item_state state;
     int32_t priority;
     void *udata;
     void *before;
@@ -193,6 +187,7 @@ typedef struct hook_chain_rw
     hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
+    uint16_t occupied_mask;
     int32_t sorted_indices[HOOK_CHAIN_NUM];
     int32_t sorted_count;
     hook_chain_item_t items[HOOK_CHAIN_NUM];
@@ -223,6 +218,7 @@ typedef struct fp_hook_chain_rw
     fp_hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
+    uint32_t occupied_mask;
     int32_t sorted_indices[FP_HOOK_CHAIN_NUM];
     int32_t sorted_count;
     hook_chain_item_t items[FP_HOOK_CHAIN_NUM];

@@ -40,7 +40,6 @@
         for (int32_t _si = 0; _si < (rw)->sorted_count; _si++) {                            \
             int32_t _idx = (rw)->sorted_indices[_si];                                        \
             hook_chain_item_t *_item = &(rw)->items[_idx];                                   \
-            if (_item->state != CHAIN_ITEM_STATE_READY) continue;                            \
             __builtin_memset(&_item->local, 0, sizeof(hook_local_t));                        \
             (fargs_ptr)->local = &_item->local;                                              \
             hook_chain12_callback _func = (hook_chain12_callback)_item->before;              \
@@ -53,7 +52,6 @@
         for (int32_t _si = (rw)->sorted_count - 1; _si >= 0; _si--) {                       \
             int32_t _idx = (rw)->sorted_indices[_si];                                        \
             hook_chain_item_t *_item = &(rw)->items[_idx];                                   \
-            if (_item->state != CHAIN_ITEM_STATE_READY) continue;                            \
             (fargs_ptr)->local = &_item->local;                                              \
             hook_chain12_callback _func = (hook_chain12_callback)_item->after;               \
             if (_func) _func((hook_fargs12_t *)(fargs_ptr), _item->udata);                  \
