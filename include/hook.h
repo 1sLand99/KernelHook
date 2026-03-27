@@ -30,7 +30,7 @@ enum hook_type
 #define local_container_of(ptr, type, member) ({ (type *)((char *)(ptr) - offsetof(type, member)); })
 
 #define HOOK_MEM_REGION_NUM 4
-#define TRAMPOLINE_NUM 4
+#define TRAMPOLINE_NUM 5
 #define RELOCATE_INST_NUM (TRAMPOLINE_NUM * 8 + 8)
 
 #define HOOK_CHAIN_NUM 0x10
@@ -42,6 +42,8 @@ enum hook_type
 #define ARM64_BTI_C 0xd503245f
 #define ARM64_BTI_J 0xd503249f
 #define ARM64_BTI_JC 0xd50324df
+#define ARM64_PACIASP 0xd503233f
+#define ARM64_PACIBSP 0xd503237f
 
 #define HOOK_LOCAL_DATA_NUM 4
 

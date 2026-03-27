@@ -465,6 +465,88 @@ TEST(relo_hook_prepare_4insts)
     ASSERT_EQ(h.relo_insts_num, 16);
 }
 
+/* ---- Test: PAC-only prologue detection ---- */
+
+TEST(relo_pac_only_prologue)
+{
+    hook_t h;
+    /* PACIASP at offset 0, NOPs for rest */
+    setup_hook_4(&h, ARM64_PACIASP, ARM64_NOP, ARM64_NOP, ARM64_NOP);
+    /* Set 5th instruction (TRAMPOLINE_NUM=5) */
+    origin_code[4] = ARM64_NOP;
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    /* 5-instruction trampoline: BTI_JC + branch_absolute */
+    ASSERT_EQ(h.tramp_insts_num, 5);
+    ASSERT_EQ(h.tramp_insts[0], ARM64_BTI_JC);
+    ASSERT_EQ(h.tramp_insts[1], (uint32_t)0x58000051); /* LDR X17, #8 */
+    ASSERT_EQ(h.tramp_insts[2], (uint32_t)0xd61f0220); /* BR X17 */
+
+    /* PACIASP relocated as-is via relo_ignore */
+    ASSERT_EQ(h.relo_insts[0], ARM64_BTI_JC); /* relo BTI header */
+    ASSERT_EQ(h.relo_insts[2], ARM64_PACIASP); /* relocated PACIASP */
+}
+
+/* ---- Test: BTI-only prologue detection ---- */
+
+TEST(relo_bti_only_prologue)
+{
+    hook_t h;
+    /* BTI C at offset 0, no PAC at offset 1 */
+    setup_hook_4(&h, ARM64_BTI_C, ARM64_NOP, ARM64_NOP, ARM64_NOP);
+    origin_code[4] = ARM64_NOP;
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    ASSERT_EQ(h.tramp_insts_num, 5);
+    ASSERT_EQ(h.tramp_insts[0], ARM64_BTI_JC);
+    ASSERT_EQ(h.tramp_insts[1], (uint32_t)0x58000051); /* LDR X17, #8 */
+    ASSERT_EQ(h.tramp_insts[2], (uint32_t)0xd61f0220); /* BR X17 */
+
+    /* BTI_C relocated as-is */
+    ASSERT_EQ(h.relo_insts[2], ARM64_BTI_C);
+}
+
+/* ---- Test: BTI + PAC combo prologue detection ---- */
+
+TEST(relo_bti_pac_combo_prologue)
+{
+    hook_t h;
+    /* BTI JC at offset 0, PACIASP at offset 1 */
+    setup_hook_4(&h, ARM64_BTI_JC, ARM64_PACIASP, ARM64_NOP, ARM64_NOP);
+    origin_code[4] = ARM64_NOP;
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    ASSERT_EQ(h.tramp_insts_num, 5);
+    ASSERT_EQ(h.tramp_insts[0], ARM64_BTI_JC);
+
+    /* Both BTI and PAC relocated */
+    ASSERT_EQ(h.relo_insts[2], ARM64_BTI_JC);   /* relocated BTI */
+    ASSERT_EQ(h.relo_insts[4], ARM64_PACIASP);  /* relocated PACIASP */
+}
+
+/* ---- Test: No BTI/PAC prologue — unchanged 4-inst trampoline ---- */
+
+TEST(relo_no_bti_pac_prologue)
+{
+    hook_t h;
+    /* Regular MOV instruction, not BTI/PAC */
+    uint32_t mov_inst = 0xd2800000; /* MOV X0, #0 */
+    setup_hook(&h, mov_inst);
+
+    hook_err_t rc = hook_prepare(&h);
+    ASSERT_EQ(rc, HOOK_NO_ERR);
+
+    ASSERT_EQ(h.tramp_insts_num, 4);
+    /* No BTI_JC prefix in trampoline */
+    ASSERT_EQ(h.tramp_insts[0], (uint32_t)0x58000051); /* LDR X17, #8 */
+}
+
 int main(void)
 {
     return RUN_ALL_TESTS();

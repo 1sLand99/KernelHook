@@ -275,8 +275,23 @@ hook_err_t hook_prepare(hook_t *hook)
         hook->origin_insts[i] = *((uint32_t *)hook->origin_addr + i);
     }
 
-    /* Trampoline to replace_addr */
-    hook->tramp_insts_num = branch_from_to(hook->tramp_insts, hook->origin_addr, hook->replace_addr);
+    /* Detect BTI/PAC prologue to determine trampoline layout */
+    uint32_t first = hook->origin_insts[0];
+    int is_bti = (first == ARM64_BTI_C || first == ARM64_BTI_J || first == ARM64_BTI_JC);
+    int is_pac = (first == ARM64_PACIASP || first == ARM64_PACIBSP);
+
+    if (is_bti || is_pac) {
+        /* BTI-only, PAC-only, or BTI+PAC combo: 5-instruction trampoline
+         * tramp[0] = BTI_JC (preserves landing pad at hooked function entry)
+         * tramp[1..4] = branch_absolute to replace_addr */
+        hook->tramp_insts[0] = ARM64_BTI_JC;
+        hook->tramp_insts_num = 1 + branch_from_to(&hook->tramp_insts[1],
+                                                     hook->origin_addr, hook->replace_addr);
+    } else {
+        /* Non-BTI/non-PAC: standard 4-instruction trampoline */
+        hook->tramp_insts_num = branch_from_to(hook->tramp_insts,
+                                                hook->origin_addr, hook->replace_addr);
+    }
 
     /* Initialize relocated instructions to NOP */
     for (uint32_t i = 0; i < sizeof(hook->relo_insts) / sizeof(hook->relo_insts[0]); i++) {
