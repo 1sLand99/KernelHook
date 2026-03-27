@@ -31,3 +31,13 @@ kh_add_test(test_remote test_remote.c)
 kh_add_test(test_pac_strip test_pac_strip.c)
 kh_add_test(test_interaction test_interaction.c)
 kh_add_test(test_unit test_unit.c)
+
+# --- Security integration tests with -mbranch-protection=standard ---
+include(CheckCCompilerFlag)
+check_c_compiler_flag(-mbranch-protection=standard HAS_BRANCH_PROTECTION)
+
+kh_add_test(test_security test_security.c)
+if(HAS_BRANCH_PROTECTION)
+    target_compile_options(test_security PRIVATE -mbranch-protection=standard)
+    target_compile_definitions(test_security PRIVATE HAS_BRANCH_PROTECTION)
+endif()
