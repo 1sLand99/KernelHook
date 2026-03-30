@@ -20,9 +20,9 @@ TEST(mem_sizes_transit_buffer)
 
 TEST(mem_sizes_hook_chain_rox)
 {
-    /* hook_t(280) + rw ptr(8) + transit(144) = 432, aligned 64 → 448 → actual 432 */
-    ASSERT_EQ(sizeof(hook_chain_rox_t), (size_t)432);
-    ASSERT_EQ(BLOCKS(sizeof(hook_chain_rox_t)), (size_t)7);
+    /* hook_t(232) + rw ptr(8) + transit(144) = 384, aligned 64 → 384 */
+    ASSERT_EQ(sizeof(hook_chain_rox_t), (size_t)384);
+    ASSERT_EQ(BLOCKS(sizeof(hook_chain_rox_t)), (size_t)6);
 }
 
 TEST(mem_sizes_hook_chain_rw)
@@ -56,7 +56,7 @@ TEST(mem_sizes_total_per_hook)
 {
     size_t inline_rox = BLOCKS(sizeof(hook_chain_rox_t)) * BLOCK_SIZE;
     size_t inline_rw  = BLOCKS(sizeof(hook_chain_rw_t)) * BLOCK_SIZE;
-    ASSERT_EQ(inline_rox + inline_rw, (size_t)1024);
+    ASSERT_EQ(inline_rox + inline_rw, (size_t)960);
 
     size_t fp_rox = BLOCKS(sizeof(fp_hook_chain_rox_t)) * BLOCK_SIZE;
     size_t fp_rw  = BLOCKS(sizeof(fp_hook_chain_rw_t)) * BLOCK_SIZE;
