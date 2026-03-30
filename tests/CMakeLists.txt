@@ -53,3 +53,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_compile_definitions(test_linux_arm64 PRIVATE HAS_BRANCH_PROTECTION)
     endif()
 endif()
+
+# --- Coverage gap tests ---
+kh_add_test(test_error_paths test_error_paths.c)
