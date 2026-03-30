@@ -33,8 +33,6 @@
 #define ASM_SYM(name) #name
 #endif
 
-/* ---- Callback iteration ---- */
-
 #define CALL_BEFORES(rw, fargs_ptr)                                                          \
     do {                                                                                     \
         for (int32_t _si = 0; _si < (rw)->sorted_count; _si++) {                            \

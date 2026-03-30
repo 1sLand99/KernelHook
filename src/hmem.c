@@ -123,9 +123,6 @@ static void *bitmap_alloc(bitmap_pool_t *pool, size_t size)
     pool->used_blocks += blocks_needed;
 
     void *ptr = (void *)(pool->pool_base + (uint64_t)start * pool->block_size);
-    /* Pool memory is zeroed during pool_init. Do not memset here —
-     * ROX pool memory is read-only and callers use hook_mem_rox_write_enable
-     * before writing. RW callers memset their allocations explicitly. */
     return ptr;
 }
 

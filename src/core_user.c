@@ -185,11 +185,9 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
     hook_chain_rox_t *rox;
     hook_chain_rw_t *rw;
 
-    /* Check if this function is already chain-hooked */
     rox = (hook_chain_rox_t *)hook_mem_get_rox_from_origin(func_addr);
 
     if (!rox) {
-        /* First hook on this function — allocate and set up */
         rox = (hook_chain_rox_t *)hook_mem_alloc_rox(sizeof(hook_chain_rox_t));
         if (!rox)
             return HOOK_NO_MEM;
@@ -200,14 +198,12 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
             return HOOK_NO_MEM;
         }
 
-        /* Initialize RW side */
         __builtin_memset(rw, 0, sizeof(hook_chain_rw_t));
         rw->rox = rox;
         rw->chain_items_max = HOOK_CHAIN_NUM;
         rw->argno = argno;
         rw->sorted_count = 0;
 
-        /* Enable writing to ROX memory for hook_prepare + transit setup */
         hook_mem_rox_write_enable(rox, sizeof(hook_chain_rox_t));
 
         rox->rw = rw;
@@ -266,7 +262,6 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
 
     hook_chain_remove(rw, before, after);
 
-    /* If all chain items are empty and caller wants removal, tear down */
     if (remove && il_chain_all_empty(rw)) {
         hook_uninstall(&rox->hook);
         hook_mem_unregister_origin(func_addr);
@@ -279,15 +274,8 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
  * Function pointer hook API
  * ================================================================== */
 
-/* ---- Helper: write a value to a function pointer address ---- */
-
 static void write_fp_value(uintptr_t fp_addr, uint64_t value)
 {
-    /* In userspace, function pointers typically live in writable data
-     * segments (.data / .bss).  Temporarily making the page RW then
-     * restoring to RO would break other globals on the same page.
-     * Just write directly — if the page happens to be read-only (e.g.
-     * rodata), the caller must handle protection changes. */
     *(volatile uint64_t *)fp_addr = value;
 }
 
@@ -324,11 +312,9 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
     fp_hook_chain_rox_t *rox;
     fp_hook_chain_rw_t *rw;
 
-    /* Check if this function pointer is already chain-hooked */
     rox = (fp_hook_chain_rox_t *)hook_mem_get_rox_from_origin(fp_addr);
 
     if (!rox) {
-        /* First hook on this FP — allocate and set up */
         rox = (fp_hook_chain_rox_t *)hook_mem_alloc_rox(sizeof(fp_hook_chain_rox_t));
         if (!rox)
             return HOOK_NO_MEM;
@@ -339,14 +325,12 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
             return HOOK_NO_MEM;
         }
 
-        /* Initialize RW side */
         __builtin_memset(rw, 0, sizeof(fp_hook_chain_rw_t));
         rw->rox = rox;
         rw->chain_items_max = FP_HOOK_CHAIN_NUM;
         rw->argno = argno;
         rw->sorted_count = 0;
 
-        /* Enable writing to ROX memory for transit setup */
         hook_mem_rox_write_enable(rox, sizeof(fp_hook_chain_rox_t));
 
         rox->rw = rw;
@@ -356,7 +340,6 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
         h->origin_fp = *(uint64_t *)fp_addr;
         h->replace_addr = (uint64_t)&rox->transit[2];
 
-        /* Set up transit buffer (self-pointer + FP asm stub copy) */
         fp_hook_chain_setup_transit(rox);
 
         hook_mem_rox_write_disable(rox, sizeof(fp_hook_chain_rox_t));
@@ -367,7 +350,6 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
             return HOOK_NO_MEM;
         }
 
-        /* Swap the function pointer to point to transit stub */
         write_fp_value(fp_addr, h->replace_addr);
     } else {
         rw = rox->rw;
@@ -393,7 +375,6 @@ void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after)
 
     fp_chain_remove(rw, before, after);
 
-    /* If all chain items are empty, restore original FP and tear down */
     if (fp_chain_all_empty(rw)) {
         write_fp_value(fp_addr, rox->hook.origin_fp);
         hook_mem_unregister_origin(fp_addr);

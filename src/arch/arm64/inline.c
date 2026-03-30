@@ -270,12 +270,10 @@ hook_err_t hook_prepare(hook_t *hook)
     if (is_bad_address((void *)hook->replace_addr)) return HOOK_BAD_ADDRESS;
     if (is_bad_address((void *)hook->relo_addr)) return HOOK_BAD_ADDRESS;
 
-    /* Backup origin instructions */
     for (int i = 0; i < TRAMPOLINE_NUM; i++) {
         hook->origin_insts[i] = *((uint32_t *)hook->origin_addr + i);
     }
 
-    /* Detect BTI/PAC prologue to determine trampoline layout */
     uint32_t first = hook->origin_insts[0];
     int is_bti = (first == ARM64_BTI_C || first == ARM64_BTI_J || first == ARM64_BTI_JC);
     int is_pac = (first == ARM64_PACIASP || first == ARM64_PACIBSP);
@@ -293,18 +291,15 @@ hook_err_t hook_prepare(hook_t *hook)
                                                 hook->origin_addr, hook->replace_addr);
     }
 
-    /* Initialize relocated instructions to NOP */
     for (uint32_t i = 0; i < sizeof(hook->relo_insts) / sizeof(hook->relo_insts[0]); i++) {
         hook->relo_insts[i] = ARM64_NOP;
     }
 
-    /* BTI + NOP header for relocated code */
     uint32_t *bti = hook->relo_insts + hook->relo_insts_num;
     bti[0] = ARM64_BTI_JC;
     bti[1] = ARM64_NOP;
     hook->relo_insts_num += 2;
 
-    /* Relocate each overwritten instruction */
     for (int i = 0; i < hook->tramp_insts_num; i++) {
         uint64_t inst_addr = hook->origin_addr + i * 4;
         uint32_t inst = hook->origin_insts[i];
@@ -314,7 +309,6 @@ hook_err_t hook_prepare(hook_t *hook)
         }
     }
 
-    /* Jump back to original function after relocated instructions */
     uint64_t back_src_addr = hook->relo_addr + hook->relo_insts_num * 4;
     uint64_t back_dst_addr = hook->origin_addr + hook->tramp_insts_num * 4;
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;

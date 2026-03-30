@@ -9,11 +9,7 @@
 #include <platform.h>
 #include <hook_mem_user.h>
 
-/* ---- Allocation tracking for free() ----
- *
- * hook_mem_ops_t.free takes (ptr) only, but platform_free needs (ptr, size).
- * Track the two pool allocations so the free wrappers can supply the size.
- */
+/* hook_mem_ops_t.free takes (ptr) only, but platform_free needs (ptr, size). */
 
 #define MAX_ALLOC_TRACK 4
 
