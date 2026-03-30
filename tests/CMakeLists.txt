@@ -56,3 +56,4 @@ endif()
 
 # --- Coverage gap tests ---
 kh_add_test(test_error_paths test_error_paths.c)
+kh_add_test(test_typed_wrappers test_typed_wrappers.c)
