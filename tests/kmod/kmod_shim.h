@@ -23,7 +23,8 @@
         __used __section(".modinfo") __aligned(1) = #tag "=" info
 
 #define __UNIQUE_ID(prefix) __PASTE(__PASTE(__unique_, prefix), __COUNTER__)
-#define __PASTE(a, b) a##b
+#define __PASTE(a, b) __PASTE2(a, b)
+#define __PASTE2(a, b) a##b
 
 #define MODULE_LICENSE(x)       __MODULE_INFO(license, license, x)
 #define MODULE_AUTHOR(x)        __MODULE_INFO(author, author, x)
@@ -63,6 +64,17 @@ extern int printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #endif
 #ifndef false
 #define false 0
+#endif
+
+/* ---- Minimal errno ---- */
+#ifndef EINVAL
+#define EINVAL 22
+#endif
+#ifndef ENOENT
+#define ENOENT 2
+#endif
+#ifndef ENOMEM
+#define ENOMEM 12
 #endif
 
 /* ---- __init / __exit section attributes ---- */

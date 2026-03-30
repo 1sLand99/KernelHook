@@ -9,7 +9,7 @@
  */
 
 #ifdef KMOD_FREESTANDING
-#include <ktypes.h>
+#include "kmod_shim.h"
 #include <hmem.h>
 #include <ksyms.h>
 #include <log.h>
