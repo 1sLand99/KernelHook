@@ -9,6 +9,7 @@
 
 #include <ktypes.h>
 #include <hook.h>
+#include <log.h>
 #include <platform.h>
 #define memcpy __builtin_memcpy
 
@@ -58,6 +59,12 @@ static void setup_transit(void *rox, uint32_t *transit,
 {
     *(uint64_t *)&transit[0] = (uint64_t)rox;
     uint64_t sz = stub_size(stub_start, stub_end);
+    uint64_t avail = (TRANSIT_INST_NUM - 2) * sizeof(uint32_t);
+    if (sz > avail) {
+        logke("transit stub (%llu) exceeds buffer (%llu)",
+              (unsigned long long)sz, (unsigned long long)avail);
+        return;
+    }
     memcpy(&transit[2], stub_start, sz);
 }
 

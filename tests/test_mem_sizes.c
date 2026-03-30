@@ -13,16 +13,16 @@
 
 TEST(mem_sizes_transit_buffer)
 {
-    /* transit[TRANSIT_INST_NUM] = 96 * 4 = 384 bytes */
-    ASSERT_EQ(TRANSIT_INST_NUM, 96);
-    ASSERT_EQ(sizeof(((hook_chain_rox_t *)0)->transit), (size_t)384);
+    /* transit[TRANSIT_INST_NUM] = 36 * 4 = 144 bytes */
+    ASSERT_EQ(TRANSIT_INST_NUM, 36);
+    ASSERT_EQ(sizeof(((hook_chain_rox_t *)0)->transit), (size_t)144);
 }
 
 TEST(mem_sizes_hook_chain_rox)
 {
-    /* hook_t(280) + rw ptr(8) + transit(384) = 672, aligned 64 → 672 */
-    ASSERT_EQ(sizeof(hook_chain_rox_t), (size_t)672);
-    ASSERT_EQ(BLOCKS(sizeof(hook_chain_rox_t)), (size_t)11);
+    /* hook_t(280) + rw ptr(8) + transit(144) = 432, aligned 64 → 448 → actual 432 */
+    ASSERT_EQ(sizeof(hook_chain_rox_t), (size_t)432);
+    ASSERT_EQ(BLOCKS(sizeof(hook_chain_rox_t)), (size_t)7);
 }
 
 TEST(mem_sizes_hook_chain_rw)
@@ -34,8 +34,8 @@ TEST(mem_sizes_hook_chain_rw)
 
 TEST(mem_sizes_fp_hook_chain_rox)
 {
-    ASSERT_EQ(sizeof(fp_hook_chain_rox_t), (size_t)416);
-    ASSERT_EQ(BLOCKS(sizeof(fp_hook_chain_rox_t)), (size_t)7);
+    ASSERT_EQ(sizeof(fp_hook_chain_rox_t), (size_t)176);
+    ASSERT_EQ(BLOCKS(sizeof(fp_hook_chain_rox_t)), (size_t)3);
 }
 
 TEST(mem_sizes_fp_hook_chain_rw)
@@ -56,11 +56,11 @@ TEST(mem_sizes_total_per_hook)
 {
     size_t inline_rox = BLOCKS(sizeof(hook_chain_rox_t)) * BLOCK_SIZE;
     size_t inline_rw  = BLOCKS(sizeof(hook_chain_rw_t)) * BLOCK_SIZE;
-    ASSERT_EQ(inline_rox + inline_rw, (size_t)1856);
+    ASSERT_EQ(inline_rox + inline_rw, (size_t)1600);
 
     size_t fp_rox = BLOCKS(sizeof(fp_hook_chain_rox_t)) * BLOCK_SIZE;
     size_t fp_rw  = BLOCKS(sizeof(fp_hook_chain_rw_t)) * BLOCK_SIZE;
-    ASSERT_EQ(fp_rox + fp_rw, (size_t)2688);
+    ASSERT_EQ(fp_rox + fp_rw, (size_t)2432);
 }
 
 int main(void)

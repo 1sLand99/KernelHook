@@ -34,7 +34,7 @@ enum hook_type
 #define RELOCATE_INST_NUM (TRAMPOLINE_NUM * 8 + 8)
 
 #define HOOK_CHAIN_NUM 0x10
-#define TRANSIT_INST_NUM 0x60
+#define TRANSIT_INST_NUM 0x24
 
 #define FP_HOOK_CHAIN_NUM 0x20
 
