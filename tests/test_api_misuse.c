@@ -1,0 +1,165 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* API misuse and robustness tests */
+
+#include "test_framework.h"
+#include <hook.h>
+#include <hmem.h>
+#include <hook_mem_user.h>
+
+/* Target function — NOP-padded */
+__attribute__((noinline))
+static int misuse_target(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+static int (*volatile call_misuse)(int, int) = misuse_target;
+
+/* Replacement */
+__attribute__((noinline))
+static int misuse_replace(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a * b;
+}
+
+/* Before callback for wrap tests */
+static void misuse_before(hook_fargs2_t *fargs, void *udata)
+{
+    (void)fargs; (void)udata;
+}
+
+/* FP target for fp_unhook misuse */
+__attribute__((noinline))
+static int fp_misuse_impl(int a, int b)
+{
+    asm volatile("nop\n\tnop\n\tnop");
+    return a + b;
+}
+
+static int (*fp_misuse)(int, int) = fp_misuse_impl;
+
+/* ------------------------------------------------------------------ */
+
+/*
+ * Test 1: misuse_cleanup_while_hooked
+ * Init, hook a function, then call hook_mem_user_cleanup() WITHOUT
+ * unhooking first.  No crash = pass.
+ */
+TEST(misuse_cleanup_while_hooked)
+{
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
+
+    void *backup = NULL;
+    hook_err_t err = hook((void *)misuse_target, (void *)misuse_replace, &backup);
+    ASSERT_EQ(err, HOOK_NO_ERR);
+
+    /* Intentionally skip unhook — cleanup must not crash */
+    hook_mem_user_cleanup();
+}
+
+/*
+ * Test 2: misuse_double_init
+ * Call hook_mem_user_init() twice.  Either call may succeed or fail;
+ * what matters is no crash.
+ */
+TEST(misuse_double_init)
+{
+    (void)hook_mem_user_init();
+    (void)hook_mem_user_init();
+    /* No crash = pass */
+    hook_mem_user_cleanup();
+}
+
+/*
+ * Test 3: misuse_hook_after_cleanup
+ * Init, cleanup, then try to hook().  Should return an error, no crash.
+ */
+TEST(misuse_hook_after_cleanup)
+{
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
+
+    hook_mem_user_cleanup();
+
+    void *backup = NULL;
+    hook_err_t err = hook((void *)misuse_target, (void *)misuse_replace, &backup);
+    ASSERT_NE(err, HOOK_NO_ERR);
+    /* No crash = pass */
+}
+
+/*
+ * Test 4: misuse_wrap_argno_negative
+ * hook_wrap_pri with argno=-1.  If it succeeds, call via volatile pointer
+ * to verify no crash, then unwrap.  Cleanup.
+ */
+TEST(misuse_wrap_argno_negative)
+{
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
+
+    hook_err_t err = hook_wrap_pri((void *)misuse_target, -1,
+                                   (void *)misuse_before, NULL, NULL, 0);
+    if (err == HOOK_NO_ERR) {
+        /* If the library accepted it, exercise the hook without crashing */
+        (void)call_misuse(3, 4);
+        hook_unwrap((void *)misuse_target, (void *)misuse_before, NULL);
+    }
+    /* No crash = pass */
+
+    hook_mem_user_cleanup();
+}
+
+/*
+ * Test 5: misuse_wrap_argno_overflow
+ * hook_wrap_pri with argno=99.  If it succeeds, call via volatile pointer,
+ * then unwrap.  Cleanup.
+ */
+TEST(misuse_wrap_argno_overflow)
+{
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
+
+    hook_err_t err = hook_wrap_pri((void *)misuse_target, 99,
+                                   (void *)misuse_before, NULL, NULL, 0);
+    if (err == HOOK_NO_ERR) {
+        (void)call_misuse(5, 6);
+        hook_unwrap((void *)misuse_target, (void *)misuse_before, NULL);
+    }
+    /* No crash = pass */
+
+    hook_mem_user_cleanup();
+}
+
+/*
+ * Test 6: misuse_fp_unhook_wrong_backup
+ * fp_hook() a target, then fp_unhook() with a wrong backup pointer
+ * (0xDEADBEEF).  No crash during unhook = pass.
+ * Restore the FP variable manually afterward to prevent calling a bad address.
+ */
+TEST(misuse_fp_unhook_wrong_backup)
+{
+    int rc = hook_mem_user_init();
+    ASSERT_EQ(rc, 0);
+
+    fp_misuse = fp_misuse_impl;
+
+    void *backup = NULL;
+    fp_hook((uintptr_t)&fp_misuse, (void *)misuse_replace, &backup);
+
+    /* Pass a wrong backup — must not crash */
+    void *wrong_backup = (void *)0xDEADBEEF;
+    fp_unhook((uintptr_t)&fp_misuse, wrong_backup);
+
+    /* Restore the FP variable so no bad address is called later */
+    fp_misuse = fp_misuse_impl;
+
+    hook_mem_user_cleanup();
+}
+
+int main(void)
+{
+    return RUN_ALL_TESTS();
+}
