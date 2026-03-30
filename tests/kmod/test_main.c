@@ -2,8 +2,14 @@
 /*
  * KernelHook kernel module test harness
  *
- * Loads as a kernel module and runs hook tests in kernel context with real
- * page table manipulation.  Results are emitted via pr_info to dmesg.
+ * Loads as a kernel module, initialises the full KernelHook subsystem, and
+ * runs hook tests in kernel context with real page table manipulation.
+ * Results are emitted via pr_info/pr_err to dmesg.
+ *
+ * Build paths:
+ *   Kbuild (Approach A):       uses kernel headers; kprobes auto-detects
+ *                              kallsyms_lookup_name when kallsyms_addr==0
+ *   Freestanding (Approach B): uses kmod_shim.h; kallsyms_addr is required
  *
  * Test plan for security-mechanism-enabled kernels:
  *
@@ -45,40 +51,99 @@
  *   CONFIG_ARM64_BTI_KERNEL=y      (BTI tests)
  */
 
+#ifdef KMOD_FREESTANDING
+#include "kmod_shim.h"
+#else
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
+#include <linux/version.h>
+#ifdef CONFIG_KPROBES
+#include <linux/kprobes.h>
+#endif
+#endif /* KMOD_FREESTANDING */
+
+#include <ktypes.h>
+#include <hook.h>
+#include <hmem.h>
+#include <ksyms.h>
+#include <arch/arm64/pgtable.h>
+#include "kmod_mem_ops.h"
+#include "test_hook_kernel.h"
+
+/* kmod_log.c — no dedicated header */
+extern int kmod_log_init(void);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook test harness for kernel-context hook verification");
 
+static unsigned long kallsyms_addr = 0;
+module_param(kallsyms_addr, ulong, 0444);
+MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex)");
+
 #define KH_TEST_TAG "kh_test: "
 
-static int tests_run;
-static int tests_passed;
-static int tests_failed;
-
-#define KH_ASSERT(cond, msg)                                             \
-    do {                                                                 \
-        tests_run++;                                                     \
-        if (cond) {                                                      \
-            tests_passed++;                                              \
-            pr_info(KH_TEST_TAG "PASS: %s\n", (msg));                   \
-        } else {                                                         \
-            tests_failed++;                                              \
-            pr_err(KH_TEST_TAG "FAIL: %s (at %s:%d)\n",                 \
-                   (msg), __FILE__, __LINE__);                           \
-        }                                                                \
-    } while (0)
-
-#define KH_SKIP(msg)                                                     \
-    pr_info(KH_TEST_TAG "SKIP: %s\n", (msg))
+/*
+ * Shared test counters — NOT static so test_hook_kernel.c can extern them.
+ */
+int tests_run;
+int tests_passed;
+int tests_failed;
 
 /*
- * Test: verify kernel module loads and test framework works
+ * Track whether the KernelHook subsystem was successfully initialised so
+ * that kh_test_exit() knows whether cleanup is needed.
+ */
+static int kh_initialized = 0;
+
+/* -------------------------------------------------------------------------
+ * Test framework macros
+ * ---------------------------------------------------------------------- */
+
+#define KH_ASSERT(cond, msg)                                              \
+    do {                                                                  \
+        tests_run++;                                                      \
+        if (cond) {                                                       \
+            tests_passed++;                                               \
+            pr_info(KH_TEST_TAG "PASS: %s\n", (msg));                    \
+        } else {                                                          \
+            tests_failed++;                                               \
+            pr_err(KH_TEST_TAG "FAIL: %s (at %s:%d)\n",                  \
+                   (msg), __FILE__, __LINE__);                            \
+        }                                                                 \
+    } while (0)
+
+#define KH_SKIP(msg) \
+    pr_info(KH_TEST_TAG "SKIP: %s\n", (msg))
+
+/* -------------------------------------------------------------------------
+ * kprobes trick: resolve kallsyms_lookup_name without a symbol table
+ * (Kbuild path only; CONFIG_KPROBES must be enabled)
+ * ---------------------------------------------------------------------- */
+
+#if !defined(KMOD_FREESTANDING) && defined(CONFIG_KPROBES)
+static unsigned long find_kallsyms_via_kprobes(void)
+{
+    struct kprobe kp = { .symbol_name = "kallsyms_lookup_name" };
+    int ret = register_kprobe(&kp);
+
+    if (ret < 0)
+        return 0;
+    unsigned long addr = (unsigned long)kp.addr;
+    unregister_kprobe(&kp);
+    return addr;
+}
+#endif
+
+/* -------------------------------------------------------------------------
+ * Phase 1: Infrastructure tests
+ * ---------------------------------------------------------------------- */
+
+/*
+ * test_framework_sanity — verify the test framework itself works.
  */
 static void test_framework_sanity(void)
 {
@@ -86,35 +151,27 @@ static void test_framework_sanity(void)
 }
 
 /*
- * Test: verify vmalloc/vfree works (prerequisite for hook memory allocation)
+ * test_vmalloc_available — verify vmalloc/vfree round-trip.
+ * (Prerequisite for hook memory allocation.)
+ * Freestanding: SKIPped because vmalloc is resolved only after subsystem init.
  */
 static void test_vmalloc_available(void)
 {
+#ifdef KMOD_FREESTANDING
+    KH_SKIP("vmalloc_available (freestanding: symbol resolved at subsystem init)");
+#else
     void *p = vmalloc(PAGE_SIZE);
 
     KH_ASSERT(p != NULL, "vmalloc allocates memory in kernel context");
     if (p)
         vfree(p);
+#endif
 }
 
-/*
- * Test: verify set_memory_x is available for W^X page manipulation
- * (actual hook installation requires executable memory regions)
- */
-static void test_page_permissions(void)
-{
-    /* Just verify we can allocate and free — actual set_memory_x tests
-     * require the full KernelHook library linked into the module */
-    void *p = vmalloc(PAGE_SIZE);
+/* -------------------------------------------------------------------------
+ * Phase 2: Security mechanism detection
+ * ---------------------------------------------------------------------- */
 
-    KH_ASSERT(p != NULL, "page allocation for permission tests");
-    if (p)
-        vfree(p);
-}
-
-/*
- * Test: check for kCFI kernel config
- */
 static void test_kcfi_detection(void)
 {
 #if defined(CONFIG_CFI_CLANG)
@@ -125,9 +182,6 @@ static void test_kcfi_detection(void)
 #endif
 }
 
-/*
- * Test: check for Shadow Call Stack kernel config
- */
 static void test_scs_detection(void)
 {
 #if defined(CONFIG_SHADOW_CALL_STACK)
@@ -138,9 +192,6 @@ static void test_scs_detection(void)
 #endif
 }
 
-/*
- * Test: check for PAC kernel config
- */
 static void test_pac_detection(void)
 {
 #if defined(CONFIG_ARM64_PTR_AUTH_KERNEL)
@@ -151,9 +202,6 @@ static void test_pac_detection(void)
 #endif
 }
 
-/*
- * Test: check for BTI kernel config
- */
 static void test_bti_detection(void)
 {
 #if defined(CONFIG_ARM64_BTI_KERNEL)
@@ -164,26 +212,149 @@ static void test_bti_detection(void)
 #endif
 }
 
+/* -------------------------------------------------------------------------
+ * Phase 3: Subsystem initialisation
+ * ---------------------------------------------------------------------- */
+
+/*
+ * kh_subsystem_init — resolve kallsyms, then bring up ksyms → log → pgtable
+ * → hook_mem in order.
+ *
+ * Returns 0 on success, negative errno on failure.
+ */
+static int kh_subsystem_init(void)
+{
+    unsigned long ksym_addr = kallsyms_addr;
+    int rc;
+
+    /* Resolve kallsyms_lookup_name address if not supplied */
+    if (!ksym_addr) {
+#if defined(KMOD_FREESTANDING)
+        pr_err(KH_TEST_TAG
+               "kallsyms_addr required for freestanding build "
+               "(pass via insmod kallsyms_addr=0x...)\n");
+        return -EINVAL;
+#elif defined(CONFIG_KPROBES)
+        ksym_addr = find_kallsyms_via_kprobes();
+        if (!ksym_addr) {
+            pr_err(KH_TEST_TAG
+                   "kprobes: failed to resolve kallsyms_lookup_name\n");
+            return -ENOENT;
+        }
+        pr_info(KH_TEST_TAG "kprobes: kallsyms_lookup_name @ 0x%lx\n",
+                ksym_addr);
+#else
+        pr_err(KH_TEST_TAG
+               "kallsyms_addr not provided and CONFIG_KPROBES not set — "
+               "cannot resolve kallsyms_lookup_name\n");
+        return -ENOENT;
+#endif
+    }
+
+    /* 1. ksyms */
+    rc = ksyms_init((uint64_t)ksym_addr);
+    if (rc) {
+        pr_err(KH_TEST_TAG "ksyms_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* 2. log */
+    rc = kmod_log_init();
+    if (rc) {
+        pr_err(KH_TEST_TAG "kmod_log_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* 3. pgtable */
+    rc = pgtable_init();
+    if (rc) {
+        pr_err(KH_TEST_TAG "pgtable_init failed: %d\n", rc);
+        return rc;
+    }
+
+    /* 4. hook_mem */
+    rc = kmod_hook_mem_init();
+    if (rc) {
+        pr_err(KH_TEST_TAG "kmod_hook_mem_init failed: %d\n", rc);
+        return rc;
+    }
+
+    return 0;
+}
+
+/*
+ * kh_subsystem_cleanup — tear down hook_mem if it was initialised.
+ */
+static void kh_subsystem_cleanup(void)
+{
+    if (kh_initialized) {
+        kmod_hook_mem_cleanup();
+        kh_initialized = 0;
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * Module init / exit
+ * ---------------------------------------------------------------------- */
+
 static int __init kh_test_init(void)
 {
-    pr_info(KH_TEST_TAG "=== KernelHook Kernel Module Test Harness ===\n");
-    pr_info(KH_TEST_TAG "Starting tests...\n");
+    int rc;
 
-    tests_run = 0;
+    pr_info(KH_TEST_TAG "=== KernelHook Kernel Module Test Harness ===\n");
+
+#ifdef KMOD_FREESTANDING
+    pr_info(KH_TEST_TAG "Build: freestanding (Approach B)\n");
+#else
+    pr_info(KH_TEST_TAG "Build: Kbuild (Approach A)\n");
+#endif
+
+    /* Reset counters */
+    tests_run    = 0;
     tests_passed = 0;
     tests_failed = 0;
 
-    /* Infrastructure tests */
+    /* ------------------------------------------------------------------
+     * Phase 1: Infrastructure
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 1: Infrastructure ---\n");
     test_framework_sanity();
     test_vmalloc_available();
-    test_page_permissions();
 
-    /* Security mechanism detection */
+    /* ------------------------------------------------------------------
+     * Phase 2: Security mechanism detection
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 2: Security mechanism detection ---\n");
     test_kcfi_detection();
     test_scs_detection();
     test_pac_detection();
     test_bti_detection();
 
+    /* ------------------------------------------------------------------
+     * Phase 3: Subsystem initialisation
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 3: Subsystem init ---\n");
+    rc = kh_subsystem_init();
+    if (rc) {
+        pr_err(KH_TEST_TAG
+               "Subsystem init FAILED (%d) — skipping hook tests\n", rc);
+        goto results;
+    }
+    kh_initialized = 1;
+    pr_info(KH_TEST_TAG "Subsystem init OK\n");
+
+    /* ------------------------------------------------------------------
+     * Phase 4: Hook tests
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 4: Hook tests ---\n");
+    test_inline_hook_basic();
+    test_hook_wrap_before_after();
+    test_hook_wrap_skip_origin();
+    test_hook_wrap_arg_passthrough();
+    test_hook_uninstall_restore();
+    test_hook_chain_priority();
+
+results:
     pr_info(KH_TEST_TAG "=== Results: %d run, %d passed, %d failed ===\n",
             tests_run, tests_passed, tests_failed);
 
@@ -192,11 +363,12 @@ static int __init kh_test_init(void)
     else
         pr_info(KH_TEST_TAG "ALL TESTS PASSED\n");
 
-    return 0;
+    return 0;  /* always return 0 so the module loads (for dmesg parsing) */
 }
 
 static void __exit kh_test_exit(void)
 {
+    kh_subsystem_cleanup();
     pr_info(KH_TEST_TAG "module unloaded\n");
 }
 
