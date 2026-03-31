@@ -324,7 +324,8 @@ hook_err_t hook_prepare(hook_t *hook)
      * On non-kCFI kernels this is harmless — just 4 bytes of data.
      * In userspace there is no kCFI, and origin_addr may not have
      * readable memory at -4, so skip. */
-    hook->_relo_cfi_hash = *(uint32_t *)(hook->origin_addr - 4);
+    if (!is_bad_address((void *)(hook->origin_addr - 4)))
+        hook->_relo_cfi_hash = *(uint32_t *)(hook->origin_addr - 4);
 #endif
 
     return HOOK_NO_ERR;
@@ -392,6 +393,15 @@ static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 
         for (int32_t i = 0; i < count; i++)
             *((uint32_t *)linear_va + i) = insts[i];
+
+        /* Clean dcache of linear alias to Point of Unification so the
+         * I-cache fill on other CPUs sees the new instructions. */
+        {
+            uint64_t addr;
+            for (addr = linear_va; addr < linear_va + (uint64_t)count * 4; addr += 4)
+                asm volatile("dc cvau, %0" :: "r"(addr) : "memory");
+            asm volatile("dsb ish" ::: "memory");
+        }
     } else {
         /* set_memory mode: temporarily make page writable */
         unsigned long page_va = va & ~(page_size - 1);
