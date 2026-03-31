@@ -6,31 +6,11 @@
 #include <hmem.h>
 #include <hook_mem_user.h>
 
-/* Target functions — each test that corrupts state gets its own target.
- *
- * IMPORTANT: On Android static binaries, platform_write_code() uses
- * mprotect to make the target's page RW, write the trampoline, then
- * mprotect back to RX.  If the target function is on the SAME page as
- * platform_write_code, the first mprotect removes execute permission
- * from the page platform_write_code is running on, causing SIGSEGV.
- *
- * Force page-alignment on the first target so all targets land on a
- * separate page from library code. */
-
-/* Place hook targets in a dedicated section so they never share a page
- * with platform_write_code (see comment above). */
-/* On Android static binaries, platform_write_code() uses mprotect to
- * make the target's page RW.  If the target is on the same page,
- * platform_write_code removes its own execute permission → SIGSEGV.
- * Use visibility("hidden") + noinline to prevent inlining while
- * keeping them non-static so the linker can place them in a separate
- * page.  The large NOP sled in misuse_target pushes later targets
- * onto a distinct page from library code. */
-#ifdef __ANDROID__
-#define HOOK_TARGET __attribute__((noinline, visibility("hidden"), aligned(4096)))
-#else
+/* Targets are noinline to prevent the compiler from folding them.
+ * Page isolation between library and user code is handled by the
+ * linker script (GNU ld) or order file (macOS ld64) — no need for
+ * per-function alignment workarounds. */
 #define HOOK_TARGET __attribute__((noinline))
-#endif
 
 HOOK_TARGET
 int misuse_target(int a, int b)
