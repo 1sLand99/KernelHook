@@ -165,8 +165,21 @@ module: $(MODULE_NAME).ko
 loader: $(KERNELHOOK_DIR)/loader/kmod_loader.c
 	$(CC) -static -O2 -o kmod_loader $<
 
+# Detect llvm-objcopy (from NDK or PATH)
+_KH_OBJCOPY := $(shell which $(CROSS_COMPILE)objcopy 2>/dev/null || which llvm-objcopy 2>/dev/null)
+
 $(MODULE_NAME).ko: $(_KH_ALL_OBJS)
-	$(LD) -r -T $(KH_LDS) -o $@ $^
+	$(LD) -r -T $(KH_LDS) -o $@.tmp $^
+	@# lld renames .kh.this_module output section to .gnu.linkonce.this_module
+	@# via linker script, but keeps .rela.kh.this_module as the relocation name.
+	@# Kernel expects .rela.gnu.linkonce.this_module — fix with objcopy.
+ifneq ($(_KH_OBJCOPY),)
+	$(_KH_OBJCOPY) --rename-section .rela.kh.this_module=.rela.gnu.linkonce.this_module $@.tmp $@
+	@rm -f $@.tmp
+else
+	@mv $@.tmp $@
+	@echo "WARNING: llvm-objcopy not found, .rela.kh.this_module not renamed"
+endif
 
 # Module's own sources
 %.kmod.o: %.c
