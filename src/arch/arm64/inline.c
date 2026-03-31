@@ -224,6 +224,10 @@ static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uin
         }
     }
 
+    /* Bounds check BEFORE writing to prevent buffer overflow */
+    if (hook->relo_insts_num + len > RELOCATE_INST_NUM)
+        return HOOK_BAD_RELO;
+
     switch (it) {
     case INST_B:
     case INST_BC:
@@ -256,9 +260,6 @@ static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uin
         rc = relo_ignore(hook, inst_addr, inst, it);
         break;
     }
-
-    if (hook->relo_insts_num + len > RELOCATE_INST_NUM)
-        return HOOK_BAD_RELO;
 
     hook->relo_insts_num += len;
 
@@ -359,23 +360,22 @@ static set_memory_fn_t kh_set_memory_rw;
 static set_memory_fn_t kh_set_memory_ro;
 static set_memory_fn_t kh_set_memory_x;
 
-/* 0 = linear mapping (default), 1 = set_memory */
-static int kh_write_mode = 0;
+/* 0 = PTE modification (fallback), 1 = set_memory (default when available) */
+int kh_write_mode = 0;
 
 /* Called from kmod init after ksyms resolution */
 void kh_write_insts_init(void)
 {
-    /* Resolve set_memory_* for fallback mode */
+    /* Resolve set_memory_* */
     kh_set_memory_rw = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_rw");
     kh_set_memory_ro = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_ro");
     kh_set_memory_x  = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_x");
     if (!kh_set_memory_x)
         kh_set_memory_x = (set_memory_fn_t)(uintptr_t)ksyms_lookup_cache("set_memory_exec");
 
-    /* Default: set_memory mode. Linear mapping available as fallback
-     * for kernels where set_memory is not exported. */
+    /* Prefer set_memory when available; fall back to direct PTE modification */
     kh_write_mode = (kh_set_memory_rw && kh_set_memory_ro) ? 1 : 0;
-    logki("write_insts: mode=%s", kh_write_mode ? "set_memory" : "linear_mapping");
+    logki("write_insts: mode=%s", kh_write_mode ? "set_memory" : "pte_modify");
 
     logki("write_insts: set_memory rw=%llx ro=%llx x=%llx",
           (unsigned long long)(uintptr_t)kh_set_memory_rw,
@@ -387,23 +387,41 @@ __attribute__((no_sanitize("kcfi")))
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
     if (kh_write_mode == 0) {
-        /* Linear mapping mode: write through the linear map VA */
-        uint64_t pa = virt_to_phys(va);
-        uint64_t linear_va = phys_to_virt(pa);
+        /* PTE mode: directly modify the page table entry to clear
+         * PTE_RDONLY, write instructions, then restore the original PTE.
+         * This is the KernelPatch approach — works on all kernels
+         * regardless of rodata_full or set_memory availability. */
+        /* Walk page table to find PTE, inline all modifications to avoid
+         * function calls that might trigger kCFI checks on ksyms pointers. */
+        uint64_t *entry = pgtable_entry_kernel(va);
+        if (!entry)
+            return;
+        uint64_t ori_pte = *entry;
+
+        /* Clear PTE_RDONLY + set PTE_DBM, then flush TLB for this VA.
+         * TLBI operand: bits[43:0] = VA[55:12], bits[63:48] = ASID (0 for kernel). */
+        *entry = (ori_pte | PTE_DBM) & ~PTE_RDONLY;
+        {
+            uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
+            asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
+            asm volatile("dsb ish" ::: "memory");
+            asm volatile("isb" ::: "memory");
+        }
 
         for (int32_t i = 0; i < count; i++)
-            *((uint32_t *)linear_va + i) = insts[i];
+            *((uint32_t *)va + i) = insts[i];
 
-        /* Clean dcache of linear alias to Point of Unification so the
-         * I-cache fill on other CPUs sees the new instructions. */
+        /* Restore original PTE and flush TLB */
+        *entry = ori_pte;
         {
-            uint64_t addr;
-            for (addr = linear_va; addr < linear_va + (uint64_t)count * 4; addr += 4)
-                asm volatile("dc cvau, %0" :: "r"(addr) : "memory");
+            uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
+            asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
             asm volatile("dsb ish" ::: "memory");
+            asm volatile("isb" ::: "memory");
         }
     } else {
-        /* set_memory mode: temporarily make page writable */
+        /* set_memory mode: use kernel's set_memory_rw/ro/x API to
+         * temporarily make the page writable. */
         unsigned long page_va = va & ~(page_size - 1);
 
         if (!kh_set_memory_rw || !kh_set_memory_ro) {

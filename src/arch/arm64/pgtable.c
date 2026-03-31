@@ -206,7 +206,10 @@ KP_EXPORT_SYMBOL(pgtable_entry_kernel);
  * given VA at EL1 (inner-shareable). */
 static inline void kh_flush_tlb_kernel_page(uint64_t va)
 {
-    uint64_t addr = va >> 12; /* TLBI takes page-aligned VA >> 12 */
+    /* TLBI VALE1IS operand: bits[43:0] = VA[55:12], bits[63:48] = ASID.
+     * Kernel pages use ASID 0. Must mask upper bits to avoid
+     * sign-extension of kernel VAs leaking into the ASID field. */
+    uint64_t addr = (va >> 12) & ((1ULL << 44) - 1);
     asm volatile("tlbi vale1is, %0" :: "r"(addr) : "memory");
     asm volatile("dsb ish" ::: "memory");
     asm volatile("isb" ::: "memory");

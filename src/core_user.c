@@ -11,6 +11,35 @@
 #include <platform.h>
 #include <log.h>
 
+/* Flush D-cache and I-cache for a memory region that contains code.
+ * Required after writing instructions to the ROX pool — the I-cache
+ * may still hold stale instructions from a previous allocation at the
+ * same address.
+ *
+ * ARM64 requires: DC CVAU (clean D-cache to PoU) → DSB ISH →
+ * IC IVAU (invalidate I-cache to PoU) → DSB ISH → ISB.
+ *
+ * Userspace uses __builtin___clear_cache which issues the SVC for
+ * CTR_EL0-based maintenance. */
+static void flush_code_cache(void *addr, size_t size)
+{
+#if defined(__aarch64__) || defined(__arm64__)
+#ifdef __USERSPACE__
+    __builtin___clear_cache((char *)addr, (char *)addr + size);
+#else
+    uint64_t start = (uint64_t)addr;
+    uint64_t end = start + size;
+    uint64_t line;
+    for (line = start; line < end; line += 4)
+        asm volatile("dc cvau, %0" :: "r"(line) : "memory");
+    asm volatile("dsb ish" ::: "memory");
+    for (line = start; line < end; line += 4)
+        asm volatile("ic ivau, %0" :: "r"(line) : "memory");
+    asm volatile("dsb ish\n\tisb" ::: "memory");
+#endif
+#endif
+}
+
 /* ---- Generic chain operations (shared by inline and FP hooks) ----
  *
  * hook_chain_rw_t and fp_hook_chain_rw_t share the same field layout
@@ -142,6 +171,7 @@ hook_err_t hook(void *func, void *replace, void **backup)
     }
 
     hook_mem_rox_write_disable(rox, sizeof(hook_chain_rox_t));
+    flush_code_cache(rox, sizeof(hook_chain_rox_t));
 
     hook_install(h);
 
@@ -227,6 +257,7 @@ hook_err_t hook_wrap_pri(void *func, int32_t argno, void *before,
         hook_chain_setup_transit(rox);
 
         hook_mem_rox_write_disable(rox, sizeof(hook_chain_rox_t));
+        flush_code_cache(rox, sizeof(hook_chain_rox_t));
 
         if (hook_mem_register_origin(func_addr, rox) != 0) {
             hook_mem_free_rox(rox, sizeof(hook_chain_rox_t));
@@ -343,6 +374,7 @@ hook_err_t fp_hook_wrap_pri(uintptr_t fp_addr, int32_t argno, void *before,
         fp_hook_chain_setup_transit(rox);
 
         hook_mem_rox_write_disable(rox, sizeof(fp_hook_chain_rox_t));
+        flush_code_cache(rox, sizeof(fp_hook_chain_rox_t));
 
         if (hook_mem_register_origin(fp_addr, rox) != 0) {
             hook_mem_free_rox(rox, sizeof(fp_hook_chain_rox_t));
