@@ -44,6 +44,12 @@ SECTIONS
         *(__versions)
     }
 
+    __param : {
+        __start___param = .;
+        *(__param)
+        __stop___param = .;
+    }
+
     .gnu.linkonce.this_module : {
         *(.kh.this_module)
     }

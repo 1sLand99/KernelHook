@@ -46,9 +46,9 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 _KH_HAVE_GCC := $(shell which $(CROSS_COMPILE)gcc 2>/dev/null)
 ifeq ($(_KH_HAVE_GCC),)
   # Try to find Android NDK
-  _KH_NDK_BASE := $(firstword $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
-                               $(wildcard $(ANDROID_NDK_ROOT)) \
-                               $(wildcard $(ANDROID_HOME)/ndk/*))
+  _KH_NDK_BASE := $(lastword $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
+                              $(wildcard $(ANDROID_NDK_ROOT)) \
+                              $(wildcard $(ANDROID_HOME)/ndk/*))
   ifneq ($(_KH_NDK_BASE),)
     _KH_NDK_PREBUILT := $(firstword $(wildcard $(_KH_NDK_BASE)/toolchains/llvm/prebuilt/*/bin))
     ifneq ($(_KH_NDK_PREBUILT),)
@@ -86,7 +86,7 @@ MODULE_EXIT_OFFSET ?=
 
 KH_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
-             -DMODULE_NAME_STR='"$(MODULE_NAME)"' \
+             -DMODULE_NAME='"$(MODULE_NAME)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
              -I$(KH_ROOT)/include \
