@@ -116,6 +116,12 @@ HAS_ROOT=0
 if $ADB shell "su -c id" 2>/dev/null | grep -q "uid=0"; then
     HAS_ROOT=1
     printf "  Root: ${GREEN}available${RESET}\n"
+    # Allow mprotect RW→RX on test binaries (SELinux execmod policy).
+    # platform_write_code() needs this to patch code pages.
+    if $ADB shell "which magiskpolicy" >/dev/null 2>&1; then
+        $ADB shell "su -c 'magiskpolicy --live \"allow shell shell_data_file file execmod\"'" >/dev/null 2>&1
+        printf "  SELinux: ${GREEN}execmod policy added${RESET}\n"
+    fi
 else
     printf "  Root: ${YELLOW}not available (some tests may skip)${RESET}\n"
 fi
@@ -238,29 +244,63 @@ if [ "$KMOD" -eq 1 ]; then
         SKIPPED=$((SKIPPED + 1))
     else
         KMOD_KO="$ROOT/tests/kmod/kh_test.ko"
+        KMOD_LOADER="$ROOT/tests/kmod/kmod_loader"
 
-        # Build freestanding .ko if not present
-        if [ ! -f "$KMOD_KO" ]; then
-            printf "  Building freestanding kh_test.ko...\n"
-            if ! (cd "$ROOT/tests/kmod" && make freestanding 2>&1 | tail -5); then
-                printf "  ${RED}FAIL${RESET} kmod build failed\n"
-                FAILED=$((FAILED + 1))
-                FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_build"
-                KMOD_KO=""
-            fi
+        # Query device kernel version for vermagic
+        DEV_UNAME=$($ADB shell "uname -r" 2>/dev/null | tr -d '[:space:]')
+        printf "  Device kernel: %s\n" "$DEV_UNAME"
+
+        # Detect NDK toolchain (prefer NDK clang for macOS cross-compilation)
+        if [ -z "${NDK_BIN:-}" ]; then
+            # Auto-detect Android NDK
+            for ndk_base in "$HOME/Library/Android/sdk/ndk" "$ANDROID_NDK_ROOT" "$ANDROID_HOME/ndk"; do
+                if [ -d "${ndk_base:-}" ]; then
+                    NDK_VER=$(ls "$ndk_base" 2>/dev/null | sort -V | tail -1)
+                    if [ -n "$NDK_VER" ]; then
+                        NDK_BIN="$ndk_base/$NDK_VER/toolchains/llvm/prebuilt/darwin-x86_64/bin"
+                        [ -d "$NDK_BIN" ] && break
+                        NDK_BIN="$ndk_base/$NDK_VER/toolchains/llvm/prebuilt/linux-x86_64/bin"
+                        [ -d "$NDK_BIN" ] && break
+                        NDK_BIN=""
+                    fi
+                fi
+            done
+        fi
+
+        # Build freestanding .ko (always rebuild to pick up correct vermagic)
+        printf "  Building freestanding kh_test.ko...\n"
+        MAKE_ARGS="freestanding KERNELRELEASE=$DEV_UNAME"
+        if [ -n "${NDK_BIN:-}" ] && [ -d "${NDK_BIN:-}" ]; then
+            # Use NDK clang for cross-compilation
+            MAKE_ARGS="$MAKE_ARGS CC=$NDK_BIN/aarch64-linux-android35-clang LD=$NDK_BIN/ld.lld CROSS_COMPILE=$NDK_BIN/llvm-"
+        fi
+        if ! (cd "$ROOT/tests/kmod" && make clean >/dev/null 2>&1; make $MAKE_ARGS 2>&1 | tail -5); then
+            printf "  ${RED}FAIL${RESET} kmod build failed\n"
+            FAILED=$((FAILED + 1))
+            FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_build"
+            KMOD_KO=""
         fi
 
         if [ -n "$KMOD_KO" ] && [ -f "$KMOD_KO" ]; then
             REMOTE_KO="/data/local/tmp/kh_test.ko"
+            REMOTE_LOADER="/data/local/tmp/kmod_loader"
             KMOD_OK=1
 
-            # Push .ko to device
+            # Push .ko and loader to device
             printf "  Pushing kh_test.ko to device...\n"
             if ! $ADB push "$KMOD_KO" "$REMOTE_KO" >/dev/null 2>&1; then
                 printf "  ${RED}FAIL${RESET} adb push failed for kh_test.ko\n"
                 FAILED=$((FAILED + 1))
                 FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_push"
                 KMOD_OK=0
+            fi
+
+            HAS_LOADER=0
+            if [ -f "$KMOD_LOADER" ]; then
+                if $ADB push "$KMOD_LOADER" "$REMOTE_LOADER" >/dev/null 2>&1; then
+                    $ADB shell "chmod +x $REMOTE_LOADER" 2>/dev/null
+                    HAS_LOADER=1
+                fi
             fi
 
             if [ "$KMOD_OK" -eq 1 ]; then
@@ -302,15 +342,32 @@ if [ "$KMOD" -eq 1 ]; then
                 $ADB shell "su -c 'dmesg -c'" >/dev/null 2>&1 || true
 
                 # Load module with kallsyms_addr parameter
+                # Try kmod_loader first (bypasses vermagic/modversions checks),
+                # fall back to insmod
                 printf "  Loading kh_test.ko (kallsyms_addr=%s)...\n" "$KALLSYMS_ADDR"
-                INSMOD_OUT=$($ADB shell "su -c 'insmod $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
-                INSMOD_RC=$?
+                INSMOD_OUT=""
+                INSMOD_RC=1
+
+                if [ "$HAS_LOADER" -eq 1 ]; then
+                    printf "  Trying kmod_loader (finit_module with relaxed checks)...\n"
+                    INSMOD_OUT=$($ADB shell "su -c '$REMOTE_LOADER $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
+                    INSMOD_RC=$?
+                    if [ "$INSMOD_RC" -ne 0 ]; then
+                        printf "  ${YELLOW}WARN${RESET} kmod_loader failed: %s\n" "$INSMOD_OUT"
+                        printf "  Falling back to insmod...\n"
+                    fi
+                fi
 
                 if [ "$INSMOD_RC" -ne 0 ]; then
-                    printf "  ${RED}FAIL${RESET} insmod failed: %s\n" "$INSMOD_OUT"
+                    INSMOD_OUT=$($ADB shell "su -c 'insmod $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
+                    INSMOD_RC=$?
+                fi
+
+                if [ "$INSMOD_RC" -ne 0 ]; then
+                    printf "  ${RED}FAIL${RESET} module load failed: %s\n" "$INSMOD_OUT"
                     # Check for SELinux denial
                     if echo "$INSMOD_OUT" | grep -qi "permission denied\|selinux\|avc:"; then
-                        printf "       SELinux may be blocking insmod.\n"
+                        printf "       SELinux may be blocking module load.\n"
                         printf "       Fix: adb shell su -c 'setenforce 0'\n"
                     fi
                     # Check for signature enforcement
@@ -319,7 +376,7 @@ if [ "$KMOD" -eq 1 ]; then
                         printf "       Fix: boot with module signature enforcement disabled.\n"
                     fi
                     FAILED=$((FAILED + 1))
-                    FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_insmod"
+                    FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_load"
                     KMOD_OK=0
                 fi
 
@@ -381,8 +438,8 @@ EOF
                     fi
                 fi
 
-                # Cleanup pushed .ko from device
-                $ADB shell "rm -f $REMOTE_KO" 2>/dev/null || true
+                # Cleanup pushed files from device
+                $ADB shell "rm -f $REMOTE_KO $REMOTE_LOADER" 2>/dev/null || true
             fi
         fi
     fi
