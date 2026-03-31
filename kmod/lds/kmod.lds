@@ -45,7 +45,7 @@ SECTIONS
     }
 
     .gnu.linkonce.this_module : {
-        *(.gnu.linkonce.this_module)
+        *(.kh.this_module)
     }
 
     .data : {

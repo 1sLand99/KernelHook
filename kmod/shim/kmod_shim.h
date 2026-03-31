@@ -211,8 +211,11 @@ struct modversion_info {
         void (*exit)(void);                                             \
         char __pad3[THIS_MODULE_SIZE - MODULE_EXIT_OFFSET - 8];        \
     };                                                                  \
+    /* Use .kh.this_module instead of .gnu.linkonce.this_module to avoid
+     * lld discarding the section during -r linking (linkonce semantics).
+     * The linker script renames it to .gnu.linkonce.this_module. */     \
     struct module __this_module                                         \
-        __used __aligned(64) __section(".gnu.linkonce.this_module") = { \
+        __used __aligned(64) __section(".kh.this_module") = {           \
             .__pre_name = {0},                                          \
             .name = MODULE_NAME,                                        \
             .init = init_module,                                        \
