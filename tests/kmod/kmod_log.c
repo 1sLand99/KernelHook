@@ -19,7 +19,10 @@ log_func_t kp_log_func = NULL;
 int kmod_log_init(void)
 {
 #ifdef KMOD_FREESTANDING
-    kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("printk");
+    /* Kernel 6.1+ exports _printk; older kernels export printk */
+    kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("_printk");
+    if (!kp_log_func)
+        kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("printk");
     if (!kp_log_func) return -1;
 #else
     kp_log_func = (log_func_t)printk;

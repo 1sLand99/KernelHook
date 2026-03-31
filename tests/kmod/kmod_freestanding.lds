@@ -9,9 +9,23 @@
 SECTIONS
 {
     .text : {
-        *(.init.text)
-        *(.exit.text)
         *(.text .text.*)
+    }
+
+    .plt : {
+        *(.plt)
+    }
+
+    .init.plt : {
+        *(.init.plt)
+    }
+
+    .init.text : {
+        *(.init.text)
+    }
+
+    .exit.text : {
+        *(.exit.text)
     }
 
     .transit.data : {
@@ -24,6 +38,14 @@ SECTIONS
 
     .modinfo : {
         *(.modinfo)
+    }
+
+    __versions : {
+        *(__versions)
+    }
+
+    .gnu.linkonce.this_module : {
+        *(.gnu.linkonce.this_module)
     }
 
     .data : {

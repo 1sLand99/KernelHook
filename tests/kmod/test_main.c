@@ -80,6 +80,12 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook test harness for kernel-context hook verification");
 
+#ifdef KMOD_FREESTANDING
+MODULE_VERSIONS();
+MODULE_VERMAGIC();
+MODULE_THIS_MODULE();
+#endif
+
 static unsigned long kallsyms_addr = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex)");
@@ -363,7 +369,7 @@ results:
     else
         pr_info(KH_TEST_TAG "ALL TESTS PASSED\n");
 
-    return 0;  /* always return 0 so the module loads (for dmesg parsing) */
+    return -1;  /* DEBUG: verify init runs by returning error */
 }
 
 static void __exit kh_test_exit(void)

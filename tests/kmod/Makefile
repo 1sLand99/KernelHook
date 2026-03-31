@@ -19,8 +19,15 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 
+# Kernel release string (pass from device: KERNELRELEASE=$(uname -r))
+KERNELRELEASE ?= unknown
+
+# Construct vermagic: "<uname -r> SMP preempt mod_unload modversions aarch64"
+VERMAGIC ?= $(KERNELRELEASE) SMP preempt mod_unload modversions aarch64
+
 # Freestanding build flags
 FS_CFLAGS := -DKMOD_FREESTANDING \
+             -DVERMAGIC_STRING='"$(VERMAGIC)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
              -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64 \
@@ -29,8 +36,10 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-parameter
 
 # Source files for freestanding build
-FS_TEST_SRCS := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c
-FS_CORE_SRCS := $(KH_ROOT)/src/hmem.c \
+FS_TEST_SRCS := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c kmod_transit_setup.c
+FS_ASM_SRCS  := kmod_plt_stub.S
+FS_CORE_SRCS := $(KH_ROOT)/src/core_user.c \
+                $(KH_ROOT)/src/hmem.c \
                 $(KH_ROOT)/src/ksyms.c \
                 $(KH_ROOT)/src/arch/arm64/inline.c \
                 $(KH_ROOT)/src/arch/arm64/transit.c \
@@ -38,6 +47,7 @@ FS_CORE_SRCS := $(KH_ROOT)/src/hmem.c \
                 $(KH_ROOT)/src/arch/arm64/pgtable.c
 
 FS_TEST_OBJS := $(FS_TEST_SRCS:.c=.fs.o)
+FS_ASM_OBJS  := $(FS_ASM_SRCS:.S=.fs.o)
 FS_CORE_OBJS := $(patsubst $(KH_ROOT)/%.c,%.fs.o,$(FS_CORE_SRCS))
 
 .PHONY: all clean test freestanding
@@ -47,10 +57,14 @@ all:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 # ---- Approach B: Freestanding ----
-freestanding: kh_test.ko
+freestanding: kh_test.ko kmod_loader
 	@echo "Freestanding kh_test.ko built successfully"
 	@file kh_test.ko
 	@$(CROSS_COMPILE)objdump -s -j .modinfo $< 2>/dev/null | tail -5 || true
+
+# ---- kmod_loader: finit_module(2) wrapper for loading without modversions/vermagic ----
+kmod_loader: kmod_loader.c
+	$(CC) -static -O2 -o $@ $<
 
 %.fs.o: %.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
@@ -59,7 +73,10 @@ src/%.fs.o: $(KH_ROOT)/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
-kh_test.ko: $(FS_TEST_OBJS) $(FS_CORE_OBJS)
+%.fs.o: %.S
+	$(CC) $(FS_CFLAGS) -c $< -o $@
+
+kh_test.ko: $(FS_TEST_OBJS) $(FS_ASM_OBJS) $(FS_CORE_OBJS)
 	$(LD) -r -T kmod_freestanding.lds -o $@ $^
 
 # ---- Test (delegates to project-level Android test runner) ----
@@ -69,5 +86,5 @@ test:
 # ---- Clean ----
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean 2>/dev/null || true
-	rm -f *.fs.o *.ko
+	rm -f *.fs.o *.ko kmod_loader
 	rm -rf src/
