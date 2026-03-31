@@ -36,18 +36,27 @@ int main(void)
 /* ---- Target functions ----
  * Compiled with -mbranch-protection=standard, the compiler will generate
  * BTI C (leaf) or PACIASP (non-leaf) prologues automatically.
- * NOP padding ensures enough instructions for the 4/5-instruction trampoline. */
+ * NOP padding ensures enough instructions for the 4/5-instruction trampoline.
+ *
+ * On Android, aligned(4096) + non-static ensures the target lands on its
+ * own page, preventing same-page mprotect issues with library code. */
 
-__attribute__((noinline))
-static int target_leaf_add(int a, int b)
+#ifdef __ANDROID__
+#define SEC_TARGET __attribute__((noinline, visibility("hidden"), aligned(4096)))
+#else
+#define SEC_TARGET __attribute__((noinline))
+#endif
+
+SEC_TARGET
+int target_leaf_add(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop\n\tnop");
     return a + b;
 }
 
 /* Non-leaf: calls target_leaf_add to force a stack frame and PACIASP */
-__attribute__((noinline))
-static int target_nonleaf_add(int a, int b)
+SEC_TARGET
+int target_nonleaf_add(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop\n\tnop");
     return target_leaf_add(a, b);

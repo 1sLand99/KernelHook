@@ -58,9 +58,18 @@ TEST(linux_mprotect_wx_enforced)
  * On Linux aarch64 (non-Android), X18 is available for SCS.
  * These target functions use .inst to emit SCS push/pop instructions
  * that would fault on macOS (X18 is platform-reserved).
+ *
+ * On Android, aligned(4096) + non-static ensures the target lands on its
+ * own page, preventing same-page mprotect issues with library code.
  */
-__attribute__((noinline, naked))
-static int target_scs_prologue(int a, int b)
+#ifdef __ANDROID__
+#define LA64_TARGET __attribute__((noinline, naked, visibility("hidden"), aligned(4096)))
+#else
+#define LA64_TARGET __attribute__((noinline, naked))
+#endif
+
+LA64_TARGET
+int target_scs_prologue(int a, int b)
 {
     asm volatile(
         ".inst 0xf800845e\n"    /* str x30, [x18], #8  (SCS push) */
@@ -75,8 +84,8 @@ static int target_scs_prologue(int a, int b)
     );
 }
 
-__attribute__((noinline, naked))
-static int target_bti_scs(int a, int b)
+LA64_TARGET
+int target_bti_scs(int a, int b)
 {
     asm volatile(
         ".inst 0xd503245f\n"    /* bti c */
@@ -95,8 +104,8 @@ static int target_bti_scs(int a, int b)
 
 TEST(linux_scs_hook_basic)
 {
-#ifndef __linux__
-    SKIP_TEST("Linux-only: SCS requires X18 (reserved on macOS)");
+#if !defined(__linux__) || defined(__ANDROID__)
+    SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);
@@ -121,8 +130,8 @@ TEST(linux_scs_hook_basic)
 
 TEST(linux_bti_scs_interaction)
 {
-#ifndef __linux__
-    SKIP_TEST("Linux-only: BTI+SCS requires X18 (reserved on macOS)");
+#if !defined(__linux__) || defined(__ANDROID__)
+    SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
     int rc = hook_mem_user_init();
     ASSERT_EQ(rc, 0);

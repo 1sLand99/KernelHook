@@ -18,9 +18,16 @@
 #endif
 
 /* ---- Target for Bionic hook test ---- */
+/* aligned(4096) + visibility("hidden") ensures the target lands on its
+ * own page, preventing same-page mprotect issues with library code
+ * (transit_body orphan sections may land nearby in .text). */
 
+#ifdef __ANDROID__
+__attribute__((noinline, visibility("hidden"), aligned(4096)))
+#else
 __attribute__((noinline))
-static int android_target(int a, int b)
+#endif
+int android_target(int a, int b)
 {
     asm volatile("nop\n\tnop\n\tnop");
     return a + b;
