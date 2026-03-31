@@ -45,10 +45,11 @@ CROSS_COMPILE ?= aarch64-linux-gnu-
 # Auto-detect: if the default gcc is missing, try Android NDK clang
 _KH_HAVE_GCC := $(shell which $(CROSS_COMPILE)gcc 2>/dev/null)
 ifeq ($(_KH_HAVE_GCC),)
-  # Try to find Android NDK
-  _KH_NDK_BASE := $(lastword $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
-                              $(wildcard $(ANDROID_NDK_ROOT)) \
-                              $(wildcard $(ANDROID_HOME)/ndk/*))
+  # Try to find Android NDK (filter .zip files that may appear in sdk/ndk/)
+  _KH_NDK_CANDIDATES := $(wildcard $(HOME)/Library/Android/sdk/ndk/*) \
+                         $(wildcard $(ANDROID_NDK_ROOT)) \
+                         $(wildcard $(ANDROID_HOME)/ndk/*)
+  _KH_NDK_BASE := $(lastword $(filter-out %.zip,$(_KH_NDK_CANDIDATES)))
   ifneq ($(_KH_NDK_BASE),)
     _KH_NDK_PREBUILT := $(firstword $(wildcard $(_KH_NDK_BASE)/toolchains/llvm/prebuilt/*/bin))
     ifneq ($(_KH_NDK_PREBUILT),)
