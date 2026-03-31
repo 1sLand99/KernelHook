@@ -116,7 +116,13 @@ typedef struct
     int32_t relo_insts_num;
     uint32_t origin_insts[TRAMPOLINE_NUM] __aligned(8);
     uint32_t tramp_insts[TRAMPOLINE_NUM] __aligned(8);
-    uint32_t relo_insts[RELOCATE_INST_NUM] __aligned(8);
+    /* Relocated code with kCFI hash prefix.
+     * _relo_cfi_hash = CFI type hash (copied from origin_addr - 4).
+     * relo_insts[0..] = relocated instructions.
+     * relo_addr points to &relo_insts[0], so *(relo_addr - 4) == _relo_cfi_hash.
+     * On non-kCFI kernels _relo_cfi_hash is harmless unused data. */
+    uint32_t _relo_cfi_hash;
+    uint32_t relo_insts[RELOCATE_INST_NUM];
 } hook_t __aligned(8);
 
 /* ---- Per-item local storage ---- */

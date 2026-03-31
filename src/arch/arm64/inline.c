@@ -314,6 +314,17 @@ hook_err_t hook_prepare(hook_t *hook)
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     hook->relo_insts_num += branch_from_to(buf, back_src_addr, back_dst_addr);
 
+#ifndef __USERSPACE__
+    /* Copy the original function's kCFI type hash to the relocated code
+     * prefix. kCFI checks *(target - 4) before every BLR; placing the
+     * hash at _relo_cfi_hash (immediately before relo_insts[0]) allows
+     * the backup pointer returned by hook() to pass CFI validation.
+     * On non-kCFI kernels this is harmless — just 4 bytes of data.
+     * In userspace there is no kCFI, and origin_addr may not have
+     * readable memory at -4, so skip. */
+    hook->_relo_cfi_hash = *(uint32_t *)(hook->origin_addr - 4);
+#endif
+
     return HOOK_NO_ERR;
 }
 KP_EXPORT_SYMBOL(hook_prepare);
