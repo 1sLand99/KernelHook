@@ -229,6 +229,16 @@ void hook_mem_cleanup(void)
     logki("hmem: memory manager cleaned up");
 }
 
+uint64_t hook_mem_rox_pool_base(void)
+{
+    return g_rox_pool.pool_base;
+}
+
+uint64_t hook_mem_rox_pool_size(void)
+{
+    return g_rox_pool.pool_size;
+}
+
 void *hook_mem_alloc_rox(size_t size)
 {
     return bitmap_alloc(&g_rox_pool, size);

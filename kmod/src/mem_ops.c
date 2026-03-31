@@ -225,5 +225,19 @@ int kmod_hook_mem_init(void)
 
 void kmod_hook_mem_cleanup(void)
 {
+    /* The ROX pool was made read-only + executable via set_memory_ro/x.
+     * vfree() internally calls clear_page() which writes to the pages.
+     * We must restore write permission before freeing, otherwise the
+     * write to RO pages causes a fatal exception (clear_page panic). */
+    extern uint64_t hook_mem_rox_pool_base(void);
+    extern uint64_t hook_mem_rox_pool_size(void);
+
+    uint64_t rox_base = hook_mem_rox_pool_base();
+    uint64_t rox_size = hook_mem_rox_pool_size();
+    if (rox_base && rox_size) {
+        int npages = (int)(rox_size / PAGE_SIZE);
+        kmod_set_memory_rw((unsigned long)rox_base, npages);
+    }
+
     hook_mem_cleanup();
 }

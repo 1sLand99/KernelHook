@@ -96,7 +96,8 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -march=armv8.5-a -O2 -Wall -Wextra -Werror \
              -Wno-unused-parameter \
              -Wno-unused-function \
-             -Wno-unknown-sanitizers
+             -Wno-unknown-sanitizers \
+             -fsanitize=kcfi
 
 # Append CRC defines if provided
 ifneq ($(MODULE_LAYOUT_CRC),)
