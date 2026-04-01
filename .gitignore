@@ -14,6 +14,8 @@ _kh_kmod/
 modules.order
 Module.symvers
 kmod_loader
+!tools/kmod_loader/
+!tools/kmod_loader/README.md
 
 # IDE
 .vscode/
