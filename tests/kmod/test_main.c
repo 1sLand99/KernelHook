@@ -51,9 +51,15 @@
  *   CONFIG_ARM64_BTI_KERNEL=y      (BTI tests)
  */
 
-#ifdef KMOD_FREESTANDING
+#if defined(KH_SDK_MODE)
+/* Mode B: SDK — kernelhook.ko provides the API */
+#include <kernelhook/hook.h>
+#include <kernelhook/types.h>
+#elif defined(KMOD_FREESTANDING)
+/* Mode A: freestanding shim */
 #include "kmod_shim.h"
 #else
+/* Mode C: standard kernel headers */
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -63,18 +69,22 @@
 #ifdef CONFIG_KPROBES
 #include <linux/kprobes.h>
 #endif
-#endif /* KMOD_FREESTANDING */
+#endif
 
+#if !defined(KH_SDK_MODE)
 #include <ktypes.h>
 #include <hook.h>
 #include <hmem.h>
 #include <ksyms.h>
 #include <arch/arm64/pgtable.h>
+#endif
 #include "kmod_mem_ops.h"
 #include "test_hook_kernel.h"
 
+#if !defined(KH_SDK_MODE)
 /* kmod_log.c — no dedicated header */
 extern int kmod_log_init(void);
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
@@ -86,12 +96,14 @@ MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 #endif
 
+#if !defined(KH_SDK_MODE)
 /* kallsyms_addr: patched directly into ELF by kmod_loader before loading.
  * This avoids module_param, which triggers shadow-CFI indirect call checks
  * on 5.10 kernels — the param handler isn't in the CFI shadow.
  * Initialized to 1 (not 0) so the linker places it in .data, not .bss —
  * the loader needs actual file bytes to patch. */
 unsigned long kallsyms_addr = 1;
+#endif
 
 #define KH_TEST_TAG "kh_test: "
 
@@ -102,11 +114,13 @@ int tests_run;
 int tests_passed;
 int tests_failed;
 
+#if !defined(KH_SDK_MODE)
 /*
  * Track whether the KernelHook subsystem was successfully initialised so
  * that kh_test_exit() knows whether cleanup is needed.
  */
 static int kh_initialized = 0;
+#endif
 
 /* -------------------------------------------------------------------------
  * Test framework macros
@@ -133,7 +147,7 @@ static int kh_initialized = 0;
  * (Kbuild path only; CONFIG_KPROBES must be enabled)
  * ---------------------------------------------------------------------- */
 
-#if !defined(KMOD_FREESTANDING) && defined(CONFIG_KPROBES)
+#if !defined(KH_SDK_MODE) && !defined(KMOD_FREESTANDING) && defined(CONFIG_KPROBES)
 static unsigned long find_kallsyms_via_kprobes(void)
 {
     struct kprobe kp = { .symbol_name = "kallsyms_lookup_name" };
@@ -225,6 +239,7 @@ static void test_bti_detection(void)
  * Phase 3: Subsystem initialisation
  * ---------------------------------------------------------------------- */
 
+#if !defined(KH_SDK_MODE)
 /*
  * kh_subsystem_init — resolve kallsyms, then bring up ksyms → log → pgtable
  * → hook_mem in order.
@@ -307,6 +322,7 @@ static void kh_subsystem_cleanup(void)
         kh_initialized = 0;
     }
 }
+#endif /* !KH_SDK_MODE */
 
 /* -------------------------------------------------------------------------
  * Module init / exit
@@ -314,13 +330,17 @@ static void kh_subsystem_cleanup(void)
 
 static int __init kh_test_init(void)
 {
+#if !defined(KH_SDK_MODE)
     int rc;
+#endif
 
 
-#ifdef KMOD_FREESTANDING
-    pr_info(KH_TEST_TAG "Build: freestanding (Approach B)\n");
+#if defined(KH_SDK_MODE)
+    pr_info(KH_TEST_TAG "Build: SDK (Mode B)\n");
+#elif defined(KMOD_FREESTANDING)
+    pr_info(KH_TEST_TAG "Build: freestanding (Mode A)\n");
 #else
-    pr_info(KH_TEST_TAG "Build: Kbuild (Approach A)\n");
+    pr_info(KH_TEST_TAG "Build: Kbuild (Mode C)\n");
 #endif
     /* Reset counters */
     tests_run    = 0;
@@ -343,6 +363,7 @@ static int __init kh_test_init(void)
     test_pac_detection();
     test_bti_detection();
 
+#if !defined(KH_SDK_MODE)
     /* ------------------------------------------------------------------
      * Phase 3: Subsystem initialisation
      * ---------------------------------------------------------------- */
@@ -355,6 +376,7 @@ static int __init kh_test_init(void)
     }
     kh_initialized = 1;
     pr_info(KH_TEST_TAG "Subsystem init OK\n");
+#endif
 
     /* ------------------------------------------------------------------
      * Phase 4: Hook tests
@@ -370,7 +392,9 @@ static int __init kh_test_init(void)
     test_hook_uninstall_restore();
     test_hook_chain_priority();
 
+#if !defined(KH_SDK_MODE)
 results:
+#endif
     pr_info(KH_TEST_TAG "=== Results: %d run, %d passed, %d failed ===\n",
             tests_run, tests_passed, tests_failed);
 
@@ -384,7 +408,9 @@ results:
 
 static void __exit kh_test_exit(void)
 {
+#if !defined(KH_SDK_MODE)
     kh_subsystem_cleanup();
+#endif
     pr_info(KH_TEST_TAG "module unloaded\n");
 }
 

@@ -11,13 +11,21 @@
  *   6. Hook chain priority ordering
  */
 
-#ifdef KMOD_FREESTANDING
+#if defined(KH_SDK_MODE)
+/* Mode B: SDK — kernelhook.ko provides the API */
+#include <kernelhook/hook.h>
+#include <kernelhook/types.h>
+#elif defined(KMOD_FREESTANDING)
+/* Mode A: freestanding shim */
 #include "kmod_shim.h"
 #else
+/* Mode C: standard kernel headers */
 #include <linux/kernel.h>
 #endif
 
+#if !defined(KH_SDK_MODE)
 #include <hook.h>
+#endif
 #include "test_hook_kernel.h"
 
 #define KH_TEST_TAG "kh_test: "

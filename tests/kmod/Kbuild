@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Kbuild for KernelHook kernel module test harness (Approach A)
+# Kbuild for kh_test.ko (Mode C — standard kernel build)
 #
 # Usage:
 #   make -C /lib/modules/$(uname -r)/build M=$(pwd) modules
@@ -9,22 +9,17 @@
 #   make -C /path/to/android-kernel/out/common M=$(pwd) ARCH=arm64 \
 #        CROSS_COMPILE=aarch64-linux-gnu- modules
 
-obj-m := kh_test.o
-
-# KernelHook project root
 KH_ROOT := $(src)/../..
 
-# Test module sources
-kh_test-y := test_main.o test_hook_kernel.o kmod_mem_ops.o kmod_log.o
+obj-m := kh_test.o
+kh_test-y := test_main.o test_hook_kernel.o \
+    kmod_mem_ops.o kmod_log.o kmod_transit_setup.o kmod_plt_stub.o \
+    $(KH_ROOT)/src/core_user.o \
+    $(KH_ROOT)/src/hmem.o \
+    $(KH_ROOT)/src/ksyms.o \
+    $(KH_ROOT)/src/arch/arm64/inline.o \
+    $(KH_ROOT)/src/arch/arm64/transit.o \
+    $(KH_ROOT)/src/arch/arm64/insn.o \
+    $(KH_ROOT)/src/arch/arm64/pgtable.o
 
-# KernelHook core sources (kernel path: no __USERSPACE__)
-kh_test-y += $(KH_ROOT)/src/hmem.o
-kh_test-y += $(KH_ROOT)/src/ksyms.o
-kh_test-y += $(KH_ROOT)/src/arch/arm64/inline.o
-kh_test-y += $(KH_ROOT)/src/arch/arm64/transit.o
-kh_test-y += $(KH_ROOT)/src/arch/arm64/insn.o
-kh_test-y += $(KH_ROOT)/src/arch/arm64/pgtable.o
-
-# Include paths
-ccflags-y += -I$(KH_ROOT)/include
-ccflags-y += -I$(KH_ROOT)/include/arch/arm64
+ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src)

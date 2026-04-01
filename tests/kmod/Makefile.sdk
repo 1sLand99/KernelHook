@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Build kh_test.ko in SDK mode (depends on kernelhook.ko at runtime)
+#
+# Usage: make -f Makefile.sdk module
+
+MODULE_NAME  := kh_test
+MODULE_SRCS  := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c kmod_transit_setup.c
+KERNELHOOK_DIR := $(shell cd ../../kmod && pwd)
+include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
