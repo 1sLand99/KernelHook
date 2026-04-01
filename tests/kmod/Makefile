@@ -76,27 +76,10 @@ all:
 	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 # ---- Approach B: Freestanding ----
-freestanding: kh_test.ko kmod_loader
+freestanding: kh_test.ko
 	@echo "Freestanding kh_test.ko built successfully"
 	@file kh_test.ko
 	@$(CROSS_COMPILE)objdump -s -j .modinfo $< 2>/dev/null | tail -5 || true
-
-# ---- Probe module (embedded in kmod_loader for binary offset probing) ----
-probe_module.ko: probe_module.c kmod_plt_stub.S
-	$(CC) $(FS_CFLAGS) -DMODULE_NAME='"kh_probe"' -c probe_module.c -o probe_module.fs.o
-	$(CC) $(FS_CFLAGS) -c kmod_plt_stub.S -o probe_plt.fs.o
-	$(LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe_module.fs.o probe_plt.fs.o
-
-probe_module_embed.h: probe_module.ko
-	@echo "// Auto-generated — do not edit" > $@
-	@echo "static const unsigned char probe_ko_data[] = {" >> $@
-	@xxd -i < $< >> $@
-	@echo "};" >> $@
-	@echo "static const unsigned int probe_ko_size = sizeof(probe_ko_data);" >> $@
-
-# ---- kmod_loader: adaptive module loader with embedded probe ----
-kmod_loader: kmod_loader.c probe_module_embed.h
-	$(CC) -DEMBED_PROBE_KO -static -O2 -o $@ $<
 
 %.fs.o: %.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
@@ -118,5 +101,5 @@ test:
 # ---- Clean ----
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean 2>/dev/null || true
-	rm -f *.fs.o *.ko kmod_loader probe_module_embed.h
+	rm -f *.fs.o *.ko
 	rm -rf src/
