@@ -13,7 +13,7 @@
  */
 
 #ifdef KMOD_FREESTANDING
-#include "../../shim/kmod_shim.h"
+#include "../../kmod/shim/kmod_shim.h"
 #else
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -28,8 +28,8 @@
 
 #include <arch/arm64/pgtable.h>
 
-#include "../../src/compat.h"
-#include "../../src/mem_ops.h"
+#include "../../kmod/src/compat.h"
+#include "../../kmod/src/mem_ops.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
