@@ -12,24 +12,33 @@
  *   insmod hello_hook.ko kallsyms_addr=0x<addr>
  */
 
-#ifdef KMOD_FREESTANDING
+#if defined(KH_SDK_MODE)
+/* Mode B: SDK — kernelhook.ko provides the API */
+#include <kernelhook/hook.h>
+#include <kernelhook/types.h>
+#elif defined(KMOD_FREESTANDING)
+/* Mode A: freestanding shim */
 #include "../../kmod/shim/kmod_shim.h"
-#else
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/init.h>
-#endif
-
 #include <ktypes.h>
 #include <hook.h>
 #include <ksyms.h>
 #include <log.h>
 #include <hmem.h>
-
 #include <arch/arm64/pgtable.h>
-
 #include "../../kmod/src/compat.h"
 #include "../../kmod/src/mem_ops.h"
+#else
+/* Mode C: standard kernel headers */
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/init.h>
+#include <ktypes.h>
+#include <hook.h>
+#include <ksyms.h>
+#include <log.h>
+#include <hmem.h>
+#include <arch/arm64/pgtable.h>
+#endif
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
@@ -41,9 +50,11 @@ MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 #endif
 
+#if !defined(KH_SDK_MODE)
 static unsigned long kallsyms_addr = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required)");
+#endif
 
 /* The function we hooked — saved for unhook on exit */
 static void *hooked_func = NULL;
@@ -71,6 +82,7 @@ static int __init hello_hook_init(void)
 {
     int rc;
 
+#if !defined(KH_SDK_MODE)
     rc = kmod_compat_init(kallsyms_addr);
     if (rc) {
         pr_err("hello_hook: compat init failed (%d)\n", rc);
@@ -95,6 +107,7 @@ static int __init hello_hook_init(void)
         extern void kh_write_insts_init(void);
         kh_write_insts_init();
     }
+#endif
 
     /* Resolve target — prefer do_sys_openat2 (kernel ≥ 5.6), fall back to
      * do_sys_open (older kernels). */
@@ -103,14 +116,18 @@ static int __init hello_hook_init(void)
         target = (void *)ksyms_lookup("do_sys_open");
     if (!target) {
         logke("hello_hook: do_sys_openat2 / do_sys_open not found");
+#if !defined(KH_SDK_MODE)
         kmod_hook_mem_cleanup();
+#endif
         return -ENOENT;
     }
 
     hook_err_t err = hook_wrap4(target, open_before, NULL, NULL);
     if (err != HOOK_NO_ERR) {
         logke("hello_hook: hook_wrap4 failed (%d)", (int)err);
+#if !defined(KH_SDK_MODE)
         kmod_hook_mem_cleanup();
+#endif
         return -1;
     }
 
@@ -126,7 +143,9 @@ static void __exit hello_hook_exit(void)
         hooked_func = NULL;
         logki("hello_hook: unhooked");
     }
+#if !defined(KH_SDK_MODE)
     kmod_hook_mem_cleanup();
+#endif
 }
 
 module_init(hello_hook_init);

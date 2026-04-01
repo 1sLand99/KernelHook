@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Kbuild for hello_hook example (Mode C — standard kernel build)
+#
+# Standalone (core library compiled in):
+#   make -C /path/to/kernel M=$(pwd) modules
+#
+# SDK (depends on kernelhook.ko):
+#   make -C /path/to/kernel M=$(pwd) modules EXTRA_CFLAGS="-DKH_SDK_MODE"
+
+KH_ROOT := $(src)/../..
+
+obj-m := hello_hook.o
+hello_hook-y := hello_hook_main.o \
+    $(KH_ROOT)/src/core_user.o \
+    $(KH_ROOT)/src/hmem.o \
+    $(KH_ROOT)/src/ksyms.o \
+    $(KH_ROOT)/src/arch/arm64/inline.o \
+    $(KH_ROOT)/src/arch/arm64/transit.o \
+    $(KH_ROOT)/src/arch/arm64/insn.o \
+    $(KH_ROOT)/src/arch/arm64/pgtable.o
+
+ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64
