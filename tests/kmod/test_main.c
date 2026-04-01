@@ -86,9 +86,12 @@ MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 #endif
 
-static unsigned long kallsyms_addr = 0;
-module_param(kallsyms_addr, ulong, 0444);
-MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex)");
+/* kallsyms_addr: patched directly into ELF by kmod_loader before loading.
+ * This avoids module_param, which triggers shadow-CFI indirect call checks
+ * on 5.10 kernels — the param handler isn't in the CFI shadow.
+ * Initialized to 1 (not 0) so the linker places it in .data, not .bss —
+ * the loader needs actual file bytes to patch. */
+unsigned long kallsyms_addr = 1;
 
 #define KH_TEST_TAG "kh_test: "
 
@@ -313,7 +316,6 @@ static int __init kh_test_init(void)
 {
     int rc;
 
-    pr_info(KH_TEST_TAG "=== KernelHook Kernel Module Test Harness ===\n");
 
 #ifdef KMOD_FREESTANDING
     pr_info(KH_TEST_TAG "Build: freestanding (Approach B)\n");

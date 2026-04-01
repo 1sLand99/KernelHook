@@ -297,6 +297,27 @@ struct modversion_info {
 #define MODULE_EXIT_OFFSET 0x3d8
 #endif
 
+/* Shadow-CFI permissive stub (CONFIG_CFI_CLANG + CONFIG_CFI_CLANG_SHADOW).
+ *
+ * On 5.10/5.15 GKI kernels, shadow-based CFI uses mod->cfi_check to validate
+ * indirect calls into modules. find_module_sections() sets it by looking up
+ * the GLOBAL symbol "__cfi_check" in the module's symtab. Without it, any
+ * indirect call (including do_one_initcall → mod->init) panics.
+ *
+ * On 6.1+ kCFI kernels, this symbol is found but the field is unused — kCFI
+ * validates calls via inline type-hash checks, not the shadow + callback
+ * mechanism. So this stub is harmless on kCFI.
+ *
+ * Declared weak so multiple TUs including this header don't conflict. */
+void __attribute__((weak, used, section(".text"))) __cfi_check(
+    unsigned long id, void *ptr, void *diag)
+{
+    /* Accept all indirect calls to this module (permissive). */
+}
+
+/* struct module with init and exit at the correct offsets for the target kernel.
+ * cfi_check is NOT included here — it's set by find_module_sections via the
+ * __cfi_check symbol name lookup. We just need the symbol to exist. */
 #define MODULE_THIS_MODULE()                                            \
     extern int  init_module(void);                                      \
     extern void cleanup_module(void);                                   \
@@ -309,9 +330,6 @@ struct modversion_info {
         void (*exit)(void);                                             \
         char __pad3[THIS_MODULE_SIZE - MODULE_EXIT_OFFSET - 8];        \
     };                                                                  \
-    /* Use .kh.this_module instead of .gnu.linkonce.this_module to avoid
-     * lld discarding the section during -r linking (linkonce semantics).
-     * The linker script renames it to .gnu.linkonce.this_module. */     \
     struct module __this_module                                         \
         __used __aligned(64) __section(".kh.this_module") = {           \
             .__pre_name = {0},                                          \

@@ -33,8 +33,26 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64 \
              -I$(PWD) \
              -march=armv8.5-a -O2 -Wall -Wextra -Werror \
-             -Wno-unused-parameter -Wno-unused-function \
-             -fsanitize=kcfi
+             -Wno-unused-parameter -Wno-unused-function
+
+# kCFI: only for 6.1+ kernels (CONFIG_CFI_CLANG uses kCFI).
+# 5.10/5.15 use shadow-based CFI — kCFI metadata causes panic.
+KVER_MAJOR := $(word 1,$(subst ., ,$(KERNELRELEASE)))
+KVER_MINOR := $(word 2,$(subst ., ,$(KERNELRELEASE)))
+KCFI_OK := $(shell [ "$(KVER_MAJOR)" -gt 6 ] 2>/dev/null && echo y || \
+             ([ "$(KVER_MAJOR)" -eq 6 ] && [ "$(KVER_MINOR)" -ge 1 ] 2>/dev/null && echo y || echo n))
+ifeq ($(KCFI_OK),y)
+FS_CFLAGS += -fsanitize=kcfi
+endif
+
+# struct module init/exit offsets differ by kernel version.
+# Compile with target kernel's offsets so kmod_loader doesn't need to patch relocations.
+# Default: GKI 6.1 offsets (from kmod_shim.h)
+ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.10)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x190 -DMODULE_EXIT_OFFSET=0x3c8
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.15)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x190 -DMODULE_EXIT_OFFSET=0x3c8
+endif
 
 # Source files for freestanding build
 FS_TEST_SRCS := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c kmod_transit_setup.c
@@ -63,9 +81,22 @@ freestanding: kh_test.ko kmod_loader
 	@file kh_test.ko
 	@$(CROSS_COMPILE)objdump -s -j .modinfo $< 2>/dev/null | tail -5 || true
 
-# ---- kmod_loader: finit_module(2) wrapper for loading without modversions/vermagic ----
-kmod_loader: kmod_loader.c
-	$(CC) -static -O2 -o $@ $<
+# ---- Probe module (embedded in kmod_loader for binary offset probing) ----
+probe_module.ko: probe_module.c kmod_plt_stub.S
+	$(CC) $(FS_CFLAGS) -DMODULE_NAME='"kh_probe"' -c probe_module.c -o probe_module.fs.o
+	$(CC) $(FS_CFLAGS) -c kmod_plt_stub.S -o probe_plt.fs.o
+	$(LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe_module.fs.o probe_plt.fs.o
+
+probe_module_embed.h: probe_module.ko
+	@echo "// Auto-generated — do not edit" > $@
+	@echo "static const unsigned char probe_ko_data[] = {" >> $@
+	@xxd -i < $< >> $@
+	@echo "};" >> $@
+	@echo "static const unsigned int probe_ko_size = sizeof(probe_ko_data);" >> $@
+
+# ---- kmod_loader: adaptive module loader with embedded probe ----
+kmod_loader: kmod_loader.c probe_module_embed.h
+	$(CC) -DEMBED_PROBE_KO -static -O2 -o $@ $<
 
 %.fs.o: %.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
@@ -87,5 +118,5 @@ test:
 # ---- Clean ----
 clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean 2>/dev/null || true
-	rm -f *.fs.o *.ko kmod_loader
+	rm -f *.fs.o *.ko kmod_loader probe_module_embed.h
 	rm -rf src/
