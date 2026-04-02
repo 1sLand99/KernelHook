@@ -24,10 +24,17 @@ kmod_loader
 *.swo
 *~
 
-# Ralph
+# AI / workflow
+CLAUDE.md
+.claude/
+docs/superpowers/
+docs/plans/
 prd.json
 progress.txt
 prompts/
+archive/
+
+# Scripts (ignore all except explicitly kept)
 scripts/*
 !scripts/kh_text.lds.in
 !scripts/kh_page_align.h.in
