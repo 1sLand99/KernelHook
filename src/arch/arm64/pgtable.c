@@ -33,9 +33,30 @@ static uint64_t kernel_pgd;
 /* Kernel function types for symbol resolution */
 typedef uint64_t (*read_sysreg_func_t)(void);
 
+/* Detect page size from TCR_EL1.TG1 field.  Safe to call early —
+ * only reads a system register, no ksyms needed. */
+static void detect_page_size(void)
+{
+    uint64_t tcr;
+    asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+    uint64_t tg1 = (tcr >> 30) & 3;
+    switch (tg1) {
+    case 1: page_shift = 14; page_size = 16384; break;  /* 16K */
+    case 3: page_shift = 16; page_size = 65536; break;  /* 64K */
+    default: page_shift = 12; page_size = 4096; break;   /* 4K */
+    }
+    /* Note: log may not be initialized yet — caller should log if needed */
+}
+
 int pgtable_init(void)
 {
     const char *pgd_source = "none";
+
+    /* Detect page size first — other components need this even if
+     * the rest of pgtable_init fails (e.g., set_memory mode). */
+    detect_page_size();
+    logki("pgtable: page_size=%llu page_shift=%llu",
+          (unsigned long long)page_size, (unsigned long long)page_shift);
 
     /* Resolve flush functions via ksyms */
     flush_tlb_kernel_page = (flush_tlb_kernel_page_func_t)(uintptr_t)ksyms_lookup_cache("flush_tlb_kernel_page");

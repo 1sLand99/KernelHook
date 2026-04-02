@@ -33,10 +33,12 @@
 #ifdef KMOD_FREESTANDING
 
 typedef void *(*vmalloc_fn_t)(unsigned long size);
+typedef void *(*kvmalloc_fn_t)(unsigned long size, unsigned int flags, int node);
 typedef void  (*vfree_fn_t)(const void *addr);
 typedef int   (*set_memory_fn_t)(unsigned long addr, int numpages);
 
 static vmalloc_fn_t    sym_vmalloc;
+static kvmalloc_fn_t   sym_kvmalloc;  /* 6.12+ __kvmalloc_node_noprof fallback */
 static vfree_fn_t      sym_vfree;
 static set_memory_fn_t sym_set_memory_rw;
 static set_memory_fn_t sym_set_memory_ro;
@@ -57,8 +59,11 @@ static uint64_t resolve_with_fallback(const struct sym_fallback *fb)
 
 static int resolve_freestanding_syms(void)
 {
+    /* 6.12+ CONFIG_MEM_ALLOC_PROFILING: vmalloc may not be exported.
+     * Fall back to __kvmalloc_node_noprof (different signature). */
     static const struct sym_fallback fb_vmalloc    = { "vmalloc",         NULL };
-    static const struct sym_fallback fb_vfree      = { "vfree",           NULL };
+    static const struct sym_fallback fb_kvmalloc   = { "__kvmalloc_node_noprof", NULL };
+    static const struct sym_fallback fb_vfree      = { "vfree",           "kvfree" };
     static const struct sym_fallback fb_set_rw     = { "set_memory_rw",   NULL };
     static const struct sym_fallback fb_set_ro     = { "set_memory_ro",   NULL };
     /* set_memory_x was added in 5.8; older kernels export set_memory_exec */
@@ -66,13 +71,18 @@ static int resolve_freestanding_syms(void)
 
     sym_vmalloc = (vmalloc_fn_t)(uintptr_t)resolve_with_fallback(&fb_vmalloc);
     if (!sym_vmalloc) {
-        logke("kmod_mem_ops: failed to resolve vmalloc");
-        return -1;
+        /* Try __kvmalloc_node_noprof as fallback (6.12+) */
+        sym_kvmalloc = (kvmalloc_fn_t)(uintptr_t)resolve_with_fallback(&fb_kvmalloc);
+        if (!sym_kvmalloc) {
+            logke("kmod_mem_ops: failed to resolve vmalloc or __kvmalloc_node_noprof");
+            return -1;
+        }
+        logki("kmod_mem_ops: using __kvmalloc_node_noprof as vmalloc fallback");
     }
 
     sym_vfree = (vfree_fn_t)(uintptr_t)resolve_with_fallback(&fb_vfree);
     if (!sym_vfree) {
-        logke("kmod_mem_ops: failed to resolve vfree");
+        logke("kmod_mem_ops: failed to resolve vfree/kvfree");
         return -1;
     }
 
@@ -99,27 +109,30 @@ static int resolve_freestanding_syms(void)
 /* Inline wrappers so the ops table below can use a uniform calling convention.
  * KCFI_EXEMPT: all sym_* are ksyms-resolved function pointers — kCFI hash
  * may not match (especially with CONFIG_CFI_ICALL_NORMALIZE_INTEGERS). */
-KCFI_EXEMPT
+KCFI_EXEMPT __attribute__((noinline))
 static void *kmod_vmalloc(uint64_t size)
 {
-    return sym_vmalloc((unsigned long)size);
+    if (sym_vmalloc)
+        return sym_vmalloc((unsigned long)size);
+    /* __kvmalloc_node_noprof(size, GFP_KERNEL, NUMA_NO_NODE) */
+    return sym_kvmalloc((unsigned long)size, 0xCC0, -1);
 }
-KCFI_EXEMPT
+KCFI_EXEMPT __attribute__((noinline))
 static void kmod_vfree(const void *addr)
 {
     sym_vfree(addr);
 }
-KCFI_EXEMPT
+KCFI_EXEMPT __attribute__((noinline))
 static int kmod_set_memory_rw(unsigned long addr, int numpages)
 {
     return sym_set_memory_rw(addr, numpages);
 }
-KCFI_EXEMPT
+KCFI_EXEMPT __attribute__((noinline))
 static int kmod_set_memory_ro(unsigned long addr, int numpages)
 {
     return sym_set_memory_ro(addr, numpages);
 }
-KCFI_EXEMPT
+KCFI_EXEMPT __attribute__((noinline))
 static int kmod_set_memory_x(unsigned long addr, int numpages)
 {
     if (!sym_set_memory_x)
