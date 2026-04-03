@@ -48,12 +48,31 @@ adb shell dmesg | grep hello_hook
 | `tools/kmod_loader/` | Adaptive module loader |
 | `examples/` | hello_hook, fp_hook, hook_chain, hook_wrap_args, ksyms_lookup |
 
+## Kernel Compatibility
+
+Verified on Android AVD emulators and USB devices (ARM64):
+
+| Kernel | Android | API | Status | Notes |
+|--------|---------|-----|--------|-------|
+| 4.4    | 9       | 28  | Verified | `-mcmodel=large` for MOVZ/MOVK relocations |
+| 4.14   | 10      | 29  | Verified | CRC fallback via `__ksymtab_` lookup |
+| 5.4    | 11      | 30  | Blocked | Kernel `populate_error_injection_list` NULL deref; needs Kbuild+LTO |
+| 5.10   | 12/12L  | 31-32 | Verified | shadow-CFI + KABI_RESERVE |
+| 5.15   | 13      | 33  | Verified | shadow-CFI, no KABI |
+| 6.1    | 14      | 34  | Verified | kCFI replaces shadow CFI; Pixel USB device verified |
+| 6.6    | 15/16   | 35-36 | Verified | |
+| 6.12   | 16      | 36.1-37 | Verified | 16K page support |
+
+Physical devices may have different `struct module` layouts than GKI AVDs.
+The `kmod_loader` auto-detects the correct layout by introspecting vendor `.ko` files on the device.
+
 ## Documentation
 
 - [Getting Started](docs/en/getting-started.md)
 - [Build Modes](docs/en/build-modes.md)
 - [API Reference](docs/en/api-reference.md)
 - [kmod_loader](docs/en/kmod-loader.md)
+- [AVD Testing](docs/en/avd-testing.md)
 - [Examples](docs/en/examples.md)
 
 [中文文档](README_zh.md)
@@ -71,11 +90,23 @@ cd build_debug && ctest
 # Android (cross-compile)
 cmake -B build_android -DCMAKE_TOOLCHAIN_FILE=cmake/android-arm64.cmake -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_android
-adb push build_android/tests/test_* /data/local/tmp/
-adb shell /data/local/tmp/test_hook_basic
+./scripts/run_android_tests.sh
 ```
 
-### Kernel Module
+### Kernel Module Tests
+
+```bash
+# Run kmod tests on all available AVD emulators
+./scripts/test_avd_kmod.sh
+
+# Test specific AVDs
+./scripts/test_avd_kmod.sh Pixel_31 Pixel_37
+
+# Manual single-device test
+./scripts/run_android_tests.sh --kmod
+```
+
+### Build Modes
 
 ```bash
 # Mode A (freestanding, no kernel headers)

@@ -61,24 +61,50 @@ def find_kernel_for_avd(serial):
     return None, None
 
 
+def detect_format(sym_size, crc_size):
+    """Detect ksymtab entry size and CRC width from section sizes.
+
+    Returns (sym_entry_size, crc_entry_size).
+
+    Formats:
+      (12, 4) — prel32 (5.10+): { i32 value, i32 name, i32 ns } + u32 CRC
+      (16, 8) — absolute arm64 (4.x): { u64 value, u64 name } + u64 CRC
+      (24, 4) — absolute+CFI (5.4): { u64 value, u64 name, u64 cfi } + u32 CRC
+    """
+    for esz, csz in ((12, 4), (16, 8), (24, 4), (16, 4)):
+        if crc_size // csz > 0 and sym_size // esz == crc_size // csz:
+            return esz, csz
+    return 12, 4  # default to prel32
+
+
 def extract_crcs(data, text_base, sym_start, sym_stop, crc_start, crc_stop, targets):
-    """Extract CRCs via ksymtab (12-byte prel32 entries) + parallel kcrctab."""
+    """Extract CRCs via ksymtab + parallel kcrctab (auto-detect entry format)."""
     sym_off = sym_start - text_base
     sym_size = sym_stop - sym_start
     crc_off = crc_start - text_base
-    n = sym_size // 12
+    crc_size = crc_stop - crc_start
     fsz = len(data)
     target_set = set(targets)
     results = {}
 
-    for i in range(n):
-        off = sym_off + i * 12
-        if off + 12 > fsz:
-            break
-        entry_va = sym_start + i * 12
-        _, name_prel, _ = struct.unpack_from('<iii', data, off)
+    esz, csz = detect_format(sym_size, crc_size)
+    n = sym_size // esz
 
-        name_foff = (entry_va + 4 + name_prel) - text_base
+    for i in range(n):
+        off = sym_off + i * esz
+        if off + esz > fsz:
+            break
+
+        if esz == 12:
+            # prel32 format: name is at (entry_va + 4 + name_prel32)
+            entry_va = sym_start + i * 12
+            _, name_prel, _ = struct.unpack_from('<iii', data, off)
+            name_foff = (entry_va + 4 + name_prel) - text_base
+        else:
+            # Absolute pointer format (16 or 24 bytes): { ulong value, ulong name, ... }
+            _, name_va = struct.unpack_from('<QQ', data, off)
+            name_foff = name_va - text_base
+
         if not (0 <= name_foff < fsz - 1):
             continue
         end = data.find(b'\x00', name_foff, name_foff + 64)
@@ -87,8 +113,9 @@ def extract_crcs(data, text_base, sym_start, sym_stop, crc_start, crc_stop, targ
         name = data[name_foff:end].decode('ascii', errors='replace')
 
         if name in target_set:
-            c_off = crc_off + i * 4
+            c_off = crc_off + i * csz
             if c_off + 4 <= fsz:
+                # CRC is always the lower 32 bits regardless of entry width
                 results[name] = struct.unpack_from('<I', data, c_off)[0]
 
     return results
@@ -114,7 +141,7 @@ def main():
     print(f"# kernel: {kernel_path}", file=sys.stderr)
 
     crcs = {}
-    # Non-GPL ksymtab
+    # Method 1: scan ksymtab entries to match names and read parallel kcrctab
     for prefix in ['', '_gpl']:
         start = adb_ksym(s, f'__start___ksymtab{prefix}')
         stop = adb_ksym(s, f'__stop___ksymtab{prefix}')
@@ -125,6 +152,31 @@ def main():
             if missing:
                 crcs.update(extract_crcs(data, text_base,
                                          start, stop, crc_start, crc_stop, missing))
+
+    # Method 2: fallback for unrelocated images (name pointers are zero).
+    # Use __ksymtab_<sym> addresses from kallsyms to compute ksymtab index,
+    # then read the corresponding kcrctab entry.
+    missing = [sym for sym in args.symbols if sym not in crcs]
+    if missing:
+        for prefix in ['', '_gpl']:
+            start = adb_ksym(s, f'__start___ksymtab{prefix}')
+            stop = adb_ksym(s, f'__stop___ksymtab{prefix}')
+            crc_start = adb_ksym(s, f'__start___kcrctab{prefix}')
+            crc_stop = adb_ksym(s, f'__stop___kcrctab{prefix}')
+            if not (start and stop and crc_start): continue
+            sym_size = stop - start
+            crc_size = crc_stop - crc_start
+            esz, csz = detect_format(sym_size, crc_size)
+            crc_off = crc_start - text_base
+            for sym in list(missing):
+                entry_addr = adb_ksym(s, f'__ksymtab_{sym}')
+                if not entry_addr or entry_addr < start or entry_addr >= stop:
+                    continue
+                idx = (entry_addr - start) // esz
+                c_off = crc_off + idx * csz
+                if 0 <= c_off < len(data) - 4:
+                    crcs[sym] = struct.unpack_from('<I', data, c_off)[0]
+                    missing.remove(sym)
 
     parts = []
     for sym in args.symbols:

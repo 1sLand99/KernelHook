@@ -308,12 +308,22 @@ struct modversion_info {
  * validates calls via inline type-hash checks, not the shadow + callback
  * mechanism. So this stub is harmless on kCFI.
  *
- * Declared weak so multiple TUs including this header don't conflict. */
-void __attribute__((weak, used, section(".text"))) __cfi_check(
-    unsigned long id, void *ptr, void *diag)
-{
-    /* Accept all indirect calls to this module (permissive). */
-}
+ * Must be non-weak GLOBAL: 5.4 GKI's find_module_sections() skips weak symbols
+ * when setting mod->cfi_check. Emitted via MODULE_THIS_MODULE() to ensure
+ * exactly one definition. */
+#define MODULE_CFI_CHECK()                                                    \
+    void __attribute__((used, visibility("default"), section(".text")))        \
+    __cfi_check(unsigned long id, void *ptr, void *diag) { /* permissive */ } \
+    void __attribute__((weak, used, visibility("default"), section(".text")))  \
+    __cfi_check_fail(void *data, void *ptr) { /* permissive */ }
+
+/* Force _error_injection_whitelist section into existence (1 byte < entry size).
+ * CONFIG_FUNCTION_ERROR_INJECTION kernels (5.4 GKI) call
+ * populate_error_injection_list() on module load; without this section the
+ * kernel dereferences NULL. section_objs() returns 0 entries (1/16=0). */
+__asm__(".pushsection _error_injection_whitelist, \"aw\"\n"
+        ".byte 0\n"
+        ".popsection\n");
 
 /* struct module with init and exit at the correct offsets for the target kernel.
  * cfi_check is NOT included here — it's set by find_module_sections via the
@@ -336,6 +346,22 @@ void __attribute__((weak, used, section(".text"))) __cfi_check(
             .name = MODULE_NAME,                                        \
             .init = init_module,                                        \
             .exit = cleanup_module,                                     \
-        }
+        };                                                              \
+    MODULE_CFI_CHECK();                                                 \
+    /* Shadow-CFI jump table stubs for 5.4 GKI.                        \
+     * The kernel replaces init_module/cleanup_module with .cfi_jt      \
+     * when applying relocations. Without these, mod->init is NULL. */  \
+    __asm__(                                                            \
+        ".pushsection .text, \"ax\"\n"                                  \
+        ".global init_module.cfi_jt\n"                                  \
+        ".type init_module.cfi_jt, %function\n"                         \
+        "init_module.cfi_jt: b init_module\n"                           \
+        ".size init_module.cfi_jt, . - init_module.cfi_jt\n"           \
+        ".global cleanup_module.cfi_jt\n"                               \
+        ".type cleanup_module.cfi_jt, %function\n"                      \
+        "cleanup_module.cfi_jt: b cleanup_module\n"                     \
+        ".size cleanup_module.cfi_jt, . - cleanup_module.cfi_jt\n"     \
+        ".popsection\n"                                                 \
+    )
 
 #endif /* _KMOD_SHIM_H_ */

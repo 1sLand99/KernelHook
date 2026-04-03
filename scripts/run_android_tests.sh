@@ -140,7 +140,11 @@ fi
 
 # ---- Discover test binaries ----
 
-TEST_DIR="$BUILD_DIR/tests"
+TEST_DIR="$BUILD_DIR/tests/userspace"
+if [ ! -d "$TEST_DIR" ]; then
+    # Fallback: tests may be directly under tests/
+    TEST_DIR="$BUILD_DIR/tests"
+fi
 if [ ! -d "$TEST_DIR" ]; then
     printf "${RED}Error: Test directory %s not found.${RESET}\n" "$TEST_DIR"
     exit 1
@@ -244,7 +248,7 @@ if [ "$KMOD" -eq 1 ]; then
         SKIPPED=$((SKIPPED + 1))
     else
         KMOD_KO="$ROOT/tests/kmod/kh_test.ko"
-        KMOD_LOADER="$ROOT/tests/kmod/kmod_loader"
+        KMOD_LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 
         # Query device kernel version for vermagic
         DEV_UNAME=$($ADB shell "uname -r" 2>/dev/null | tr -d '[:space:]')
@@ -253,9 +257,9 @@ if [ "$KMOD" -eq 1 ]; then
         # Detect NDK toolchain (prefer NDK clang for macOS cross-compilation)
         if [ -z "${NDK_BIN:-}" ]; then
             # Auto-detect Android NDK
-            for ndk_base in "$HOME/Library/Android/sdk/ndk" "$ANDROID_NDK_ROOT" "$ANDROID_HOME/ndk"; do
+            for ndk_base in "$HOME/Library/Android/sdk/ndk" "${ANDROID_NDK_ROOT:-}" "${ANDROID_HOME:-}/ndk"; do
                 if [ -d "${ndk_base:-}" ]; then
-                    NDK_VER=$(ls "$ndk_base" 2>/dev/null | sort -V | tail -1)
+                    NDK_VER=$(ls "$ndk_base" 2>/dev/null | grep -v '.zip' | sort -V | tail -1)
                     if [ -n "$NDK_VER" ]; then
                         NDK_BIN="$ndk_base/$NDK_VER/toolchains/llvm/prebuilt/darwin-x86_64/bin"
                         [ -d "$NDK_BIN" ] && break
@@ -350,7 +354,7 @@ if [ "$KMOD" -eq 1 ]; then
 
                 if [ "$HAS_LOADER" -eq 1 ]; then
                     printf "  Trying kmod_loader (finit_module with relaxed checks)...\n"
-                    INSMOD_OUT=$($ADB shell "su -c '$REMOTE_LOADER $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
+                    INSMOD_OUT=$($ADB shell "su -c 'timeout 30 $REMOTE_LOADER $REMOTE_KO kallsyms_addr=$KALLSYMS_ADDR'" 2>&1)
                     INSMOD_RC=$?
                     if [ "$INSMOD_RC" -ne 0 ]; then
                         printf "  ${YELLOW}WARN${RESET} kmod_loader failed: %s\n" "$INSMOD_OUT"

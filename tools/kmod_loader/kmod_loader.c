@@ -54,17 +54,17 @@ struct kver_preset {
 static const struct kver_preset presets[] = {
     /* Linux 4.x — pre-GKI, no ANDROID_KABI_RESERVE on most builds.
      * Offsets computed from AOSP source; unverified on real devices. */
-    { 4, 4,  0x340, 0x148, 0x2d0 },
+    { 4, 4,  0x340, 0x158, 0x2d0 },  /* AVD android-28 verified */
     { 4, 9,  0x358, 0x150, 0x2e8 },
-    { 4, 14, 0x370, 0x158, 0x2f8 },
+    { 4, 14, 0x370, 0x150, 0x2f8 },  /* AVD android-29, init verified via disasm */
     { 4, 19, 0x390, 0x168, 0x318 },
     /* Linux 5.x — ANDROID_KABI_RESERVE inflates struct module */
-    { 5, 4,  0x3c0, 0x168, 0x350 },
+    { 5, 4,  0x400, 0x178, 0x350 },  /* AVD android-30, init verified via disasm */
     { 5, 10, 0x440, 0x190, 0x3c8 },  /* AVD android12-5.10 verified */
-    { 5, 15, 0x440, 0x190, 0x3c8 },
+    { 5, 15, 0x3c0, 0x178, 0x378 },  /* AVD android13-5.15 verified */
     /* Linux 6.x — kCFI replaces shadow CFI */
-    { 6, 1,  0x440, 0x170, 0x3d8 },  /* Pixel 6 verified */
-    { 6, 6,  0x460, 0x178, 0x3f0 },
+    { 6, 1,  0x400, 0x140, 0x3d8 },  /* AVD android14-6.1 verified */
+    { 6, 6,  0x600, 0x188, 0x5b8 },  /* AVD android15-6.6 verified */
     { 6, 12, 0x640, 0x188, 0x5f8 },  /* AVD API 37 (16K pages) verified */
 };
 #define NUM_PRESETS (sizeof(presets) / sizeof(presets[0]))
@@ -1065,13 +1065,13 @@ static int probe_init_offset_disasm(uint32_t *out_init)
 
 /* Method B: binary probe with embedded probe.ko.
  *
- * Iterates candidate init offsets 0x140..0x220 (step 8).
+ * Iterates candidate init offsets 0x100..0x220 (step 8).
  * For each: patches probe .ko's init relocation, calls init_module.
  * EINVAL → init ran → found. 0 → init not called → skip. crash → recovered on next run.
  */
-#define PROBE_CAND_BASE  0x140
+#define PROBE_CAND_BASE  0x100
 #define PROBE_CAND_STEP  8
-#define PROBE_CAND_COUNT 25  /* 0x140..0x200, step 8 */
+#define PROBE_CAND_COUNT 32  /* 0x100..0x200, step 8 */
 _Static_assert(PROBE_CAND_COUNT <= 32, "probe bitmask overflow");
 
 static uint32_t probe_cand_offset(int idx)
@@ -1232,7 +1232,101 @@ static int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
 #endif
 }
 
-/* ---- Resolve init/exit offsets (tiered: CLI → cache → preset → disasm → probe) ---- */
+/* ---- Vendor module introspection ----
+ *
+ * Read a loaded vendor .ko's ELF to extract the actual struct module size
+ * and init/exit offsets from .rela.gnu.linkonce.this_module relocations.
+ * This handles physical devices where GKI presets may not match. */
+
+static int introspect_vendor_module(struct kver_preset *out)
+{
+    /* Search common vendor module directories */
+    static const char *dirs[] = {
+        "/vendor_dlkm/lib/modules",
+        "/vendor/lib/modules",
+        "/system/lib/modules",
+        NULL
+    };
+
+    for (const char **dp = dirs; *dp; dp++) {
+        DIR *d = opendir(*dp);
+        if (!d) continue;
+        struct dirent *ent;
+        while ((ent = readdir(d)) != NULL) {
+            size_t nlen = strlen(ent->d_name);
+            if (nlen < 4 || strcmp(ent->d_name + nlen - 3, ".ko") != 0)
+                continue;
+            char path[512];
+            snprintf(path, sizeof(path), "%s/%s", *dp, ent->d_name);
+
+            int fd = open(path, O_RDONLY);
+            if (fd < 0) continue;
+            struct stat st;
+            if (fstat(fd, &st) != 0 || st.st_size < (off_t)sizeof(Ehdr)) {
+                close(fd); continue;
+            }
+            uint8_t *buf = malloc(st.st_size);
+            if (!buf) { close(fd); continue; }
+            if (read(fd, buf, st.st_size) != st.st_size) {
+                free(buf); close(fd); continue;
+            }
+            close(fd);
+
+            Ehdr *eh = (Ehdr *)buf;
+            if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0) {
+                free(buf); continue;
+            }
+
+            /* Find .gnu.linkonce.this_module and its rela section */
+            Shdr *this_mod = elf_find_section(buf, eh, ".gnu.linkonce.this_module");
+            Shdr *rela = elf_find_section(buf, eh, ".rela.gnu.linkonce.this_module");
+            if (!this_mod || !rela || rela->sh_entsize == 0) {
+                free(buf); continue;
+            }
+
+            uint32_t mod_size = (uint32_t)this_mod->sh_size;
+            uint32_t init_off = 0, exit_off = 0;
+            size_t nrela = rela->sh_size / rela->sh_entsize;
+            Shdr *strtab = NULL;
+            Shdr *symtab = NULL;
+            /* Find the symtab linked from rela */
+            if (rela->sh_link < eh->e_shnum) {
+                symtab = (Shdr *)(buf + eh->e_shoff + rela->sh_link * eh->e_shentsize);
+                if (symtab->sh_link < eh->e_shnum)
+                    strtab = (Shdr *)(buf + eh->e_shoff + symtab->sh_link * eh->e_shentsize);
+            }
+
+            for (size_t i = 0; i < nrela && symtab && strtab; i++) {
+                Elf64_Rela *r = (Elf64_Rela *)(buf + rela->sh_offset + i * rela->sh_entsize);
+                uint32_t sym_idx = ELF64_R_SYM(r->r_info);
+                if (sym_idx == 0) continue;
+                Elf64_Sym *sym = (Elf64_Sym *)(buf + symtab->sh_offset +
+                                               sym_idx * symtab->sh_entsize);
+                const char *name = (const char *)(buf + strtab->sh_offset + sym->st_name);
+                if (strcmp(name, "init_module") == 0)
+                    init_off = (uint32_t)r->r_offset;
+                else if (strcmp(name, "cleanup_module") == 0)
+                    exit_off = (uint32_t)r->r_offset;
+            }
+
+            free(buf);
+            if (init_off && exit_off) {
+                out->mod_size = mod_size;
+                out->init_off = init_off;
+                out->exit_off = exit_off;
+                closedir(d);
+                fprintf(stderr,
+                    "kmod_loader: vendor introspect %s: size=0x%x init=0x%x exit=0x%x\n",
+                    ent->d_name, mod_size, init_off, exit_off);
+                return 0;
+            }
+        }
+        closedir(d);
+    }
+    return -1;
+}
+
+/* ---- Resolve init/exit offsets (tiered: CLI → vendor → preset → cache → disasm → probe) ---- */
 
 static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int kminor,
                                           uint32_t cli_init, uint32_t cli_exit,
@@ -1245,16 +1339,35 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
     uint32_t vhash = hash_version(u.release);
     struct kver_preset result = {kmajor, kminor, 0, 0, 0};
 
-    /* Tier 0: CLI override */
+    /* Tier 0: CLI override (still look up mod_size from preset/vendor) */
     if (cli_init && cli_exit) {
         result.init_off = cli_init;
         result.exit_off = cli_exit;
+        /* Try to get mod_size from vendor introspection or preset */
+        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
+        if (introspect_vendor_module(&vendor) == 0) {
+            result.mod_size = vendor.mod_size;
+        } else {
+            const struct kver_preset *p = find_preset(kmajor, kminor);
+            if (p) result.mod_size = p->mod_size;
+        }
         fprintf(stderr, "kmod_loader: CLI offsets init=0x%x exit=0x%x\n",
                 result.init_off, result.exit_off);
         return result;
     }
 
-    /* Tier 1: Preset table (most reliable — verified values) */
+    /* Tier 1: Vendor module introspection (most accurate for physical devices).
+     * Read a vendor .ko's ELF to determine the actual struct module layout.
+     * This handles devices where GKI presets don't match (e.g. Pixel kernels). */
+    {
+        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
+        if (introspect_vendor_module(&vendor) == 0) {
+            result = vendor;
+            return result;
+        }
+    }
+
+    /* Tier 2: Preset table (verified for GKI/AVD kernels) */
     const struct kver_preset *preset = find_preset(kmajor, kminor);
     if (preset && !force_probe) {
         result = *preset;
@@ -1264,7 +1377,7 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
         return result;
     }
 
-    /* Tier 2: Persistent cache (for kernels without preset) */
+    /* Tier 3: Persistent cache (for kernels without preset) */
     probe_load(self_path);
     if (!force_probe && g_probe.magic == PROBE_MAGIC &&
         g_probe.confirmed && g_probe.version_hash == vhash) {
@@ -1275,9 +1388,9 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
         return result;
     }
 
-    /* (preset already checked in Tier 1) */
+    /* (preset already checked in Tier 2) */
 
-    /* Tier 3: Disassembly */
+    /* Tier 4: Disassembly */
     uint32_t disasm_init = 0;
     if (probe_init_offset_disasm(&disasm_init) == 0 && disasm_init) {
         result.init_off = disasm_init;
@@ -1293,7 +1406,12 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
         return result;
     }
 
-    /* Tier 4: Binary probe */
+    /* Tier 5: Binary probe */
+    if (force_probe) {
+        /* --probe: reset persistent state to re-probe all candidates */
+        memset(&g_probe, 0, sizeof(g_probe));
+        g_probe.probing_idx = PROBE_IDLE;
+    }
     uint32_t probe_init = 0;
     if (probe_init_offset_binary(self_path, mod, mod_size, eh, params,
                                  &probe_init) == 0 && probe_init) {
@@ -1337,7 +1455,7 @@ int main(int argc, char *argv[])
     char params[4096] = "";
     uint64_t kallsyms_addr = 0;
     int have_kallsyms_addr = 0;
-    uint32_t cli_init_off = 0, cli_exit_off = 0;
+    uint32_t cli_init_off = 0, cli_exit_off = 0, cli_mod_size = 0;
     int force_probe = 0;
     for (int i = 2; i < argc; i++) {
         if (strncmp(argv[i], "--init-off", 10) == 0) {
@@ -1362,6 +1480,13 @@ int main(int argc, char *argv[])
         }
         if (strcmp(argv[i], "--probe") == 0) {
             force_probe = 1;
+            continue;
+        }
+        if (strncmp(argv[i], "--mod-size", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) sscanf(val, "0x%x", &cli_mod_size);
             continue;
         }
         if (strncmp(argv[i], "--crc", 5) == 0) {
@@ -1486,19 +1611,13 @@ int main(int argc, char *argv[])
         mod, mod_size, eh, params);
 
     /* Patch struct module layout using resolved offsets */
+    if (cli_mod_size) resolved.mod_size = cli_mod_size;
     if (resolved.init_off) {
-        Shdr *this_mod = elf_find_section(mod, eh, ".gnu.linkonce.this_module");
-        uint32_t cur_size = this_mod ? (uint32_t)this_mod->sh_size : 0;
-
-        if (resolved.mod_size && cur_size != resolved.mod_size) {
-            uint32_t exact = probe_mod_size(mod, mod_size, eh, params, resolved.mod_size);
-            struct kver_preset actual = resolved;
-            actual.mod_size = exact;
-            patch_module_layout(mod, mod_size, eh, &actual);
-        } else {
-            if (!resolved.mod_size) resolved.mod_size = cur_size;
-            patch_module_layout(mod, mod_size, eh, &resolved);
+        if (!resolved.mod_size) {
+            Shdr *this_mod = elf_find_section(mod, eh, ".gnu.linkonce.this_module");
+            resolved.mod_size = this_mod ? (uint32_t)this_mod->sh_size : 0;
         }
+        patch_module_layout(mod, mod_size, eh, &resolved);
     }
 
     /* Step 3.5: Patch kallsyms_addr directly into ELF data section.
@@ -1518,15 +1637,17 @@ int main(int argc, char *argv[])
     /* Step 4: Try to patch CRCs from kernel Image (best-effort) */
     patch_crcs(mod, eh);
 
-    /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS) */
-    patch_kcfi_hashes(mod, mod_size, eh);
+    /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS).
+     * Only applicable to 6.1+ kernels which use kCFI; pre-6.1 uses shadow CFI. */
+    if (kmajor > 6 || (kmajor == 6 && kminor >= 1))
+        patch_kcfi_hashes(mod, mod_size, eh);
 
     /* Step 5: Try finit_module with IGNORE flags (bypasses CRC/vermagic on supported kernels) */
     {
         char tmppath[] = "/data/local/tmp/.kmod_XXXXXX";
         int tmpfd = mkstemp(tmppath);
         if (tmpfd >= 0) {
-            if (write(tmpfd, mod, mod_size) == (ssize_t)mod_size) {
+            if (write(tmpfd, mod, st.st_size) == (ssize_t)st.st_size) {
                 close(tmpfd);
                 tmpfd = open(tmppath, O_RDONLY | O_CLOEXEC);
                 if (tmpfd >= 0) {
@@ -1555,7 +1676,7 @@ int main(int argc, char *argv[])
     /* Step 6: Fallback — init_module with patched binary */
     fprintf(stderr, "kmod_loader: trying init_module (size=%lu, alloc=%zu)\n",
             (unsigned long)st.st_size, mod_size);
-    int ret = (int)syscall(__NR_init_module, mod, (unsigned long)mod_size, params);
+    int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
     int err = errno;
     free(mod);
 

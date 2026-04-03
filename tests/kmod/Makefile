@@ -45,13 +45,39 @@ ifeq ($(KCFI_OK),y)
 FS_CFLAGS += -fsanitize=kcfi
 endif
 
+# Code model: 4.x kernels lack R_AARCH64_ADR_PREL_PG_HI21 (ADRP) relocation support
+# in their module loader. Use -mcmodel=large to emit MOVZ/MOVK sequences instead.
+LARGE_MODEL := $(shell [ "$(KVER_MAJOR)" -le 4 ] 2>/dev/null && echo y || echo n)
+ifeq ($(LARGE_MODEL),y)
+FS_CFLAGS += -mcmodel=large
+endif
+
 # struct module init/exit offsets differ by kernel version.
-# Compile with target kernel's offsets so kmod_loader doesn't need to patch relocations.
-# Default: GKI 6.1 offsets (from kmod_shim.h)
-ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.10)
+# THIS_MODULE_SIZE is padded to 0x800 so kmod_loader can always shrink to the
+# actual device size (physical devices may differ from GKI AVD presets).
+FS_CFLAGS += -DTHIS_MODULE_SIZE=0x800
+
+# GKI preset offsets — kmod_loader overrides at load time if vendor .ko differs.
+ifeq ($(KVER_MAJOR).$(KVER_MINOR),4.4)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x158 -DMODULE_EXIT_OFFSET=0x2d0
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),4.9)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x150 -DMODULE_EXIT_OFFSET=0x2e8
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),4.14)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x150 -DMODULE_EXIT_OFFSET=0x2f8
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),4.19)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x168 -DMODULE_EXIT_OFFSET=0x318
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.4)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x178 -DMODULE_EXIT_OFFSET=0x350
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.10)
 FS_CFLAGS += -DMODULE_INIT_OFFSET=0x190 -DMODULE_EXIT_OFFSET=0x3c8
 else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.15)
-FS_CFLAGS += -DMODULE_INIT_OFFSET=0x190 -DMODULE_EXIT_OFFSET=0x3c8
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x178 -DMODULE_EXIT_OFFSET=0x378
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),6.1)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x140 -DMODULE_EXIT_OFFSET=0x3d8
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),6.6)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x188 -DMODULE_EXIT_OFFSET=0x5b8
+else ifeq ($(KVER_MAJOR).$(KVER_MINOR),6.12)
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x188 -DMODULE_EXIT_OFFSET=0x5f8
 endif
 
 # Source files for freestanding build
@@ -92,7 +118,7 @@ src/%.fs.o: $(KH_ROOT)/src/%.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
 kh_test.ko: $(FS_TEST_OBJS) $(FS_ASM_OBJS) $(FS_CORE_OBJS)
-	$(LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ $^
+	$(LD) -r -T kmod_freestanding.lds -o $@ $^
 
 # ---- Test (delegates to project-level Android test runner) ----
 test:

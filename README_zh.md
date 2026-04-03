@@ -48,12 +48,31 @@ adb shell dmesg | grep hello_hook
 | `tools/kmod_loader/` | 自适应模块加载器 |
 | `examples/` | hello_hook、fp_hook、hook_chain、hook_wrap_args、ksyms_lookup |
 
+## 内核兼容性
+
+已在 Android AVD 模拟器和 USB 物理设备 (ARM64) 上验证：
+
+| 内核版本 | Android | API | 状态 | 备注 |
+|---------|---------|-----|------|------|
+| 4.4     | 9       | 28  | 已验证 | `-mcmodel=large` 生成 MOVZ/MOVK 重定位 |
+| 4.14    | 10      | 29  | 已验证 | CRC 通过 `__ksymtab_` 回退提取 |
+| 5.4     | 11      | 30  | 阻塞 | 内核 `populate_error_injection_list` NULL 解引用；需要 Kbuild+LTO |
+| 5.10    | 12/12L  | 31-32 | 已验证 | shadow-CFI + KABI_RESERVE |
+| 5.15    | 13      | 33  | 已验证 | shadow-CFI，无 KABI |
+| 6.1     | 14      | 34  | 已验证 | kCFI 取代 shadow CFI；Pixel USB 设备已验证 |
+| 6.6     | 15/16   | 35-36 | 已验证 | |
+| 6.12    | 16      | 36.1-37 | 已验证 | 16K 页面支持 |
+
+物理设备的 `struct module` 布局可能与 GKI AVD 不同。
+`kmod_loader` 通过解析设备上的 vendor `.ko` 文件自动检测正确的布局。
+
 ## 文档
 
 - [快速上手](docs/zh/getting-started.md)
 - [构建模式](docs/zh/build-modes.md)
 - [API 参考](docs/zh/api-reference.md)
 - [kmod_loader](docs/zh/kmod-loader.md)
+- [AVD 测试](docs/zh/avd-testing.md)
 - [示例](docs/zh/examples.md)
 
 [English](README.md)
@@ -71,11 +90,23 @@ cd build_debug && ctest
 # Android（交叉编译）
 cmake -B build_android -DCMAKE_TOOLCHAIN_FILE=cmake/android-arm64.cmake -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_android
-adb push build_android/tests/test_* /data/local/tmp/
-adb shell /data/local/tmp/test_hook_basic
+./scripts/run_android_tests.sh
 ```
 
-### 内核模块
+### 内核模块测试
+
+```bash
+# 在所有可用的 AVD 模拟器上运行 kmod 测试
+./scripts/test_avd_kmod.sh
+
+# 测试指定 AVD
+./scripts/test_avd_kmod.sh Pixel_31 Pixel_37
+
+# 手动单设备测试
+./scripts/run_android_tests.sh --kmod
+```
+
+### 构建模式
 
 ```bash
 # 模式 A（freestanding，无需内核头文件）

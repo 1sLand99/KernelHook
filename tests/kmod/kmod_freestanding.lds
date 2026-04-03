@@ -44,8 +44,14 @@ SECTIONS
         *(__versions)
     }
 
+    __param : {
+        __start___param = .;
+        *(__param)
+        __stop___param = .;
+    }
+
     .gnu.linkonce.this_module : {
-        *(.gnu.linkonce.this_module)
+        *(.kh.this_module)
     }
 
     .data : {
@@ -58,6 +64,13 @@ SECTIONS
 
     .kp.symbol : {
         *(.kp.symbol)
+    }
+
+    /* Required by CONFIG_FUNCTION_ERROR_INJECTION (5.4 GKI).
+     * The kernel's ei_module_callback dereferences this section;
+     * missing → NULL pointer oops in populate_error_injection_list. */
+    _error_injection_whitelist : {
+        *(_error_injection_whitelist)
     }
 
     /DISCARD/ : {
