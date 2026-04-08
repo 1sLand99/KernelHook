@@ -3,6 +3,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 FIX="$HERE/fixtures"
 MK="$HERE/test_detect_toolchain.mk"
+MAKE="$(command -v make)"  # capture full path so case 4 (PATH=/nonexistent) can still run make
 
 PASS=0; FAIL=0; FAILURES=()
 
@@ -34,7 +35,7 @@ out=$(run_mk ANDROID_NDK_ROOT="$FIX/ndk_linux" ANDROID_API_LEVEL=28)
 assert_eq "mk.api_override" "28" "$(get "$out" KH_ANDROID_API_LEVEL)"
 
 # Case 4: failure — unreachable toolchain
-out=$(env -i PATH=/nonexistent HOME="$HOME" make --no-print-directory -f "$MK" dump 2>&1 || true)
+out=$(env -i PATH=/nonexistent HOME="$HOME" "$MAKE" --no-print-directory -f "$MK" dump 2>&1 || true)
 echo "$out" | grep -q 'no usable toolchain' && PASS=$((PASS+1)) || { FAIL=$((FAIL+1)); FAILURES+=("  mk.fail: expected error message"); }
 
 echo "---"
