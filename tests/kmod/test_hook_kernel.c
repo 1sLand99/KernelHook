@@ -17,7 +17,7 @@
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
-#include "kmod_shim.h"
+#include "shim.h"
 #else
 /* Mode C: standard kernel headers */
 #include <linux/kernel.h>

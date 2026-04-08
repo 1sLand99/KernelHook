@@ -4,7 +4,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <platform.h>
 #include <string.h>
 
@@ -48,7 +48,7 @@ TEST(android_bionic_hook)
 {
     ANDROID_SKIP();
 
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     android_before_called = 0;
 
@@ -60,7 +60,7 @@ TEST(android_bionic_hook)
     ASSERT_TRUE(android_before_called);
 
     hook_unwrap((void *)android_target, (void *)android_before, NULL);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(android_mprotect_wx)
@@ -76,13 +76,13 @@ TEST(android_mprotect_wx)
         munmap(p, 4096);
     }
     /* The real test: our pool uses W^X correctly */
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     void *rox = hook_mem_alloc_rox(64);
     ASSERT_NOT_NULL(rox);
     /* ROX memory should be readable but not writable */
     hook_mem_free_rox(rox, 64);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 #endif
 }
 

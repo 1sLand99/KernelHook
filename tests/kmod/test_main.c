@@ -9,7 +9,7 @@
  * Build paths:
  *   Kbuild (Approach A):       uses kernel headers; kprobes auto-detects
  *                              kallsyms_lookup_name when kallsyms_addr==0
- *   Freestanding (Approach B): uses kmod_shim.h; kallsyms_addr is required
+ *   Freestanding (Approach B): uses shim.h; kallsyms_addr is required
  *
  * Test plan for security-mechanism-enabled kernels:
  *
@@ -57,7 +57,7 @@
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
-#include "kmod_shim.h"
+#include "shim.h"
 #else
 /* Mode C: standard kernel headers */
 #include <linux/module.h>
@@ -78,11 +78,11 @@
 #include <ksyms.h>
 #include <arch/arm64/pgtable.h>
 #endif
-#include "kmod_mem_ops.h"
+#include "mem_ops.h"
 #include "test_hook_kernel.h"
 
 #if !defined(KH_SDK_MODE)
-/* kmod_log.c — no dedicated header */
+/* log.c — no dedicated header */
 extern int kmod_log_init(void);
 #endif
 

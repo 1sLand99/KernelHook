@@ -12,18 +12,18 @@ SECTIONS {
          * sections placed adjacent to .text.kh by lld's orphan placement,
          * which is acceptable since they are never executed in-place
          * (copied to ROX pages at runtime). */
-        *libkernelhook.a:core_user.c.o(.text .text.*)
+        *libkernelhook.a:hook.c.o(.text .text.*)
         *libkernelhook.a:hmem.c.o(.text .text.*)
         *libkernelhook.a:inline.c.o(.text .text.*)
         *libkernelhook.a:insn.c.o(.text .text.*)
         *libkernelhook.a:linux.c.o(.text .text.*)
         *libkernelhook.a:darwin.c.o(.text .text.*)
-        *libkernelhook.a:hook_mem_user.c.o(.text .text.*)
-        *libkernelhook.a:hook_install_user.c.o(.text .text.*)
-        *libkernelhook.a:log_user.c.o(.text .text.*)
+        *libkernelhook.a:hmem_user.c.o(.text .text.*)
+        *libkernelhook.a:hook_install.c.o(.text .text.*)
+        *libkernelhook.a:log.c.o(.text .text.*)
         *libkernelhook.a:remote_linux.c.o(.text .text.*)
         *libkernelhook.a:remote_stub.c.o(.text .text.*)
-        *libkernelhook.a:kh_section_fence.c.o(.text .text.*)
+        *libkernelhook.a:section_fence.c.o(.text .text.*)
         . = ALIGN(@KH_PAGE_ALIGN@);
         __kh_text_end = .;
     }

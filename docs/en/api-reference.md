@@ -129,6 +129,16 @@ Type-safe convenience wrappers, analogous to `hook_wrapN`.
 
 Header: `<ksyms.h>`
 
+### `ksyms_init`
+
+```c
+int ksyms_init(uint64_t kallsyms_lookup_name_addr);
+```
+
+Initialize the symbol resolver with the runtime address of the kernel's
+`kallsyms_lookup_name`. Must be called before `ksyms_lookup` /
+`ksyms_lookup_cache`. Returns 0 on success, non-zero on error.
+
 ### `ksyms_lookup`
 
 ```c
@@ -136,8 +146,7 @@ uint64_t ksyms_lookup(const char *name);
 ```
 
 Look up a kernel symbol by name. Returns the address, or 0 if not found.
-
-Requires prior initialization via `ksyms_init(kallsyms_lookup_name_addr)`.
+Requires prior `ksyms_init()`.
 
 ### `ksyms_lookup_cache`
 

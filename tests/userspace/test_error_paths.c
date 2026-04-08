@@ -4,7 +4,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 /* Target function — padded to >= 16 bytes for trampoline. */
 __attribute__((noinline))
@@ -41,42 +41,42 @@ static void before_noop(hook_fargs2_t *fargs, void *udata)
 
 TEST(error_hook_null_func)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     void *backup = NULL;
     hook_err_t err = hook(NULL, (void *)err_replace, &backup);
     ASSERT_EQ(err, HOOK_BAD_ADDRESS);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_hook_null_replace)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     void *backup = NULL;
     hook_err_t err = hook((void *)err_target, NULL, &backup);
     ASSERT_EQ(err, HOOK_BAD_ADDRESS);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_hook_null_backup)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     hook_err_t err = hook((void *)err_target, (void *)err_replace, NULL);
     ASSERT_EQ(err, HOOK_BAD_ADDRESS);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_hook_duplicate)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     void *backup1 = NULL;
@@ -88,23 +88,23 @@ TEST(error_hook_duplicate)
     ASSERT_EQ(err, HOOK_DUPLICATED);
 
     unhook((void *)err_target2);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_wrap_null_func)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     hook_err_t err = hook_wrap(NULL, 2, (void *)before_noop, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_BAD_ADDRESS);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_fp_hook_null)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     /* fp_hook with addr=0 should return without crash */
@@ -112,34 +112,34 @@ TEST(error_fp_hook_null)
     fp_hook(0, (void *)err_replace, &backup);
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_unhook_null)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     unhook(NULL);
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_unhook_unhooked)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     unhook((void *)err_target);
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_double_unhook)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     void *backup = NULL;
@@ -150,12 +150,12 @@ TEST(error_double_unhook)
     unhook((void *)err_target);
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(error_unwrap_while_empty)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     /* Wrap then unwrap, then unwrap again on empty chain */
@@ -169,7 +169,7 @@ TEST(error_unwrap_while_empty)
     hook_unwrap((void *)err_target, (void *)before_noop, NULL);
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

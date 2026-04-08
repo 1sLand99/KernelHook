@@ -21,27 +21,24 @@ make module
 
 ### 加载到设备
 
-从目标设备获取 `kallsyms_lookup_name` 地址：
-
-```bash
-adb shell "su -c 'cat /proc/kallsyms'" | grep ' kallsyms_lookup_name$'
-# 输出: ffffffc0xxxxxxxx T kallsyms_lookup_name
-```
-
-若 CRC/vermagic 与当前内核匹配，可直接用 `insmod`：
+若 CRC/vermagic 与当前内核匹配，可直接用 `insmod`。`insmod` 不会自动获取符号
+地址，需要显式传入 `kallsyms_addr=`：
 
 ```bash
 adb push hello_hook.ko /data/local/tmp/
-adb shell "su -c 'insmod /data/local/tmp/hello_hook.ko kallsyms_addr=0xffffffc0xxxxxxxx'"
+ADDR=$(adb shell "su -c 'grep \" kallsyms_lookup_name$\" /proc/kallsyms'" | awk '{print "0x"$1}')
+adb shell "su -c 'insmod /data/local/tmp/hello_hook.ko kallsyms_addr=$ADDR'"
 ```
 
-若 CRC/vermagic 不匹配（跨内核加载），使用 `kmod_loader`：
+若 CRC/vermagic 不匹配（跨内核加载），使用 `kmod_loader`。loader 会自动从
+`/proc/kallsyms` 获取 `kallsyms_lookup_name` 地址，无需手动传参：
 
 ```bash
 cd ../../tools/kmod_loader
 make
 adb push kmod_loader hello_hook.ko /data/local/tmp/
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0xffffffc0xxxxxxxx'"
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
+# 若 kptr_restrict 对 root 屏蔽了符号地址，可追加 kallsyms_addr=0xHEX 覆盖。
 ```
 
 ### 验证

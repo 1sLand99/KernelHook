@@ -11,9 +11,17 @@ Automated test infrastructure for running KernelHook kernel module tests across 
 # Test specific AVDs
 ./scripts/test_avd_kmod.sh Pixel_31 Pixel_34 Pixel_37
 
-# Manual single-device test
+# Userspace test sweep on a running emulator (auto adb-root + setenforce 0)
+./scripts/run_android_tests.sh --serial emulator-5554 --build-dir build_android
+
+# Manual single-device kmod test (USB / magisk only)
 ./scripts/run_android_tests.sh --kmod
 ```
+
+> `run_android_tests.sh` auto-issues `adb root` + `setenforce 0` on userdebug
+> emulators so userspace tests can `mprotect RW→RX`. The kmod path (`--kmod`)
+> still uses `su -c` helpers and is intended for USB/magisk devices; for
+> emulator kmod regression use `test_avd_kmod.sh` above.
 
 ## Prerequisites
 
@@ -69,7 +77,7 @@ python3 scripts/extract_avd_crcs.py -s emulator-5554 module_layout printk memcpy
 | Kernel | Issue | Root Cause |
 |--------|-------|------------|
 | 3.18 (API 25-27) | Skipped | Module loader hangs on large freestanding modules (MOVW relocation overhead) |
-| 5.4 (API 30) | Kernel oops | `populate_error_injection_list` NULL deref in `ei_module_callback` notifier; requires Kbuild+LTO build |
+| 5.4 (API 30) | Fixed | Was: `_error_injection_whitelist` section overflow + wrong `exit_off` preset (0x350→0x340) |
 | Pixel_36 | Boot timeout | AVD system image does not boot; API 36 is covered by Pixel_36.1 |
 
 ## Creating AVDs for Testing

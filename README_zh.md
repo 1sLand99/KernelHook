@@ -25,11 +25,9 @@ make
 # 推送到设备
 adb push kmod_loader hello_hook.ko /data/local/tmp/
 
-# 获取 kallsyms_lookup_name 地址
-ADDR=$(adb shell "su -c 'cat /proc/kallsyms'" | awk '/kallsyms_lookup_name$/{print "0x"$1}')
-
-# 加载
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=$ADDR'"
+# 加载（loader 会自动从 /proc/kallsyms 读取 kallsyms_lookup_name；
+# 如需手动指定可追加 kallsyms_addr=0xHEX）
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
 
 # 验证
 adb shell dmesg | grep hello_hook
@@ -42,7 +40,7 @@ adb shell dmesg | grep hello_hook
 | `src/arch/arm64/inline.c` | 指令重定位引擎 + 代码修补 |
 | `src/arch/arm64/transit.c` | 中转桩 + 回调分发 |
 | `src/arch/arm64/pgtable.c` | 页表遍历 + PTE 修改 |
-| `src/core_user.c` | Hook 链 API（hook/unhook/hook_wrap） |
+| `src/hook.c` | Hook 链 API（hook/unhook/hook_wrap） |
 | `src/hmem.c` | ROX/RW 内存池的位图分配器 |
 | `kmod/` | SDK、链接脚本、shim 头文件 |
 | `tools/kmod_loader/` | 自适应模块加载器 |
@@ -56,7 +54,7 @@ adb shell dmesg | grep hello_hook
 |---------|---------|-----|------|------|
 | 4.4     | 9       | 28  | 已验证 | `-mcmodel=large` 生成 MOVZ/MOVK 重定位 |
 | 4.14    | 10      | 29  | 已验证 | CRC 通过 `__ksymtab_` 回退提取 |
-| 5.4     | 11      | 30  | 阻塞 | 内核 `populate_error_injection_list` NULL 解引用；需要 Kbuild+LTO |
+| 5.4     | 11      | 30  | 已验证 | shadow-CFI + `_error_injection_whitelist` 修复 |
 | 5.10    | 12/12L  | 31-32 | 已验证 | shadow-CFI + KABI_RESERVE |
 | 5.15    | 13      | 33  | 已验证 | shadow-CFI，无 KABI |
 | 6.1     | 14      | 34  | 已验证 | kCFI 取代 shadow CFI；Pixel USB 设备已验证 |
@@ -87,10 +85,12 @@ cmake -B build_debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_debug
 cd build_debug && ctest
 
-# Android（交叉编译）
+# Android（交叉编译）— 自动适配真机或模拟器。
+# 在 userdebug 模拟器上 runner 会自动 `adb root` + `setenforce 0`，
+# 让测试能 mprotect RW→RX；在 USB 真机上则使用 magisk `su -c`。
 cmake -B build_android -DCMAKE_TOOLCHAIN_FILE=cmake/android-arm64.cmake -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_android
-./scripts/run_android_tests.sh
+./scripts/run_android_tests.sh              # 自动探测；或加 --serial emulator-5554
 ```
 
 ### 内核模块测试
@@ -102,7 +102,8 @@ cmake --build build_android
 # 测试指定 AVD
 ./scripts/test_avd_kmod.sh Pixel_31 Pixel_37
 
-# 手动单设备测试
+# 手动单设备 kmod 测试（仅 USB / magisk 设备 — 模拟器请用
+# test_avd_kmod.sh，它正确处理 adb-root 路径）
 ./scripts/run_android_tests.sh --kmod
 ```
 

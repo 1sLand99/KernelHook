@@ -10,10 +10,10 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <platform.h>
 
-/* External symbols from kh_section_fence.c */
+/* External symbols from section_fence.c */
 extern void __kh_text_fence_head(void);
 extern void __kh_text_fence_tail(void);
 
@@ -85,7 +85,7 @@ TEST(page_isolation_functional_after_hook)
 {
     /* Verify that hooking a local target works without SIGSEGV.
      * This is the actual scenario that used to crash on Android. */
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     hook_before_called = 0;
 
@@ -108,7 +108,7 @@ TEST(page_isolation_functional_after_hook)
                 (void *)isolation_before, NULL);
     ASSERT_EQ(call_local(3, 7), 10);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

@@ -15,7 +15,7 @@
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
-#include "../../kmod/shim/kmod_shim.h"
+#include "../../kmod/shim/shim.h"
 #include <ktypes.h>
 #include <hook.h>
 #include <ksyms.h>

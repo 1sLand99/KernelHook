@@ -13,8 +13,8 @@ KH_ROOT := $(src)/../..
 
 obj-m := kh_test.o
 kh_test-y := test_main.o test_hook_kernel.o \
-    kmod_mem_ops.o kmod_log.o kmod_transit_setup.o kmod_plt_stub.o \
-    $(KH_ROOT)/src/core_user.o \
+    mem_ops.o log.o transit_setup.o plt_stub.o \
+    $(KH_ROOT)/src/hook.o \
     $(KH_ROOT)/src/hmem.o \
     $(KH_ROOT)/src/ksyms.o \
     $(KH_ROOT)/src/arch/arm64/inline.o \

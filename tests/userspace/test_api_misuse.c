@@ -4,7 +4,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 /* On Android static binaries, platform_write_code() uses mprotect to
  * make the target's page RW.  If the target is on the same page,
@@ -89,12 +89,12 @@ static int (*fp_misuse)(int, int) = fp_misuse_impl;
 
 /*
  * Test 1: misuse_cleanup_while_hooked
- * Init, hook a function, then call hook_mem_user_cleanup() WITHOUT
+ * Init, hook a function, then call hmem_user_cleanup() WITHOUT
  * unhooking first.  No crash = pass.
  */
 TEST(misuse_cleanup_while_hooked)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     void *backup = NULL;
@@ -105,20 +105,20 @@ TEST(misuse_cleanup_while_hooked)
      * leaves the trampoline branch patched into the function body
      * pointing at freed/unmapped ROX pages — a latent crash hazard. */
     unhook((void *)misuse_target_cleanup);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /*
  * Test 2: misuse_double_init
- * Call hook_mem_user_init() twice.  Either call may succeed or fail;
+ * Call hmem_user_init() twice.  Either call may succeed or fail;
  * what matters is no crash.
  */
 TEST(misuse_double_init)
 {
-    (void)hook_mem_user_init();
-    (void)hook_mem_user_init();
+    (void)hmem_user_init();
+    (void)hmem_user_init();
     /* No crash = pass */
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /*
@@ -127,10 +127,10 @@ TEST(misuse_double_init)
  */
 TEST(misuse_hook_after_cleanup)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 
     void *backup = NULL;
     hook_err_t err = hook((void *)misuse_target_afterclean, (void *)misuse_replace, &backup);
@@ -145,7 +145,7 @@ TEST(misuse_hook_after_cleanup)
  */
 TEST(misuse_wrap_argno_negative)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     hook_err_t err = hook_wrap((void *)misuse_target_neg, -1,
@@ -158,7 +158,7 @@ TEST(misuse_wrap_argno_negative)
     }
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /*
@@ -168,7 +168,7 @@ TEST(misuse_wrap_argno_negative)
  */
 TEST(misuse_wrap_argno_overflow)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     hook_err_t err = hook_wrap((void *)misuse_target_ovf, 99,
@@ -180,7 +180,7 @@ TEST(misuse_wrap_argno_overflow)
     }
     /* No crash = pass */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /*
@@ -191,7 +191,7 @@ TEST(misuse_wrap_argno_overflow)
  */
 TEST(misuse_fp_unhook_wrong_backup)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     fp_misuse = fp_misuse_impl;
@@ -206,7 +206,7 @@ TEST(misuse_fp_unhook_wrong_backup)
     /* Restore the FP variable so no bad address is called later */
     fp_misuse = fp_misuse_impl;
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

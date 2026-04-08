@@ -5,7 +5,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <stddef.h>
 
 #define BLOCK_SIZE 64

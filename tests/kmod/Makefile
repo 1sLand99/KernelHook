@@ -67,7 +67,7 @@ FS_CFLAGS += -DMODULE_INIT_OFFSET=0x150 -DMODULE_EXIT_OFFSET=0x2f8
 else ifeq ($(KVER_MAJOR).$(KVER_MINOR),4.19)
 FS_CFLAGS += -DMODULE_INIT_OFFSET=0x168 -DMODULE_EXIT_OFFSET=0x318
 else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.4)
-FS_CFLAGS += -DMODULE_INIT_OFFSET=0x178 -DMODULE_EXIT_OFFSET=0x350
+FS_CFLAGS += -DMODULE_INIT_OFFSET=0x178 -DMODULE_EXIT_OFFSET=0x340
 else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.10)
 FS_CFLAGS += -DMODULE_INIT_OFFSET=0x190 -DMODULE_EXIT_OFFSET=0x3c8
 else ifeq ($(KVER_MAJOR).$(KVER_MINOR),5.15)
@@ -81,9 +81,9 @@ FS_CFLAGS += -DMODULE_INIT_OFFSET=0x188 -DMODULE_EXIT_OFFSET=0x5f8
 endif
 
 # Source files for freestanding build
-FS_TEST_SRCS := test_main.c test_hook_kernel.c kmod_mem_ops.c kmod_log.c kmod_transit_setup.c
-FS_ASM_SRCS  := kmod_plt_stub.S
-FS_CORE_SRCS := $(KH_ROOT)/src/core_user.c \
+FS_TEST_SRCS := test_main.c test_hook_kernel.c mem_ops.c log.c transit_setup.c
+FS_ASM_SRCS  := plt_stub.S
+FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/hmem.c \
                 $(KH_ROOT)/src/ksyms.c \
                 $(KH_ROOT)/src/arch/arm64/inline.c \
@@ -118,7 +118,7 @@ src/%.fs.o: $(KH_ROOT)/src/%.c
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
 kh_test.ko: $(FS_TEST_OBJS) $(FS_ASM_OBJS) $(FS_CORE_OBJS)
-	$(LD) -r -T kmod_freestanding.lds -o $@ $^
+	$(LD) -r -T freestanding.lds -o $@ $^
 
 # ---- Test (delegates to project-level Android test runner) ----
 test:

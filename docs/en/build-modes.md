@@ -15,7 +15,7 @@ KernelHook supports three build modes for kernel modules. Choose based on your c
 
 ## Mode A -- Freestanding
 
-No kernel headers required. Uses `kmod_shim.h` as a minimal kernel header replacement. The core hooking library is compiled directly into your `.ko`.
+No kernel headers required. Uses `shim.h` as a minimal kernel header replacement. The core hooking library is compiled directly into your `.ko`.
 
 ### Build
 
@@ -38,7 +38,7 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 ### Source Includes
 
 ```c
-#include "../../kmod/shim/kmod_shim.h"
+#include "../../kmod/shim/shim.h"
 #include <ktypes.h>
 #include <hook.h>
 #include <ksyms.h>
@@ -80,7 +80,7 @@ static int __init my_hook_init(void)
 Use `insmod` if CRC/vermagic matches, or `kmod_loader` for cross-kernel compatibility:
 
 ```bash
-kmod_loader my_hook.ko kallsyms_addr=0x...
+kmod_loader my_hook.ko    # auto-fetches kallsyms_addr from /proc/kallsyms
 ```
 
 ## Mode B -- SDK
@@ -153,7 +153,7 @@ KH_ROOT := /path/to/KernelHook
 
 obj-m := my_hook.o
 my_hook-y := my_hook_main.o \
-    $(KH_ROOT)/src/core_user.o \
+    $(KH_ROOT)/src/hook.o \
     $(KH_ROOT)/src/hmem.o \
     $(KH_ROOT)/src/ksyms.o \
     $(KH_ROOT)/src/arch/arm64/inline.o \

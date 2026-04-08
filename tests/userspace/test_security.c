@@ -17,7 +17,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 #ifndef HAS_BRANCH_PROTECTION
 /* Compiler does not support -mbranch-protection=standard */
@@ -105,7 +105,7 @@ static void after_cb(hook_fargs2_t *fargs, void *udata)
 /* Simple hook on a BTI+PAC function: hook, call, verify return value */
 TEST(security_simple_hook_leaf)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -127,13 +127,13 @@ TEST(security_simple_hook_leaf)
     ASSERT_EQ(captured_arg1, 7);
 
     hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* Chain hook on BTI+PAC function with before/after callbacks */
 TEST(security_chain_hook_leaf)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -152,13 +152,13 @@ TEST(security_chain_hook_leaf)
 
     hook_unwrap((void *)target_leaf_add,
                 (void *)before_cb, (void *)after_cb);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* Unhook restores original function correctly */
 TEST(security_unhook_restores)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -183,13 +183,13 @@ TEST(security_unhook_restores)
     ASSERT_FALSE(before_called);
     ASSERT_FALSE(after_called);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* Verify trampoline has BTI_JC at position 0 after hooking */
 TEST(security_trampoline_has_bti_jc)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     hook_err_t err = hook_wrap(
@@ -204,13 +204,13 @@ TEST(security_trampoline_has_bti_jc)
     ASSERT_EQ(first_inst, ARM64_BTI_JC);
 
     hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* Hook a non-leaf function (PACIASP prologue) */
 TEST(security_nonleaf_hook)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -235,7 +235,7 @@ TEST(security_nonleaf_hook)
 
     hook_unwrap((void *)target_nonleaf_add,
                 (void *)before_cb, (void *)after_cb);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

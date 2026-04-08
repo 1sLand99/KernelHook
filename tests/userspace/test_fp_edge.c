@@ -7,20 +7,20 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <string.h>
 
 /* ---- Setup/teardown ---- */
 
 static void hook_setup(void)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void hook_teardown(void)
 {
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* ---- Execution order tracking ---- */

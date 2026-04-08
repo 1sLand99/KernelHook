@@ -11,9 +11,17 @@
 # 测试指定 AVD
 ./scripts/test_avd_kmod.sh Pixel_31 Pixel_34 Pixel_37
 
-# 手动单设备测试
+# 在运行中的模拟器上跑用户态测试套件（自动 adb root + setenforce 0）
+./scripts/run_android_tests.sh --serial emulator-5554 --build-dir build_android
+
+# 手动单设备 kmod 测试（仅 USB / magisk 真机）
 ./scripts/run_android_tests.sh --kmod
 ```
+
+> `run_android_tests.sh` 在 userdebug 模拟器上会自动执行 `adb root` +
+> `setenforce 0`，让用户态测试可以 `mprotect RW→RX`。`--kmod` 路径仍然依赖
+> `su -c` helper，仅适用于 USB / magisk 真机；模拟器上跑 kmod 回归请使用上面
+> 的 `test_avd_kmod.sh`。
 
 ## 前置要求
 
@@ -69,7 +77,7 @@ python3 scripts/extract_avd_crcs.py -s emulator-5554 module_layout printk memcpy
 | 内核版本 | 问题 | 根因 |
 |---------|------|------|
 | 3.18 (API 25-27) | 跳过 | 大模块加载挂起（MOVW 重定位开销过大） |
-| 5.4 (API 30) | 内核 oops | `populate_error_injection_list` 在 `ei_module_callback` 通知链中 NULL 解引用；需要 Kbuild+LTO 构建 |
+| 5.4 (API 30) | 已修复 | 原因：`_error_injection_whitelist` 段溢出 + `exit_off` 预设错误（0x350→0x340） |
 | Pixel_36 | 启动超时 | AVD 系统镜像无法启动；API 36 由 Pixel_36.1 覆盖 |
 
 ## 创建测试用 AVD

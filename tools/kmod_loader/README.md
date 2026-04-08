@@ -24,13 +24,13 @@ kmod_loader <module.ko> [kallsyms_addr=0xHEX] [options] [param=value ...]
 
 ```bash
 make              # Build kmod_loader (host binary)
-make regenerate   # Rebuild embedded probe_module.ko (needs cross-compiler)
+make regenerate   # Rebuild embedded probe.ko (needs cross-compiler)
 make clean        # Clean build artifacts
 ```
 
-The embedded `probe_module_embed.h` is pre-committed -- `make` only requires a host C compiler.
+The embedded `probe_embed.h` is pre-committed -- `make` only requires a host C compiler.
 
-内嵌的 `probe_module_embed.h` 已预先提交，`make` 只需宿主机 C 编译器。
+内嵌的 `probe_embed.h` 已预先提交，`make` 只需宿主机 C 编译器。
 
 ## What It Patches / 修补内容
 

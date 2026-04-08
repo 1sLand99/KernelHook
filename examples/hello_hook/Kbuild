@@ -11,7 +11,7 @@ KH_ROOT := $(src)/../..
 
 obj-m := hello_hook.o
 hello_hook-y := hello_hook_main.o \
-    $(KH_ROOT)/src/core_user.o \
+    $(KH_ROOT)/src/hook.o \
     $(KH_ROOT)/src/hmem.o \
     $(KH_ROOT)/src/ksyms.o \
     $(KH_ROOT)/src/arch/arm64/inline.o \

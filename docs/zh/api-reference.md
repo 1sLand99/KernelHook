@@ -129,15 +129,22 @@ void *fp_get_origin_func(void *hook_args);
 
 头文件：`<ksyms.h>`
 
+### `ksyms_init`
+
+```c
+int ksyms_init(uint64_t kallsyms_lookup_name_addr);
+```
+
+用内核 `kallsyms_lookup_name` 的运行时地址初始化符号解析器。必须在调用
+`ksyms_lookup` / `ksyms_lookup_cache` 之前调用。成功返回 0，失败返回非零。
+
 ### `ksyms_lookup`
 
 ```c
 uint64_t ksyms_lookup(const char *name);
 ```
 
-按名称查找内核符号，返回地址。未找到时返回 0。
-
-需要事先通过 `ksyms_init(kallsyms_lookup_name_addr)` 初始化。
+按名称查找内核符号，返回地址。未找到时返回 0。必须先调用 `ksyms_init()`。
 
 ### `ksyms_lookup_cache`
 

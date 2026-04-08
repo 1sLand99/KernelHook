@@ -3,7 +3,7 @@
  * Minimal probe module for kmod_loader binary offset probing.
  * init returns -EINVAL so kmod_loader can detect "init was called".
  */
-#include "kmod_shim.h"
+#include "shim.h"
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("kmod_loader init offset probe");

@@ -9,7 +9,7 @@
  */
 
 #ifdef KMOD_FREESTANDING
-#include "kmod_shim.h"
+#include "shim.h"
 #else
 #include <linux/string.h>
 #endif

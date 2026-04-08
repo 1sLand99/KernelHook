@@ -22,7 +22,7 @@
 #ifdef __linux__
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -41,13 +41,13 @@ TEST(linux_mprotect_wx_enforced)
      * On macOS, memory protection uses mach_vm_protect which has
      * different semantics.  This test exercises the Linux mprotect path.
      */
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     /* Simple verification that hook_mem is functional on Linux */
     ASSERT_TRUE(1); /* Placeholder — real W^X verification needs /proc/self/maps parsing */
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 #endif
 }
 
@@ -107,7 +107,7 @@ TEST(linux_scs_hook_basic)
 #if !defined(__linux__) || defined(__ANDROID__)
     SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_scs_prologue;
@@ -124,7 +124,7 @@ TEST(linux_scs_hook_basic)
     unhook((void *)fn);
     ASSERT_EQ(fn(10, 20), 30);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 #endif
 }
 
@@ -133,7 +133,7 @@ TEST(linux_bti_scs_interaction)
 #if !defined(__linux__) || defined(__ANDROID__)
     SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_bti_scs;
@@ -149,7 +149,7 @@ TEST(linux_bti_scs_interaction)
     unhook((void *)fn);
     ASSERT_EQ(fn(5, 7), 12);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 #endif
 }
 

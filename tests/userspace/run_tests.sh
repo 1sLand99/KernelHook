@@ -16,7 +16,7 @@ BOLD='\033[1m'
 RESET='\033[0m'
 
 TESTS=(
-    test_framework_smoke
+    test_smoke
     test_hmem
     test_reloc
     test_chain

@@ -8,7 +8,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 #include <stdint.h>
 
 /* ---- Target function (must be >= 16 bytes for trampoline) ---- */
@@ -26,13 +26,13 @@ static int (*volatile call_pac_target)(int, int) = pac_target;
 
 static void pac_setup(void)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void pac_teardown(void)
 {
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* ---- Tests ---- */

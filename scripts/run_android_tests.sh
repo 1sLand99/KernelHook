@@ -110,20 +110,67 @@ fi
 printf "${BOLD}KernelHook Android Test Runner${RESET}\n"
 printf "  Target: %s (%s)\n" "$DEVICE" "$DEV_TYPE"
 
-# ---- Check root ----
+# ---- Check / acquire root ----
+#
+# Three paths to root:
+#   1. magisk `su` (USB devices) — non-interactive `su -c id`
+#   2. adb root (userdebug emulators / -userdebug devices) — restarts adbd
+#   3. nothing — tests requiring mprotect RW→RX will SEGV; warn loudly
+#
+# On emulators we always try `adb root` first since `su` is not present.
 
 HAS_ROOT=0
-if $ADB shell "su -c id" 2>/dev/null | grep -q "uid=0"; then
+
+try_su_root() {
+    $ADB shell "su -c id" 2>/dev/null | grep -q "uid=0"
+}
+
+try_adb_root() {
+    # adb root succeeds silently on userdebug builds and prints
+    # "adbd cannot run as root in production builds" otherwise.
+    local out
+    out=$($ADB root 2>&1)
+    case "$out" in
+        *"already running as root"*|*"restarting adbd as root"*) ;;
+        *"production builds"*|*"cannot run as root"*) return 1 ;;
+    esac
+    # adbd restarts; wait for it to come back.
+    $ADB wait-for-device >/dev/null 2>&1
+    $ADB shell id 2>/dev/null | grep -q "uid=0"
+}
+
+if try_su_root; then
     HAS_ROOT=1
-    printf "  Root: ${GREEN}available${RESET}\n"
-    # Allow mprotect RW→RX on test binaries (SELinux execmod policy).
-    # platform_write_code() needs this to patch code pages.
+    ROOT_METHOD="su"
+elif [ "$DEV_TYPE" = "emulator" ] && try_adb_root; then
+    HAS_ROOT=1
+    ROOT_METHOD="adb-root"
+fi
+
+if [ "$HAS_ROOT" -eq 1 ]; then
+    printf "  Root: ${GREEN}available${RESET} (%s)\n" "$ROOT_METHOD"
+    # Magisk path: targeted execmod policy
     if $ADB shell "which magiskpolicy" >/dev/null 2>&1; then
         $ADB shell "su -c 'magiskpolicy --live \"allow shell shell_data_file file execmod\"'" >/dev/null 2>&1
         printf "  SELinux: ${GREEN}execmod policy added${RESET}\n"
+    elif [ "$ROOT_METHOD" = "adb-root" ]; then
+        # adb-root path (emulators): drop SELinux to permissive so platform_write_code
+        # can mprotect RW→RX. This is the same effect run_tests.sh used to require
+        # users to do manually.
+        $ADB shell "setenforce 0" 2>/dev/null
+        mode=$($ADB shell "getenforce" 2>/dev/null | tr -d '[:space:]')
+        if [ "$mode" = "Permissive" ]; then
+            printf "  SELinux: ${GREEN}permissive${RESET}\n"
+        else
+            printf "  SELinux: ${YELLOW}%s (could not set permissive)${RESET}\n" "$mode"
+        fi
     fi
 else
-    printf "  Root: ${YELLOW}not available (some tests may skip)${RESET}\n"
+    printf "  Root: ${YELLOW}not available${RESET}\n"
+    if [ "$DEV_TYPE" = "emulator" ]; then
+        printf "         Tried 'adb root' but adbd refused — is this a -user build?\n"
+    fi
+    printf "         Tests requiring mprotect RW→RX will crash (SIGSEGV).\n"
 fi
 
 # ---- Build if needed ----
@@ -190,7 +237,9 @@ run_test() {
     local name="$1"
     local cmd="$REMOTE_DIR/$name"
 
-    if [ "$HAS_ROOT" -eq 1 ]; then
+    # adb-root devices already run adbd as uid 0 — no `su` needed
+    # (and emulators don't ship a `su` binary anyway).
+    if [ "$HAS_ROOT" -eq 1 ] && [ "$ROOT_METHOD" = "su" ]; then
         cmd="su -c $cmd"
     fi
 
@@ -245,6 +294,9 @@ if [ "$KMOD" -eq 1 ]; then
     # Require root for kmod operations
     if [ "$HAS_ROOT" -ne 1 ]; then
         printf "  ${YELLOW}SKIP${RESET} kmod tests (no root access)\n"
+        SKIPPED=$((SKIPPED + 1))
+    elif [ "$ROOT_METHOD" = "adb-root" ]; then
+        printf "  ${YELLOW}SKIP${RESET} kmod tests (adb-root path uses 'su -c' helpers; use scripts/test_avd_kmod.sh for emulator kmod regression)\n"
         SKIPPED=$((SKIPPED + 1))
     else
         KMOD_KO="$ROOT/tests/kmod/kh_test.ko"

@@ -16,7 +16,7 @@ function(kh_add_test name source)
 endfunction()
 
 # --- Test executables ---
-kh_add_test(test_framework_smoke test_framework_smoke.c)
+kh_add_test(test_smoke test_smoke.c)
 kh_add_test(test_hmem test_hmem.c)
 kh_add_test(test_reloc test_reloc.c)
 kh_add_test(test_chain test_chain.c)
@@ -70,7 +70,7 @@ kh_add_test(test_page_isolation test_page_isolation.c)
 # --- Android: static linking so binaries run standalone ---
 if(ANDROID)
     foreach(_tgt
-        test_framework_smoke test_hmem test_reloc test_chain
+        test_smoke test_hmem test_reloc test_chain
         test_hook_basic test_hook_chain test_stress test_remote
         test_pac_strip test_interaction test_unit test_security
         test_linux_arm64 test_error_paths test_typed_wrappers

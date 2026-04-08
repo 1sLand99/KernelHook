@@ -8,7 +8,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 /* ---- Shared callback-state ---- */
 
@@ -52,7 +52,7 @@ static void after_0(hook_fargs0_t *fargs, void *udata)
 
 TEST(wrap0)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -66,7 +66,7 @@ TEST(wrap0)
     ASSERT_EQ(g_captured_ret, (uint64_t)42);
 
     hook_unwrap((void *)target_0, (void *)before_0, (void *)after_0);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* ====================================================================
@@ -98,7 +98,7 @@ static void after_1(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap1)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -112,7 +112,7 @@ TEST(wrap1)
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
     hook_unwrap((void *)target_1, (void *)before_1, (void *)after_1);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 2 --- */
@@ -140,7 +140,7 @@ static void after_2(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap2)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -154,7 +154,7 @@ TEST(wrap2)
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
     hook_unwrap((void *)target_2, (void *)before_2, (void *)after_2);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 3 --- */
@@ -182,7 +182,7 @@ static void after_3(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap3)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -196,7 +196,7 @@ TEST(wrap3)
     ASSERT_EQ(g_captured_ret, (uint64_t)6);
 
     hook_unwrap((void *)target_3, (void *)before_3, (void *)after_3);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 4 --- */
@@ -224,7 +224,7 @@ static void after_4(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap4)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -238,7 +238,7 @@ TEST(wrap4)
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
     hook_unwrap((void *)target_4, (void *)before_4, (void *)after_4);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* ====================================================================
@@ -272,7 +272,7 @@ static void after_5(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap5)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -286,7 +286,7 @@ TEST(wrap5)
     ASSERT_EQ(g_captured_ret, (uint64_t)15);
 
     hook_unwrap((void *)target_5, (void *)before_5, (void *)after_5);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 6 --- */
@@ -316,7 +316,7 @@ static void after_6(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap6)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -330,7 +330,7 @@ TEST(wrap6)
     ASSERT_EQ(g_captured_ret, (uint64_t)21);
 
     hook_unwrap((void *)target_6, (void *)before_6, (void *)after_6);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 7 --- */
@@ -360,7 +360,7 @@ static void after_7(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap7)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -374,7 +374,7 @@ TEST(wrap7)
     ASSERT_EQ(g_captured_ret, (uint64_t)28);
 
     hook_unwrap((void *)target_7, (void *)before_7, (void *)after_7);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 8 --- */
@@ -405,7 +405,7 @@ static void after_8(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap8)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -419,7 +419,7 @@ TEST(wrap8)
     ASSERT_EQ(g_captured_ret, (uint64_t)36);
 
     hook_unwrap((void *)target_8, (void *)before_8, (void *)after_8);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* ====================================================================
@@ -455,7 +455,7 @@ static void after_9(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap9)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -469,7 +469,7 @@ TEST(wrap9)
     ASSERT_EQ(g_captured_ret, (uint64_t)45);
 
     hook_unwrap((void *)target_9, (void *)before_9, (void *)after_9);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 10 --- */
@@ -501,7 +501,7 @@ static void after_10(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap10)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -515,7 +515,7 @@ TEST(wrap10)
     ASSERT_EQ(g_captured_ret, (uint64_t)55);
 
     hook_unwrap((void *)target_10, (void *)before_10, (void *)after_10);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 11 --- */
@@ -547,7 +547,7 @@ static void after_11(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap11)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -561,7 +561,7 @@ TEST(wrap11)
     ASSERT_EQ(g_captured_ret, (uint64_t)66);
 
     hook_unwrap((void *)target_11, (void *)before_11, (void *)after_11);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 /* --- Arity 12 --- */
@@ -594,7 +594,7 @@ static void after_12(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap12)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -608,7 +608,7 @@ TEST(wrap12)
     ASSERT_EQ(g_captured_ret, (uint64_t)78);
 
     hook_unwrap((void *)target_12, (void *)before_12, (void *)after_12);
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

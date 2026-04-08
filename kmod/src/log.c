@@ -6,7 +6,7 @@
  */
 
 #ifdef KMOD_FREESTANDING
-#include "../shim/kmod_shim.h"
+#include "../shim/shim.h"
 #include <hook.h>
 #include <ksyms.h>
 #else

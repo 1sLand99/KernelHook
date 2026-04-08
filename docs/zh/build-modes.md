@@ -15,7 +15,7 @@ KernelHook 为内核模块提供三种构建模式，根据实际需求选择。
 
 ## 模式 A -- Freestanding
 
-无需内核头文件。使用 `kmod_shim.h` 作为最小化的内核头文件替代。核心 hook 库直接编译进你的 `.ko` 中。
+无需内核头文件。使用 `shim.h` 作为最小化的内核头文件替代。核心 hook 库直接编译进你的 `.ko` 中。
 
 ### 构建
 
@@ -38,7 +38,7 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 ### 源码 include
 
 ```c
-#include "../../kmod/shim/kmod_shim.h"
+#include "../../kmod/shim/shim.h"
 #include <ktypes.h>
 #include <hook.h>
 #include <ksyms.h>
@@ -80,7 +80,7 @@ static int __init my_hook_init(void)
 CRC/vermagic 匹配时用 `insmod`，不匹配时用 `kmod_loader` 实现跨内核加载：
 
 ```bash
-kmod_loader my_hook.ko kallsyms_addr=0x...
+kmod_loader my_hook.ko    # 自动从 /proc/kallsyms 获取 kallsyms_addr
 ```
 
 ## 模式 B -- SDK
@@ -153,7 +153,7 @@ KH_ROOT := /path/to/KernelHook
 
 obj-m := my_hook.o
 my_hook-y := my_hook_main.o \
-    $(KH_ROOT)/src/core_user.o \
+    $(KH_ROOT)/src/hook.o \
     $(KH_ROOT)/src/hmem.o \
     $(KH_ROOT)/src/ksyms.o \
     $(KH_ROOT)/src/arch/arm64/inline.o \

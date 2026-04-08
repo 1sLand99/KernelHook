@@ -59,7 +59,7 @@ static const struct kver_preset presets[] = {
     { 4, 14, 0x370, 0x150, 0x2f8 },  /* AVD android-29, init verified via disasm */
     { 4, 19, 0x390, 0x168, 0x318 },
     /* Linux 5.x — ANDROID_KABI_RESERVE inflates struct module */
-    { 5, 4,  0x400, 0x178, 0x350 },  /* AVD android-30, init verified via disasm */
+    { 5, 4,  0x400, 0x178, 0x340 },  /* AVD android-30 verified (exit was 0x350→0x340) */
     { 5, 10, 0x440, 0x190, 0x3c8 },  /* AVD android12-5.10 verified */
     { 5, 15, 0x3c0, 0x178, 0x378 },  /* AVD android13-5.15 verified */
     /* Linux 6.x — kCFI replaces shadow CFI */
@@ -1080,7 +1080,7 @@ static uint32_t probe_cand_offset(int idx)
 }
 
 #ifdef EMBED_PROBE_KO
-#include "probe_module_embed.h"
+#include "probe_embed.h"
 #endif
 
 #ifndef __NR_delete_module
@@ -1437,6 +1437,46 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
     return result;
 }
 
+/* ---- kallsyms auto-discovery ----
+ *
+ * Reads /proc/kallsyms and returns the address of `kallsyms_lookup_name`.
+ * The loader must already be running as root (init_module / finit_module
+ * requires CAP_SYS_MODULE), so /proc/kallsyms is readable with unmasked
+ * addresses provided kptr_restrict <= 1. Returns 0 on failure; caller
+ * can override with kallsyms_addr=0xHEX on the CLI.
+ */
+static uint64_t auto_fetch_kallsyms_addr(void)
+{
+    FILE *fp = fopen("/proc/kallsyms", "r");
+    if (!fp) {
+        fprintf(stderr, "kmod_loader: cannot open /proc/kallsyms: %s\n",
+                strerror(errno));
+        return 0;
+    }
+    char line[512];
+    uint64_t addr = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        /* format: "ffffffc010123456 T kallsyms_lookup_name\n" */
+        char type;
+        uint64_t a;
+        char name[256];
+        if (sscanf(line, "%lx %c %255s", &a, &type, name) == 3 &&
+            strcmp(name, "kallsyms_lookup_name") == 0) {
+            addr = a;
+            break;
+        }
+    }
+    fclose(fp);
+    if (addr) {
+        fprintf(stderr, "kmod_loader: auto-fetched kallsyms_lookup_name=0x%lx\n",
+                (unsigned long)addr);
+    } else {
+        fprintf(stderr, "kmod_loader: /proc/kallsyms exposes no unmasked "
+                        "symbols (kptr_restrict?)\n");
+    }
+    return addr;
+}
+
 /* ---- Main ---- */
 
 int main(int argc, char *argv[])
@@ -1622,7 +1662,19 @@ int main(int argc, char *argv[])
 
     /* Step 3.5: Patch kallsyms_addr directly into ELF data section.
      * This bypasses module_param, avoiding CFI indirect-call checks
-     * on shadow-CFI (5.10) kernels. */
+     * on shadow-CFI (5.10) kernels.
+     *
+     * If the user didn't pass kallsyms_addr= on the CLI, try to auto-fetch
+     * kallsyms_lookup_name from /proc/kallsyms. This removes a manual step
+     * for the common case. Failure is non-fatal — the loader still runs
+     * and lets the in-kernel init report the missing symbol. */
+    if (!have_kallsyms_addr) {
+        kallsyms_addr = auto_fetch_kallsyms_addr();
+        if (kallsyms_addr) have_kallsyms_addr = 1;
+        else
+            fprintf(stderr, "kmod_loader: WARNING: no kallsyms_addr= given and "
+                            "auto-fetch failed; pass kallsyms_addr=0xHEX manually\n");
+    }
     if (have_kallsyms_addr && kallsyms_addr) {
         if (patch_elf_symbol(mod, alloc_size, eh, "kallsyms_addr", kallsyms_addr) == 0)
             fprintf(stderr, "kmod_loader: patched kallsyms_addr=0x%lx in ELF\n",
@@ -1632,7 +1684,7 @@ int main(int argc, char *argv[])
     }
 
     /* Note: cfi_check is now handled at compile time via MODULE_CFI_CHECK_OFFSET
-     * in kmod_shim.h — no runtime injection needed. */
+     * in shim.h — no runtime injection needed. */
 
     /* Step 4: Try to patch CRCs from kernel Image (best-effort) */
     patch_crcs(mod, eh);

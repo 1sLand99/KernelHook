@@ -11,8 +11,8 @@
  *   - Proper ELF relocatable format (ET_REL)
  */
 
-#ifndef _KMOD_SHIM_H_
-#define _KMOD_SHIM_H_
+#ifndef _SHIM_H_
+#define _SHIM_H_
 
 #include <ktypes.h>
 
@@ -250,8 +250,14 @@ struct modversion_info {
 #define MODULE_NAME "kh_test"
 #endif
 
+/* Pad vermagic to ~160 bytes with trailing spaces so the loader can replace
+ * it with any kernel's vermagic (which may be longer than the compiled-in
+ * string). The kernel's check_modinfo() uses strcmp on vermagic, so spaces
+ * would cause mismatch — the loader must patch vermagic before loading. */
+#define _KH_VM_PAD \
+    "                                                                "
 #define MODULE_VERMAGIC()                                               \
-    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING);                 \
+    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING _KH_VM_PAD);      \
     __MODULE_INFO(name, modulename, MODULE_NAME)
 
 /*
@@ -291,6 +297,37 @@ struct modversion_info {
 #define MODULE_EXIT_OFFSET 0x3d8
 #endif
 
+/* Shadow-CFI permissive stub (CONFIG_CFI_CLANG + CONFIG_CFI_CLANG_SHADOW).
+ *
+ * On 5.10/5.15 GKI kernels, shadow-based CFI uses mod->cfi_check to validate
+ * indirect calls into modules. find_module_sections() sets it by looking up
+ * the GLOBAL symbol "__cfi_check" in the module's symtab. Without it, any
+ * indirect call (including do_one_initcall → mod->init) panics.
+ *
+ * On 6.1+ kCFI kernels, this symbol is found but the field is unused — kCFI
+ * validates calls via inline type-hash checks, not the shadow + callback
+ * mechanism. So this stub is harmless on kCFI.
+ *
+ * Must be non-weak GLOBAL: 5.4 GKI's find_module_sections() skips weak symbols
+ * when setting mod->cfi_check. Emitted via MODULE_THIS_MODULE() to ensure
+ * exactly one definition. */
+#define MODULE_CFI_CHECK()                                                    \
+    void __attribute__((used, visibility("default"), section(".text")))        \
+    __cfi_check(unsigned long id, void *ptr, void *diag) { /* permissive */ } \
+    void __attribute__((weak, used, visibility("default"), section(".text")))  \
+    __cfi_check_fail(void *data, void *ptr) { /* permissive */ }
+
+/* _error_injection_whitelist: see MODULE_ERROR_INJECTION_WHITELIST() below.
+ * Must be emitted exactly once — previously at file scope, which caused
+ * multiple .byte entries when shim.h was included by several .c files.
+ * On kernels with HAVE_ARCH_PREL32_RELOCATIONS (ARM64), sizeof(struct
+ * error_injection_entry) = 8, and accumulating ≥8 bytes made the kernel
+ * interpret garbage as a valid entry → crash in populate_error_injection_list.
+ */
+
+/* struct module with init and exit at the correct offsets for the target kernel.
+ * cfi_check is NOT included here — it's set by find_module_sections via the
+ * __cfi_check symbol name lookup. We just need the symbol to exist. */
 #define MODULE_THIS_MODULE()                                            \
     extern int  init_module(void);                                      \
     extern void cleanup_module(void);                                   \
@@ -303,15 +340,36 @@ struct modversion_info {
         void (*exit)(void);                                             \
         char __pad3[THIS_MODULE_SIZE - MODULE_EXIT_OFFSET - 8];        \
     };                                                                  \
-    /* Use .kh.this_module instead of .gnu.linkonce.this_module to avoid
-     * lld discarding the section during -r linking (linkonce semantics).
-     * The linker script renames it to .gnu.linkonce.this_module. */     \
     struct module __this_module                                         \
         __used __aligned(64) __section(".kh.this_module") = {           \
             .__pre_name = {0},                                          \
             .name = MODULE_NAME,                                        \
             .init = init_module,                                        \
             .exit = cleanup_module,                                     \
-        }
+        };                                                              \
+    MODULE_CFI_CHECK();                                                 \
+    /* Force _error_injection_whitelist section (exactly 1 byte).        \
+     * CONFIG_FUNCTION_ERROR_INJECTION kernels call                      \
+     * populate_error_injection_list(); missing section → NULL deref.    \
+     * section_objs() returns 0 entries (1 / sizeof(entry) = 0).        \
+     * Emitted here (not file scope) to guarantee exactly one byte. */  \
+    __asm__(".pushsection _error_injection_whitelist, \"aw\"\n"         \
+            ".byte 0\n"                                                 \
+            ".popsection\n");                                           \
+    /* Shadow-CFI jump table stubs for 5.4 GKI.                        \
+     * The kernel replaces init_module/cleanup_module with .cfi_jt      \
+     * when applying relocations. Without these, mod->init is NULL. */  \
+    __asm__(                                                            \
+        ".pushsection .text, \"ax\"\n"                                  \
+        ".global init_module.cfi_jt\n"                                  \
+        ".type init_module.cfi_jt, %function\n"                         \
+        "init_module.cfi_jt: b init_module\n"                           \
+        ".size init_module.cfi_jt, . - init_module.cfi_jt\n"           \
+        ".global cleanup_module.cfi_jt\n"                               \
+        ".type cleanup_module.cfi_jt, %function\n"                      \
+        "cleanup_module.cfi_jt: b cleanup_module\n"                     \
+        ".size cleanup_module.cfi_jt, . - cleanup_module.cfi_jt\n"     \
+        ".popsection\n"                                                 \
+    )
 
-#endif /* _KMOD_SHIM_H_ */
+#endif /* _SHIM_H_ */

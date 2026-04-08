@@ -5,8 +5,12 @@
 ## 用法
 
 ```
-kmod_loader <module.ko> [kallsyms_addr=0xHEX] [选项] [param=value ...]
+kmod_loader <module.ko> [选项] [param=value ...]
 ```
+
+`kallsyms_lookup_name` 由 loader 自动从 `/proc/kallsyms` 获取。loader 本身
+必须以 root 运行（加载内核模块需要 `CAP_SYS_MODULE`），且内核要对 root 暴露
+符号地址（`kptr_restrict <= 1`）。需要覆盖时显式追加 `kallsyms_addr=0xHEX`。
 
 ## 修补内容
 
@@ -24,7 +28,7 @@ kmod_loader <module.ko> [kallsyms_addr=0xHEX] [选项] [param=value ...]
 
 | 选项 | 说明 |
 |------|------|
-| `kallsyms_addr=0xHEX` | `kallsyms_lookup_name` 的地址（大多数模块必需） |
+| `kallsyms_addr=0xHEX` | 覆盖自动获取的 `kallsyms_lookup_name` 地址 |
 | `--init-off 0xHEX` | 手动指定 `struct module` 中 init 函数的偏移 |
 | `--exit-off 0xHEX` | 手动指定 `struct module` 中 exit 函数的偏移 |
 | `--probe` | 强制重新探测 init/exit 偏移（忽略缓存） |
@@ -40,7 +44,7 @@ kmod_loader <module.ko> [kallsyms_addr=0xHEX] [选项] [param=value ...]
 3. **版本预设** -- 已知 GKI 内核版本的硬编码偏移（已在 AVD 模拟器上验证）
 4. **持久缓存** -- 之前探测的偏移存储在 `kmod_loader` 二进制自身中
 5. **方法 A（kcore 反汇编）** -- 从 `/proc/kcore` 读取 `do_init_module`，扫描 `LDR X0, [Xn, #imm]; CBZ X0` 指令模式
-6. **方法 B（二进制探测）** -- 内嵌一个最小的 `probe_module.ko`（init 返回 `-EINVAL`），在 0x100-0x200 范围内以步长 8 尝试各候选偏移。返回 `EINVAL` 表示 init 被调用，即偏移正确。支持崩溃恢复。
+6. **方法 B（二进制探测）** -- 内嵌一个最小的 `probe.ko`（init 返回 `-EINVAL`），在 0x100-0x200 范围内以步长 8 尝试各候选偏移。返回 `EINVAL` 表示 init 被调用，即偏移正确。支持崩溃恢复。
 
 ### 版本预设表
 
@@ -50,7 +54,7 @@ kmod_loader <module.ko> [kallsyms_addr=0xHEX] [选项] [param=value ...]
 | 4.9     | 0x358             | 0x150    | 0x2e8    | 源码推算 |
 | 4.14    | 0x370             | 0x150    | 0x2f8    | AVD 已验证 (init) |
 | 4.19    | 0x390             | 0x168    | 0x318    | 源码推算 |
-| 5.4     | 0x400             | 0x178    | 0x350    | AVD 已验证 (init) |
+| 5.4     | 0x400             | 0x178    | 0x340    | AVD 已验证 |
 | 5.10    | 0x440             | 0x190    | 0x3c8    | AVD 已验证 |
 | 5.15    | 0x3c0             | 0x178    | 0x378    | AVD 已验证 |
 | 6.1     | 0x400             | 0x140    | 0x3d8    | AVD 已验证 |
@@ -93,22 +97,26 @@ CRC 提取工具支持三种 ksymtab 条目格式：
 
 ```bash
 cd tools/kmod_loader
-make              # 构建 kmod_loader（宿主机二进制）
-make regenerate   # 重新生成内嵌的 probe_module.ko（需要交叉编译器）
+make              # 构建 kmod_loader（需要交叉编译器生成 aarch64 二进制）
+make regenerate   # 重新生成内嵌的 probe.ko（仅当 probe.c 或工具链改变时需要）
 ```
 
-`probe_module_embed.h` 已预先提交，因此 `make` 只需要宿主机 C 编译器。
+`probe.ko` 在编译期通过 `probe_embed.h` 直接内嵌到 `kmod_loader` 二进制里
+（由 `xxd -i` 生成并 commit 进仓库），所以**只需要 push `kmod_loader` 和你
+自己的 `.ko`** 到设备，不需要单独推 `probe.ko`。运行时 Method B 偏移探测
+会把内嵌的字节写入临时文件再 `finit_module` 加载。
+
+`make regenerate` 只在你修改了 `probe.c` 或切换交叉编译器版本时才需要执行；
+日常构建用不到。
 
 ## 示例
 
 ```bash
-# 物理设备（Pixel 6，内核 6.1）
-ADDR=$(adb shell "su -c 'cat /proc/kallsyms'" | awk '/kallsyms_lookup_name$/{print "0x"$1}')
+# 物理设备（Pixel 6，内核 6.1）— loader 自动获取 kallsyms_addr
 adb push kmod_loader hello_hook.ko /data/local/tmp/
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=$ADDR'"
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
 
-# AVD（内核 5.10）
+# AVD（内核 5.10）— CRC 由 host 端从内核镜像提取
 CRC_ARGS=$(python3 scripts/extract_avd_crcs.py -s emulator-5554)
-adb shell "/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko \
-    kallsyms_addr=$ADDR $CRC_ARGS"
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko $CRC_ARGS'"
 ```

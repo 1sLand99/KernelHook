@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Build tests/kmod/kh_test.ko via the standard kbuild path against Android
+# GKI common-kernel sources. Complements the freestanding build exercised by
+# the AVD regression (scripts/test_avd_kmod.sh) with a second, independent
+# build system so we catch modpost/symvers/CRC drift early.
+#
+# Matrix mirrors the AVD sweep from 5.10 onward. Older branches (4.4/4.14/
+# 4.19/5.4) are intentionally omitted — those common-kernel trees don't build
+# cleanly with modern host toolchains, and the freestanding path already
+# covers them in the AVD regression.
+
+name: kbuild (GKI)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tests/kmod/**'
+      - 'src/**'
+      - 'include/**'
+      - 'scripts/ci/verify_kmod.sh'
+      - '.github/workflows/kbuild.yml'
+  pull_request:
+    paths:
+      - 'tests/kmod/**'
+      - 'src/**'
+      - 'include/**'
+      - 'scripts/ci/verify_kmod.sh'
+      - '.github/workflows/kbuild.yml'
+  workflow_dispatch:
+
+jobs:
+  kbuild:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - branch: common-android12-5.10
+            kver: '5.10'
+          - branch: common-android13-5.15
+            kver: '5.15'
+          - branch: common-android14-6.1
+            kver: '6.1'
+          - branch: common-android15-6.6
+            kver: '6.6'
+          - branch: common-android16-6.12
+            kver: '6.12'
+    name: ${{ matrix.branch }}
+    env:
+      ARCH: arm64
+      KERNEL_DIR: ${{ github.workspace }}/kernel
+      KERNEL_OUT: ${{ github.workspace }}/kernel/out
+    steps:
+      - name: Checkout KernelHook
+        uses: actions/checkout@v4
+
+      - name: Install host toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison flex libssl-dev libelf-dev cpio kmod python3 ccache \
+            clang lld llvm llvm-dev \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            rsync zstd xz-utils
+          clang --version
+          ld.lld --version
+
+      - name: Cache kernel source
+        id: cache-kernel
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.KERNEL_DIR }}
+          key: gki-src-${{ matrix.branch }}-v1
+
+      - name: Fetch Android common-kernel (${{ matrix.branch }})
+        if: steps.cache-kernel.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth=1 --single-branch \
+            --branch "${{ matrix.branch }}" \
+            https://android.googlesource.com/kernel/common "$KERNEL_DIR"
+
+      - name: Configure (gki_defconfig)
+        run: |
+          if [ -f "$KERNEL_DIR/arch/arm64/configs/gki_defconfig" ]; then
+            CFG=gki_defconfig
+          else
+            CFG=defconfig
+          fi
+          echo "Using config: $CFG"
+          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 "$CFG"
+
+      - name: modules_prepare
+        run: |
+          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
+               modules_prepare -j"$(nproc)"
+
+      # modpost for external modules needs Module.symvers. On GKI branches
+      # this is produced by a full kernel build. Building vmlinux is cheaper
+      # than Image+modules and is enough for M= modpost to resolve CRCs.
+      - name: Build vmlinux (for Module.symvers)
+        run: |
+          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
+               vmlinux -j"$(nproc)" || \
+          make -C "$KERNEL_DIR" O="$KERNEL_OUT" ARCH=arm64 LLVM=1 \
+               Image -j"$(nproc)"
+
+      - name: Build kh_test.ko (M=tests/kmod)
+        run: |
+          make -C "$KERNEL_OUT" \
+               M="$GITHUB_WORKSPACE/tests/kmod" \
+               ARCH=arm64 LLVM=1 \
+               modules -j"$(nproc)"
+
+      - name: Verify kh_test.ko
+        run: |
+          bash scripts/ci/verify_kmod.sh \
+               tests/kmod/kh_test.ko \
+               "${{ matrix.kver }}"
+
+      - name: Show modinfo
+        if: always()
+        run: |
+          if [ -f tests/kmod/kh_test.ko ]; then
+            modinfo tests/kmod/kh_test.ko || true
+          fi
+
+      - name: Upload kh_test.ko
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kh_test-${{ matrix.branch }}
+          path: tests/kmod/kh_test.ko
+          if-no-files-found: error
+          retention-days: 14

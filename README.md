@@ -25,11 +25,9 @@ make
 # Push to device
 adb push kmod_loader hello_hook.ko /data/local/tmp/
 
-# Get kallsyms_lookup_name address
-ADDR=$(adb shell "su -c 'cat /proc/kallsyms'" | awk '/kallsyms_lookup_name$/{print "0x"$1}')
-
-# Load
-adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=$ADDR'"
+# Load (loader auto-fetches kallsyms_lookup_name from /proc/kallsyms;
+# pass kallsyms_addr=0xHEX to override)
+adb shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko'"
 
 # Verify
 adb shell dmesg | grep hello_hook
@@ -42,7 +40,7 @@ adb shell dmesg | grep hello_hook
 | `src/arch/arm64/inline.c` | Instruction relocation engine + code patching |
 | `src/arch/arm64/transit.c` | Transit stub + callback dispatch |
 | `src/arch/arm64/pgtable.c` | Page table walking + PTE modification |
-| `src/core_user.c` | Hook chain API (hook/unhook/hook_wrap) |
+| `src/hook.c` | Hook chain API (hook/unhook/hook_wrap) |
 | `src/hmem.c` | Bitmap allocator for ROX/RW memory pools |
 | `kmod/` | SDK, linker scripts, shim headers |
 | `tools/kmod_loader/` | Adaptive module loader |
@@ -56,7 +54,7 @@ Verified on Android AVD emulators and USB devices (ARM64):
 |--------|---------|-----|--------|-------|
 | 4.4    | 9       | 28  | Verified | `-mcmodel=large` for MOVZ/MOVK relocations |
 | 4.14   | 10      | 29  | Verified | CRC fallback via `__ksymtab_` lookup |
-| 5.4    | 11      | 30  | Blocked | Kernel `populate_error_injection_list` NULL deref; needs Kbuild+LTO |
+| 5.4    | 11      | 30  | Verified | shadow-CFI + `_error_injection_whitelist` fix |
 | 5.10   | 12/12L  | 31-32 | Verified | shadow-CFI + KABI_RESERVE |
 | 5.15   | 13      | 33  | Verified | shadow-CFI, no KABI |
 | 6.1    | 14      | 34  | Verified | kCFI replaces shadow CFI; Pixel USB device verified |
@@ -87,10 +85,12 @@ cmake -B build_debug -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_debug
 cd build_debug && ctest
 
-# Android (cross-compile)
+# Android (cross-compile) — runs on any connected device or emulator.
+# On userdebug emulators the runner auto-issues `adb root` + `setenforce 0`
+# so tests can mprotect RW→RX. On USB devices it uses magisk `su -c`.
 cmake -B build_android -DCMAKE_TOOLCHAIN_FILE=cmake/android-arm64.cmake -DCMAKE_BUILD_TYPE=Debug
 cmake --build build_android
-./scripts/run_android_tests.sh
+./scripts/run_android_tests.sh              # auto-detect; or --serial emulator-5554
 ```
 
 ### Kernel Module Tests
@@ -102,7 +102,8 @@ cmake --build build_android
 # Test specific AVDs
 ./scripts/test_avd_kmod.sh Pixel_31 Pixel_37
 
-# Manual single-device test
+# Manual single-device kmod test (USB / magisk only — emulators should
+# use test_avd_kmod.sh, which handles adb-root pathways correctly)
 ./scripts/run_android_tests.sh --kmod
 ```
 

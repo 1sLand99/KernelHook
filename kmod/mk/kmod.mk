@@ -129,7 +129,7 @@ KH_LDS := $(KERNELHOOK_DIR)/lds/kmod.lds
 # ---------- Source files ----------
 
 # Core library sources from $(KH_ROOT)/src/
-_KH_CORE_SRCS := $(KH_ROOT)/src/core_user.c \
+_KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/hmem.c \
                  $(KH_ROOT)/src/ksyms.c \
                  $(KH_ROOT)/src/arch/arm64/inline.c \

@@ -36,7 +36,7 @@
 #include "test_framework.h"
 #include <hook.h>
 #include <hmem.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 /* ---- Target functions with security mechanism prologues ----
  *
@@ -132,7 +132,7 @@ static void after_cb(hook_fargs2_t *fargs, void *udata)
 
 TEST(interaction_bti_only)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -163,12 +163,12 @@ TEST(interaction_bti_only)
     ASSERT_EQ(result, 300);
     ASSERT_FALSE(before_called);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(interaction_pac_only)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -199,12 +199,12 @@ TEST(interaction_pac_only)
     ASSERT_EQ(result, 110);
     ASSERT_FALSE(before_called);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 TEST(interaction_bti_pac_combo)
 {
-    int rc = hook_mem_user_init();
+    int rc = hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -235,7 +235,7 @@ TEST(interaction_bti_pac_combo)
     ASSERT_EQ(result, 100);
     ASSERT_FALSE(before_called);
 
-    hook_mem_user_cleanup();
+    hmem_user_cleanup();
 }
 
 int main(void)

@@ -31,12 +31,12 @@ set(LIB_SOURCES
     src/arch/arm64/insn.c
     src/arch/arm64/transit.c
     ${PLATFORM_SOURCE}
-    src/platform/hook_mem_user.c
-    src/platform/hook_install_user.c
-    src/platform/log_user.c
-    src/core_user.c
+    src/platform/hmem_user.c
+    src/platform/hook_install.c
+    src/platform/log.c
+    src/hook.c
     ${REMOTE_SOURCE}
-    src/platform/kh_section_fence.c
+    src/platform/section_fence.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})
@@ -53,7 +53,7 @@ if(NOT DEFINED KH_PAGE_ALIGN)
     set(KH_PAGE_ALIGN 16384)
 endif()
 
-# Generate page alignment header (used by kh_section_fence.c on all platforms)
+# Generate page alignment header (used by section_fence.c on all platforms)
 configure_file(
     ${CMAKE_SOURCE_DIR}/scripts/kh_page_align.h.in
     ${CMAKE_BINARY_DIR}/kh_page_align.h

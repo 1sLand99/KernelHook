@@ -7,7 +7,7 @@
 #include <ktypes.h>
 #include <hmem.h>
 #include <platform.h>
-#include <hook_mem_user.h>
+#include <hmem_user.h>
 
 /* hook_mem_ops_t.free takes (ptr) only, but platform_free needs (ptr, size). */
 
@@ -91,7 +91,7 @@ static int rw_set_memory_nop(uint64_t addr __unused, int numpages __unused)
 
 /* ---- Public API ---- */
 
-int hook_mem_user_init(void)
+int hmem_user_init(void)
 {
     static const hook_mem_ops_t rox_ops = {
         .alloc = rox_alloc,
@@ -114,7 +114,7 @@ int hook_mem_user_init(void)
     return hook_mem_init(&rox_ops, &rw_ops, platform_page_size());
 }
 
-void hook_mem_user_cleanup(void)
+void hmem_user_cleanup(void)
 {
     hook_mem_cleanup();
     alloc_track_count = 0;
