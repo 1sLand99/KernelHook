@@ -14,6 +14,8 @@
  * Usage: kmod_loader <module.ko> [param=value ...]
  */
 
+#include "resolver.h"
+
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1516,6 +1518,159 @@ uint64_t auto_fetch_kallsyms_addr(void)
                         "symbols (kptr_restrict?)\n");
     }
     return addr;
+}
+
+/* ---- Argv → resolve_ctx_t (Plan 2 M-C T13) ----
+ *
+ * Behavior-neutral helper: parses the same argv flags that main() has always
+ * parsed and populates a resolve_ctx_t. Added as a standalone helper in this
+ * commit so reviewers can diff it in isolation; it is wired into main() in a
+ * later commit. No existing call site is touched.
+ *
+ * Returns 0 on success, non-zero on unrecoverable parse error. Fills:
+ *   *out_ctx       — populated ctx (kmajor/kminor/uname_release, CLI flags)
+ *   *out_mod_path  — argv[1]
+ *   params[]       — concatenated module param string (kallsyms_addr= stripped)
+ *   *out_have_k    — 1 if kallsyms_addr= was intercepted from argv
+ *   *out_kaddr     — value for kallsyms_addr if intercepted
+ *   *out_force_probe — 1 if --probe was passed
+ *   *out_cli_mod_size — 0 or parsed --mod-size value
+ */
+static int build_ctx_from_argv(int argc, char *argv[],
+                               resolve_ctx_t *out_ctx,
+                               const char **out_mod_path,
+                               char *params, size_t params_sz,
+                               int *out_have_k, uint64_t *out_kaddr,
+                               int *out_force_probe, uint32_t *out_cli_mod_size)
+{
+    memset(out_ctx, 0, sizeof(*out_ctx));
+    params[0] = '\0';
+    *out_have_k = 0;
+    *out_kaddr = 0;
+    *out_force_probe = 0;
+    *out_cli_mod_size = 0;
+
+    if (argc < 2) return -1;
+    *out_mod_path = argv[1];
+
+    /* Kernel identity */
+    struct utsname u;
+    if (uname(&u) == 0) {
+        strncpy(out_ctx->uname_release, u.release, sizeof(out_ctx->uname_release) - 1);
+        sscanf(u.release, "%d.%d", &out_ctx->kmajor, &out_ctx->kminor);
+    }
+
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--init-off", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    out_ctx->have_module_init_offset = 1;
+                    out_ctx->cli_module_init_offset = v;
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--exit-off", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    out_ctx->have_module_exit_offset = 1;
+                    out_ctx->cli_module_exit_offset = v;
+                }
+            }
+            continue;
+        }
+        if (strcmp(argv[i], "--probe") == 0) {
+            *out_force_probe = 1;
+            continue;
+        }
+        if (strncmp(argv[i], "--mod-size", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    *out_cli_mod_size = v;
+                    out_ctx->have_this_module_size = 1;
+                    out_ctx->cli_this_module_size = v;
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--device", 8) == 0) {
+            const char *val = NULL;
+            if (argv[i][8] == '=') val = &argv[i][9];
+            else if (argv[i][8] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) out_ctx->device_override = val;
+            continue;
+        }
+        if (strcmp(argv[i], "--no-probe") == 0)    { out_ctx->no_probe = 1; continue; }
+        if (strcmp(argv[i], "--no-config") == 0)   { out_ctx->no_config = 1; continue; }
+        if (strcmp(argv[i], "--strict-config") == 0) { out_ctx->strict_config = 1; continue; }
+        if (strcmp(argv[i], "--prefer-config") == 0) { out_ctx->prefer_config = 1; continue; }
+
+        if (strncmp(argv[i], "--crc", 5) == 0) {
+            const char *spec = NULL;
+            if (argv[i][5] == '=') spec = &argv[i][6];
+            else if (argv[i][5] == '\0' && i + 1 < argc) spec = argv[++i];
+            if (spec) {
+                /* Keep populating legacy crc_overrides[] so the existing
+                 * crc_from_override() path still sees unknown-sym overrides. */
+                if (num_crc_overrides < MAX_CRC_OVERRIDES) {
+                    char name[56] = {0};
+                    uint32_t crc = 0;
+                    if (sscanf(spec, "%55[^=]=0x%x", name, &crc) == 2 ||
+                        sscanf(spec, "%55[^=]=%u", name, &crc) == 2) {
+                        strncpy(crc_overrides[num_crc_overrides].name, name, 55);
+                        crc_overrides[num_crc_overrides].crc = crc;
+                        num_crc_overrides++;
+
+                        /* Mirror known CRCs into ctx so strategy_cli_override
+                         * can return them via the resolver chain. */
+                        if (strcmp(name, "module_layout") == 0) {
+                            out_ctx->have_module_layout_crc = 1;
+                            out_ctx->cli_module_layout_crc = crc;
+                        } else if (strcmp(name, "_printk") == 0 ||
+                                   strcmp(name, "printk") == 0) {
+                            out_ctx->have_printk_crc = 1;
+                            out_ctx->cli_printk_crc = crc;
+                        } else if (strcmp(name, "memcpy") == 0) {
+                            out_ctx->have_memcpy_crc = 1;
+                            out_ctx->cli_memcpy_crc = crc;
+                        } else if (strcmp(name, "memset") == 0) {
+                            out_ctx->have_memset_crc = 1;
+                            out_ctx->cli_memset_crc = crc;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "kallsyms_addr=", 14) == 0) {
+            uint64_t a = 0;
+            sscanf(argv[i] + 14, "0x%lx", (unsigned long *)&a);
+            if (!a) sscanf(argv[i] + 14, "%lu", (unsigned long *)&a);
+            *out_kaddr = a;
+            *out_have_k = 1;
+            out_ctx->have_kallsyms_addr = 1;
+            out_ctx->cli_kallsyms_addr = a;
+            continue;
+        }
+        if (params[0]) strlcat(params, " ", params_sz);
+        strlcat(params, argv[i], params_sz);
+    }
+    return 0;
 }
 
 /* ---- Main ---- */
