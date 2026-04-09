@@ -27,10 +27,12 @@ static int __init importer_init(void)
     uint64_t addr = ksyms_lookup("do_sys_openat2");
     pr_info("export_link_test importer: do_sys_openat2 = 0x%llx\n",
             (unsigned long long)addr);
-    /* Force a reference to hook_wrap so the linker keeps the UND symbol. */
-    (void)hook_wrap;
-    if (addr == 0)
+    /* Force an UND reference to hook_wrap so the symbol survives linking.
+     * We never actually call it — addr==0 path returns before reaching it. */
+    if (addr == 0) {
+        (void)hook_wrap((void *)(uintptr_t)addr, 4, 0, 0, 0, 0);
         return -1;
+    }
     return 0;
 }
 
