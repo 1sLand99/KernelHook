@@ -1119,24 +1119,56 @@ static void patch_printk_symbol(uint8_t *mod, const Ehdr *eh)
         }
     }
 
-    /* Patch string table entry for the _printk symbol */
-    Shdr *strtab = NULL;
+    /* Patch strtab in place: find the UND symbol named "_printk" and
+     * overwrite the 7 bytes starting at its st_name offset with "printk\0"
+     * (shifting the name left by 1 byte within strtab).
+     *
+     * This works whether the string is standalone or aliased into a longer
+     * LOCAL symbol's name:
+     *   (a) kh_test.ko has a standalone "_printk\0" — shift produces
+     *       "printk\0\0" which reads as "printk".
+     *   (b) export_link_test/exporter.ko has "_printk" aliased inside
+     *       "__modver_printk\0" (at offset +8). Shifting those 7 bytes in
+     *       place renames that local OBJECT symbol from "__modver_printk"
+     *       to "__modverprintk" — a cosmetic change. Local symbols are
+     *       only read by diagnostic paths (kallsyms, oops backtraces); the
+     *       kernel's find_symbol / resolve path does NOT consult them. So
+     *       the corrupted local name has no functional effect, while the
+     *       UND _printk lookup now correctly resolves to "printk".
+     *
+     * We DO NOT bump st_name. An earlier attempt at that caused a kernel
+     * panic in find_symbol → bsearch → strcmp on Pixel_30 (kernel 5.4),
+     * suspected to be cascading effects from other symbol table fields
+     * becoming inconsistent with the new offset. Patching the bytes in
+     * place is the safer minimum-diff approach.
+     */
+    Shdr *symtab_sh = NULL, *linked_strtab = NULL;
     for (int i = 0; i < eh->e_shnum; i++) {
         Shdr *sh = (Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
-        if (sh->sh_type == SHT_STRTAB && i != eh->e_shstrndx) {
-            strtab = sh;
+        if (sh->sh_type == SHT_SYMTAB && sh->sh_link < eh->e_shnum) {
+            symtab_sh = sh;
+            linked_strtab = (Shdr *)(mod + eh->e_shoff +
+                                     sh->sh_link * eh->e_shentsize);
             break;
         }
     }
-    if (strtab) {
-        char *base = (char *)(mod + strtab->sh_offset);
-        char *end = base + strtab->sh_size;
-        for (char *p = base; p < end; ) {
-            if (strcmp(p, "_printk") == 0) {
-                memmove(p, p + 1, strlen(p)); /* Remove leading underscore */
-                fprintf(stderr, "kmod_loader: strtab _printk -> printk\n");
+    if (symtab_sh && linked_strtab) {
+        int num_syms = symtab_sh->sh_size / symtab_sh->sh_entsize;
+        Elf64_Sym *syms = (Elf64_Sym *)(mod + symtab_sh->sh_offset);
+        char *strs = (char *)(mod + linked_strtab->sh_offset);
+        int patched = 0;
+        for (int i = 0; i < num_syms; i++) {
+            if (syms[i].st_shndx != SHN_UNDEF) continue;  /* only UND */
+            char *name = strs + syms[i].st_name;
+            if (strcmp(name, "_printk") == 0) {
+                /* Shift "printk\0" left by 1, overwriting the leading '_'. */
+                memmove(name, name + 1, strlen(name));
+                patched++;
             }
-            p += strlen(p) + 1;
+        }
+        if (patched) {
+            fprintf(stderr, "kmod_loader: strtab UND _printk -> printk (%d)\n",
+                    patched);
         }
     }
 }
