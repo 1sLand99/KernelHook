@@ -267,12 +267,12 @@ static int self_test_crc32(void)
         { "a",             0xe8b7be43u },
         { "abc",           0x352441c2u },
         { "hello world",   0x0d4a1185u },
-        { "unhook(x)->v",  0u },  /* computed in Task 6, placeholder now */
+        { "unhook(x)->v",  0x335ffb6au },
     };
     size_t n = sizeof(cases) / sizeof(cases[0]);
     size_t i;
     int failed = 0;
-    for (i = 0; i < n - 1; i++) {   /* skip last entry (placeholder) */
+    for (i = 0; i < n; i++) {
         uint32_t got = crc32_string(cases[i].s);
         if (got != cases[i].expected) {
             fprintf(stderr, "FAIL crc32(\"%s\"): got 0x%08x expected 0x%08x\n",
@@ -281,7 +281,7 @@ static int self_test_crc32(void)
         }
     }
     if (failed == 0)
-        printf("crc32: OK (%zu cases)\n", n - 1);
+        printf("crc32: OK (%zu cases)\n", n);
     return failed;
 }
 
@@ -385,24 +385,6 @@ int main(int argc, char **argv)
         rc |= self_test_canonicalize();
         rc |= self_test_parser();
         return rc ? 1 : 0;
-    }
-    if (strcmp(mode, "dump") == 0) {
-        kh_entry_t entries[KH_MAX_ENTRIES];
-        int n = 0, k;
-        const char *manifest = "kmod/exports.manifest";
-        for (k = 1; k < argc; k++)
-            if (strncmp(argv[k], "--manifest=", 11) == 0) manifest = argv[k] + 11;
-        if (parse_manifest(manifest, entries, KH_MAX_ENTRIES, &n) != 0) return 1;
-        printf("parsed %d entries\n", n);
-        for (k = 0; k < n; k++) {
-            char buf[256];
-            if (canonicalize(entries[k].name, entries[k].ret_tok,
-                             entries[k].arg_toks, entries[k].nargs,
-                             buf, sizeof(buf)) != 0) return 1;
-            printf("  %-28s -> %-40s CRC=0x%08x\n",
-                   entries[k].name, buf, crc32_string(buf));
-        }
-        return 0;
     }
     fprintf(stderr, "unknown mode: %s\n", mode);
     return 2;
