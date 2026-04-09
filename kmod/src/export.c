@@ -7,7 +7,7 @@
  * scripts/lint_exports.sh at build time.
  *
  * In freestanding mode (KMOD_FREESTANDING) KH_EXPORT is a no-op:
- *   the actual __ksymtab_*/__kcrctab_* sections are populated by
+ *   the actual __ksymtab_xxx / __kcrctab_xxx sections are populated by
  *   kmod/generated/kh_exports.S (emitted by tools/kh_crc).
  *
  * In kbuild mode (Deliverable C, separate spec) KH_EXPORT resolves to
