@@ -1048,7 +1048,7 @@ static void patch_printk_symbol(uint8_t *mod, const Ehdr *eh)
 
 /* ---- Probe stubs (Method A: disassembly, Method B: binary probe) ---- */
 
-static int probe_init_offset_disasm(uint32_t *out_init)
+int probe_init_offset_disasm(uint32_t *out_init)
 {
     uint64_t do_init = ksym_addr("do_init_module");
     if (!do_init) return -1;
@@ -1128,7 +1128,7 @@ static uint32_t probe_cand_offset(int idx)
 #define __NR_delete_module 106
 #endif
 
-static int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
+int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
                                     size_t main_mod_size, const Ehdr *main_eh,
                                     const char *params, uint32_t *out_init)
 {
