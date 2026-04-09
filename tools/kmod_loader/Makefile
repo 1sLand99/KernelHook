@@ -45,11 +45,27 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
 all: kmod_loader
 	@echo "Built kmod_loader successfully"
 
-kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H)
-	$(HOSTCC) -DEMBED_PROBE_KO -static -O2 -o $@ kmod_loader.c $(DEVICES_TABLE_C)
+RESOLVER_SRCS := resolver.c \
+                 strategies/cli.c \
+                 strategies/probe_procfs.c \
+                 strategies/probe_loaded.c \
+                 strategies/probe_ondisk.c \
+                 strategies/probe_disasm.c \
+                 strategies/probe_binary.c \
+                 strategies/config.c
 
-test: kmod_loader
+RESOLVER_HDRS := resolver.h devices_table.h
+
+kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) $(RESOLVER_SRCS) $(RESOLVER_HDRS)
+	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
+		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS)
+
+test: kmod_loader test_resolver
 	@./tests/test_config_parser.sh
+	@./test_resolver
+
+test_resolver: tests/test_resolver.c resolver.c resolver.h
+	$(HOSTCC) -O2 -o $@ tests/test_resolver.c resolver.c
 
 # Regenerate probe_embed.h from source (requires cross-compiler)
 regenerate: probe.ko
@@ -66,4 +82,4 @@ probe.ko: probe.c
 	$(CROSS_LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe.fs.o probe_plt.fs.o
 
 clean:
-	rm -f kmod_loader probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
+	rm -f kmod_loader test_resolver probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
