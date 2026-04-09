@@ -54,11 +54,14 @@ RESOLVER_SRCS := resolver.c \
                  strategies/probe_binary.c \
                  strategies/config.c
 
-RESOLVER_HDRS := resolver.h devices_table.h
+SUBCOMMAND_SRCS := subcommands.c
 
-kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) $(RESOLVER_SRCS) $(RESOLVER_HDRS)
+RESOLVER_HDRS := resolver.h devices_table.h subcommands.h
+
+kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
+             $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS) $(RESOLVER_HDRS)
 	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
-		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS)
+		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
 
 test: kmod_loader test_resolver
 	@./tests/test_config_parser.sh

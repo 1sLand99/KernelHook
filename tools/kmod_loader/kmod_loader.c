@@ -15,6 +15,7 @@
  */
 
 #include "resolver.h"
+#include "subcommands.h"
 
 #include <elf.h>
 #include <errno.h>
@@ -155,7 +156,7 @@ static Shdr *elf_find_section(uint8_t *buf, const Ehdr *eh, const char *name)
 
 /* ---- Parse kernel version from uname ---- */
 
-static int parse_kver(int *major, int *minor)
+int parse_kver(int *major, int *minor)
 {
     struct utsname u;
     if (uname(&u) < 0) return -1;
@@ -1660,9 +1661,17 @@ static int build_ctx_from_argv(int argc, char *argv[],
     return 0;
 }
 
-/* ---- Main ---- */
-
-int main(int argc, char *argv[])
+/* ---- Load / info shared implementation ----
+ *
+ * This function is the old main() body: parse argv, read the module,
+ * run the resolver for every VAL_*, patch the in-memory buffer, then
+ * try finit_module / init_module.
+ *
+ * dry_run == 1 (info subcommand): perform resolution and buffer patching
+ * exactly the same way as load, then dump the trace and return WITHOUT
+ * calling init_module/finit_module. This lets users see what WOULD happen.
+ */
+static int do_load(int argc, char *argv[], int dry_run)
 {
     if (argc < 2) {
         fprintf(stderr,
@@ -1768,7 +1777,7 @@ int main(int argc, char *argv[])
                 p += strlen((char *)p) + 1;
             }
         }
-        if (vm_match) {
+        if (vm_match && !dry_run) {
             fprintf(stderr, "kmod_loader: vermagic matches, loading directly\n");
             int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
             if (ret == 0) {
@@ -1855,6 +1864,15 @@ int main(int argc, char *argv[])
     if (kmajor > 6 || (kmajor == 6 && kminor >= 1))
         patch_kcfi_hashes(mod, mod_size, eh);
 
+    /* Dry-run (info subcommand): dump the resolution trace and exit. */
+    if (dry_run) {
+        trace_dump(trace, trace_count);
+        fprintf(stderr, "kmod_loader: dry-run — would call init_module (size=%lu, alloc=%zu)\n",
+                (unsigned long)st.st_size, mod_size);
+        free(mod);
+        return 0;
+    }
+
     /* Step 5: Try finit_module with IGNORE flags (bypasses CRC/vermagic on supported kernels) */
     {
         char tmppath[] = "/data/local/tmp/.kmod_XXXXXX";
@@ -1900,4 +1918,66 @@ int main(int argc, char *argv[])
 
     printf("Module %s loaded (init_module, patched)\n", argv[1]);
     return 0;
+}
+
+/* ---- Subcommand wrappers ----
+ *
+ * subcmd_load and subcmd_info live in kmod_loader.c (not subcommands.c)
+ * because do_load references many static helpers in this file. The other
+ * four subcommands (unload, list, devices, probe) live in subcommands.c
+ * and only depend on the public resolver + devices_table headers. */
+
+int subcmd_load(int argc, char **argv)
+{
+    return do_load(argc, argv, 0);
+}
+
+int subcmd_info(int argc, char **argv)
+{
+    return do_load(argc, argv, 1);
+}
+
+/* ---- Main — dispatcher ---- */
+
+static void usage_dispatcher(const char *argv0)
+{
+    fprintf(stderr,
+        "Usage: %s <subcommand> [args...]\n"
+        "\n"
+        "Subcommands:\n"
+        "  load <module.ko> [opts]  — resolve + patch + init_module\n"
+        "  unload <name>            — delete_module\n"
+        "  list                     — list loaded modules\n"
+        "  info <module.ko> [opts]  — dry-run resolve + patch (no load)\n"
+        "  devices                  — list bundled device profiles\n"
+        "  probe                    — dump all probe-strategy outputs\n"
+        "\n"
+        "Legacy form (backwards compat):\n"
+        "  %s <module.ko> [opts]    — equivalent to `%s load <module.ko> [opts]`\n",
+        argv0, argv0, argv0);
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 2) { usage_dispatcher(argv[0]); return 1; }
+    const char *sub = argv[1];
+
+    if (strcmp(sub, "load") == 0)    return subcmd_load(argc - 1, argv + 1);
+    if (strcmp(sub, "unload") == 0)  return subcmd_unload(argc - 1, argv + 1);
+    if (strcmp(sub, "list") == 0)    return subcmd_list(argc - 1, argv + 1);
+    if (strcmp(sub, "info") == 0)    return subcmd_info(argc - 1, argv + 1);
+    if (strcmp(sub, "devices") == 0) return subcmd_devices(argc - 1, argv + 1);
+    if (strcmp(sub, "probe") == 0)   return subcmd_probe(argc - 1, argv + 1);
+
+    /* Legacy positional: kmod_loader <module.ko> [params...]
+     * Detected by .ko suffix on argv[1]. Falls through to subcmd_load
+     * with the original argv so the existing parser (build_ctx_from_argv)
+     * still sees argv[1] as the module path. */
+    size_t n = strlen(sub);
+    if (n > 3 && strcmp(sub + n - 3, ".ko") == 0) {
+        return subcmd_load(argc, argv);
+    }
+
+    usage_dispatcher(argv[0]);
+    return 1;
 }
