@@ -62,7 +62,7 @@ static uint64_t relo_in_tramp(hook_t *hook, uint64_t addr)
     return fix_addr;
 }
 
-static __noinline hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     uint64_t imm64;
@@ -96,7 +96,7 @@ static __noinline hook_err_t relo_b(hook_t *hook, uint64_t inst_addr, uint32_t i
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
 
@@ -118,7 +118,7 @@ static __noinline hook_err_t relo_adr(hook_t *hook, uint64_t inst_addr, uint32_t
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
 
@@ -165,7 +165,7 @@ static __noinline hook_err_t relo_ldr(hook_t *hook, uint64_t inst_addr, uint32_t
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)type;
@@ -184,7 +184,7 @@ static __noinline hook_err_t relo_cb(hook_t *hook, uint64_t inst_addr, uint32_t 
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)type;
@@ -203,7 +203,7 @@ static __noinline hook_err_t relo_tb(hook_t *hook, uint64_t inst_addr, uint32_t 
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint32_t inst, inst_type_t type)
 {
     uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
     (void)inst_addr;
@@ -213,7 +213,7 @@ static __noinline hook_err_t relo_ignore(hook_t *hook, uint64_t inst_addr, uint3
     return HOOK_NO_ERR;
 }
 
-static __noinline hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uint32_t inst)
+static __attribute__((__noinline__)) hook_err_t relocate_inst(hook_t *hook, uint64_t inst_addr, uint32_t inst)
 {
     hook_err_t rc = HOOK_NO_ERR;
     inst_type_t it = INST_IGNORE;
