@@ -6,7 +6,7 @@
 #include <string.h>
 
 /* Forward declarations for strategy functions — these are implemented in
- * the strategies/*.c files created in Phase 3. Kept here so resolver.c can
+ * the strategies subdirectory .c files created in Phase 3. Kept here so resolver.c can
  * populate g_value_specs[] with the right function pointers. */
 extern resolved_t strategy_cli_override(value_id_t, resolve_ctx_t *);
 extern resolved_t strategy_probe_procfs(value_id_t, resolve_ctx_t *);

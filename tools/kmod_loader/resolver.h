@@ -4,7 +4,19 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <elf.h>
+
+/* <elf.h> provides Elf64_Ehdr on Linux/Android NDK. macOS host libc
+ * lacks it, so fall back to an opaque forward declaration — only
+ * files that actually dereference the pointer need the real header. */
+#if defined(__has_include)
+#  if __has_include(<elf.h>)
+#    include <elf.h>
+#    define KH_HAVE_ELF_H 1
+#  endif
+#endif
+#ifndef KH_HAVE_ELF_H
+typedef struct Elf64_Ehdr Elf64_Ehdr;
+#endif
 
 #define KH_TRACE_MAX 32
 #define KH_SOURCE_LABEL_MAX 128

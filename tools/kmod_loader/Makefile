@@ -64,8 +64,13 @@ test: kmod_loader test_resolver
 	@./tests/test_config_parser.sh
 	@./test_resolver
 
+# test_resolver must run on the build host, so compile with the native
+# host compiler (TEST_CC), not the aarch64 NDK cross compiler. Defaults
+# to `cc`. resolver.h falls back to an opaque Elf64_Ehdr when <elf.h>
+# is unavailable, so this builds cleanly on macOS too.
+TEST_CC ?= cc
 test_resolver: tests/test_resolver.c resolver.c resolver.h
-	$(HOSTCC) -O2 -o $@ tests/test_resolver.c resolver.c
+	$(TEST_CC) -O2 -o $@ tests/test_resolver.c resolver.c
 
 # Regenerate probe_embed.h from source (requires cross-compiler)
 regenerate: probe.ko
