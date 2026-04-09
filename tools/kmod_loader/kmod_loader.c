@@ -754,6 +754,92 @@ static int patch_crcs(uint8_t *mod, const Ehdr *eh)
     return patched;
 }
 
+/* ---- patch_crcs_via_resolver (Plan 2 M-C T13) ----
+ *
+ * Resolver-driven variant of patch_crcs(). Iterates __versions the same
+ * way, but for each of the four known symbols (module_layout, _printk,
+ * memcpy, memset) it routes the lookup through resolve(VAL_*_CRC) so the
+ * CLI / probe_loaded_module / probe_ondisk_module / config strategies all
+ * get a shot. For symbols outside that set it falls back to the legacy
+ * crc_from_* helper chain (crc_from_override → crc_from_kallsyms →
+ * crc_from_vendor_ko → crc_from_boot_image), which is the same chain the
+ * old resolve_crc() used.
+ *
+ * Behavior is identical when __versions contains only the four known
+ * symbols — which is the case for freestanding kh_test.ko — and a strict
+ * superset otherwise (unknown syms still use the old chain). Defined in
+ * this commit but not called yet; a later commit wires it into main().
+ */
+static int crc_fallback_chain(const char *sym, uint32_t *out)
+{
+    if (crc_from_override(sym, out) == 0) return 0;
+    if (crc_from_kallsyms(sym, out) == 0) return 0;
+    if (crc_from_vendor_ko(sym, out) == 0) return 0;
+    if (crc_from_boot_image(sym, out) == 0) return 0;
+    return -1;
+}
+
+static int sym_to_crc_value_id(const char *sym, value_id_t *out)
+{
+    if (strcmp(sym, "module_layout") == 0) { *out = VAL_MODULE_LAYOUT_CRC; return 0; }
+    if (strcmp(sym, "_printk") == 0 || strcmp(sym, "printk") == 0) {
+        *out = VAL_PRINTK_CRC; return 0;
+    }
+    if (strcmp(sym, "memcpy") == 0) { *out = VAL_MEMCPY_CRC; return 0; }
+    if (strcmp(sym, "memset") == 0) { *out = VAL_MEMSET_CRC; return 0; }
+    return -1;
+}
+
+static int patch_crcs_via_resolver(uint8_t *mod, const Ehdr *eh,
+                                   resolve_ctx_t *ctx,
+                                   trace_entry_t *trace, int *trace_count)
+{
+    Shdr *ver = elf_find_section(mod, eh, "__versions");
+    if (!ver || ver->sh_size == 0) return 0;
+
+    int patched = 0;
+    int num_entries = ver->sh_size / 64;
+    for (int i = 0; i < num_entries; i++) {
+        uint8_t *ent = mod + ver->sh_offset + i * 64;
+        const char *sym = (const char *)(ent + 8);
+        uint32_t new_crc = 0;
+        int ok = 0;
+        const char *src = NULL;
+
+        value_id_t vid;
+        if (sym_to_crc_value_id(sym, &vid) == 0) {
+            trace_entry_t t;
+            resolved_t r = resolve(vid, ctx, &t);
+            if (trace && trace_count && *trace_count < KH_TRACE_MAX)
+                trace[(*trace_count)++] = t;
+            if (r.available) {
+                new_crc = (uint32_t)r.u64_val;
+                src = r.source_label;
+                ok = 1;
+            }
+        }
+        if (!ok && crc_fallback_chain(sym, &new_crc) == 0) {
+            src = "legacy_chain";
+            ok = 1;
+        }
+
+        if (ok) {
+            uint32_t old_crc;
+            memcpy(&old_crc, ent, 4);
+            if (old_crc != new_crc) {
+                memcpy(ent, &new_crc, 4);
+                fprintf(stderr, "kmod_loader: CRC %s: 0x%08x -> 0x%08x [%s]\n",
+                        sym, old_crc, new_crc, src ? src : "?");
+            }
+            patched++;
+        } else {
+            fprintf(stderr, "kmod_loader: CRC %s: not found (keeping 0x%08x)\n",
+                    sym, *(uint32_t *)ent);
+        }
+    }
+    return patched;
+}
+
 /* ---- Patch vermagic in .modinfo ---- */
 
 static void patch_vermagic(uint8_t *mod, const Ehdr *eh)
