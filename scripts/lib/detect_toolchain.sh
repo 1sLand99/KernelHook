@@ -12,7 +12,10 @@
 # Exports on success: KH_CC KH_LD KH_AR KH_CROSS_COMPILE
 #                     KH_ANDROID_SDK KH_NDK KH_NDK_BIN KH_NDK_HOST_TAG
 #                     KH_ANDROID_API_LEVEL KH_TOOLCHAIN_KIND KH_TOOLCHAIN_DESC
-# Returns nonzero on failure; callers using `set -e` should `source` inside `|| return`.
+# On failure: returns nonzero if sourced (safe for interactive shells) or
+# exits nonzero if executed directly. Callers should `. detect_toolchain.sh`
+# and check $? (or use `|| exit 1`, since `set -e` does not catch a sourced
+# script's `return` in all bash versions).
 
 # Idempotency: always clear our own outputs first.
 unset KH_CC KH_LD KH_AR KH_CROSS_COMPILE KH_ANDROID_SDK \
@@ -64,15 +67,27 @@ else
         KH_ANDROID_SDK=""
     fi
 
-    # Resolve NDK root
+    # Resolve NDK root. Warn if user set ANDROID_NDK_{ROOT,HOME} but the
+    # path does not exist — silent fall-through would produce a surprising
+    # sys-gcc result and wrong-ABI binaries.
     _ndk=""
-    if [ -n "${ANDROID_NDK_ROOT:-}" ] && [ -d "${ANDROID_NDK_ROOT:-}" ]; then
-        _ndk="$ANDROID_NDK_ROOT"
-    elif [ -n "${ANDROID_NDK_HOME:-}" ] && [ -d "${ANDROID_NDK_HOME:-}" ]; then
-        _ndk="$ANDROID_NDK_HOME"
-    elif [ -n "$KH_ANDROID_SDK" ] && [ -d "$KH_ANDROID_SDK/ndk" ]; then
-        # Pick lexicographically-last non-zip entry
-        _ndk=$(ls -1 "$KH_ANDROID_SDK/ndk" 2>/dev/null | grep -v '\.zip$' | sort | tail -1)
+    if [ -n "${ANDROID_NDK_ROOT:-}" ]; then
+        if [ -d "$ANDROID_NDK_ROOT" ]; then
+            _ndk="$ANDROID_NDK_ROOT"
+        else
+            _kh_log "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT does not exist, ignoring"
+        fi
+    fi
+    if [ -z "$_ndk" ] && [ -n "${ANDROID_NDK_HOME:-}" ]; then
+        if [ -d "$ANDROID_NDK_HOME" ]; then
+            _ndk="$ANDROID_NDK_HOME"
+        else
+            _kh_log "ANDROID_NDK_HOME=$ANDROID_NDK_HOME does not exist, ignoring"
+        fi
+    fi
+    if [ -z "$_ndk" ] && [ -n "$KH_ANDROID_SDK" ] && [ -d "$KH_ANDROID_SDK/ndk" ]; then
+        # Pick the highest-version non-zip entry (version sort, not lex).
+        _ndk=$(ls -1 "$KH_ANDROID_SDK/ndk" 2>/dev/null | grep -v '\.zip$' | sort -V | tail -1)
         [ -n "$_ndk" ] && _ndk="$KH_ANDROID_SDK/ndk/$_ndk"
     fi
 
@@ -109,7 +124,8 @@ else
 
     # ---- Step 3: system cross-compiler ----
     if [ -z "${KH_TOOLCHAIN_KIND:-}" ]; then
-        _kh_log "NDK not found (checked: ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-<unset>}, ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<unset>}, $KH_ANDROID_SDK/ndk); falling back"
+        _sdk_msg="${KH_ANDROID_SDK:+$KH_ANDROID_SDK/ndk}"; _sdk_msg="${_sdk_msg:-<no SDK found>}"
+        _kh_log "NDK not found (checked: ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-<unset>}, ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<unset>}, $_sdk_msg); falling back"
         if command -v aarch64-linux-gnu-gcc >/dev/null 2>&1; then
             KH_CC=$(command -v aarch64-linux-gnu-gcc)
             KH_LD=$(command -v aarch64-linux-gnu-ld 2>/dev/null || echo aarch64-linux-gnu-ld)
@@ -137,7 +153,8 @@ if [ -z "${KH_TOOLCHAIN_KIND:-}" ]; then
     _kh_log "  checked NDK: ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-<unset>}, ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-<unset>}, ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-<unset>}"
     _kh_log "  checked system: aarch64-linux-gnu-gcc, clang+ld.lld"
     _kh_log "  set one of: ANDROID_NDK_ROOT, ANDROID_SDK_ROOT, CROSS_COMPILE, or CC+LD"
-    exit 1
+    # `return` if sourced (preserves caller shell); `exit` if executed directly.
+    return 1 2>/dev/null || exit 1
 fi
 
 export KH_CC KH_LD KH_AR KH_CROSS_COMPILE KH_ANDROID_SDK \

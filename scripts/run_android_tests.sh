@@ -334,11 +334,13 @@ if [ "$KMOD" -eq 1 ]; then
             printf "  Toolchain re-pinned to API %s\n" "$DEV_SDK"
         fi
 
-        # Build freestanding .ko (always rebuild to pick up correct vermagic)
+        # Build freestanding .ko (always rebuild to pick up correct vermagic).
+        # Use an array so $KH_CC (which contains "clang --target=...") stays
+        # as a single assignment and is not broken up by shell word-splitting.
         printf "  Building freestanding kh_test.ko...\n"
-        MAKE_ARGS="freestanding KERNELRELEASE=$DEV_UNAME"
-        MAKE_ARGS="$MAKE_ARGS CC=\"$KH_CC\" LD=\"$KH_LD\" CROSS_COMPILE=\"$KH_CROSS_COMPILE\""
-        if ! (cd "$ROOT/tests/kmod" && make clean >/dev/null 2>&1; make $MAKE_ARGS 2>&1 | tail -5); then
+        MAKE_ARGS=(freestanding "KERNELRELEASE=$DEV_UNAME"
+                   "CC=$KH_CC" "LD=$KH_LD" "CROSS_COMPILE=$KH_CROSS_COMPILE")
+        if ! (cd "$ROOT/tests/kmod" && make clean >/dev/null 2>&1; make "${MAKE_ARGS[@]}" 2>&1 | tail -5); then
             printf "  ${RED}FAIL${RESET} kmod build failed\n"
             FAILED=$((FAILED + 1))
             FAILURES="${FAILURES}\n  ${RED}FAIL${RESET} kmod_build"

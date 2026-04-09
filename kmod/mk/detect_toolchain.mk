@@ -71,15 +71,36 @@ else
     endif
   endif
 
-  # Resolve NDK root
+  # Resolve NDK root. Warn if user set ANDROID_NDK_{ROOT,HOME} but the
+  # path does not exist — silent fall-through would produce a surprising
+  # sys-gcc result and wrong-ABI binaries.
   _kh_ndk :=
-  ifneq ($(wildcard $(ANDROID_NDK_ROOT)),)
-    _kh_ndk := $(ANDROID_NDK_ROOT)
-  else ifneq ($(wildcard $(ANDROID_NDK_HOME)),)
-    _kh_ndk := $(ANDROID_NDK_HOME)
-  else ifneq ($(KH_ANDROID_SDK),)
-    _kh_ndk_cands := $(filter-out %.zip,$(wildcard $(KH_ANDROID_SDK)/ndk/*))
-    _kh_ndk := $(lastword $(sort $(_kh_ndk_cands)))
+  ifneq ($(ANDROID_NDK_ROOT),)
+    ifneq ($(wildcard $(ANDROID_NDK_ROOT)),)
+      _kh_ndk := $(ANDROID_NDK_ROOT)
+    else
+      $(warning [toolchain] ANDROID_NDK_ROOT=$(ANDROID_NDK_ROOT) does not exist, ignoring)
+    endif
+  endif
+  ifeq ($(_kh_ndk),)
+  ifneq ($(ANDROID_NDK_HOME),)
+    ifneq ($(wildcard $(ANDROID_NDK_HOME)),)
+      _kh_ndk := $(ANDROID_NDK_HOME)
+    else
+      $(warning [toolchain] ANDROID_NDK_HOME=$(ANDROID_NDK_HOME) does not exist, ignoring)
+    endif
+  endif
+  endif
+  ifeq ($(_kh_ndk),)
+  ifneq ($(KH_ANDROID_SDK),)
+    # Pick highest-version non-zip entry under $(KH_ANDROID_SDK)/ndk. Use
+    # shell sort -V instead of Make's $(sort) (lex-only) so "25.2.9xxxxx"
+    # ranks below "25.2.11xxxxx".
+    _kh_ndk := $(shell ls -1 $(KH_ANDROID_SDK)/ndk 2>/dev/null | grep -v '\.zip$$' | sort -V | tail -1)
+    ifneq ($(_kh_ndk),)
+      _kh_ndk := $(KH_ANDROID_SDK)/ndk/$(_kh_ndk)
+    endif
+  endif
   endif
 
   ifneq ($(_kh_ndk),)

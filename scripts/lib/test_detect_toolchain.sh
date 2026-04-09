@@ -33,7 +33,9 @@ run_case() {
         # Per-case setup runs as the rest of the arguments
         eval "$@"
         # shellcheck disable=SC1090
-        . "$DETECTOR" 2>/dev/null || true
+        # Exit the subshell nonzero if the detector's `return 1` fires —
+        # this is how Case 6 (no tools) observes the failure path.
+        . "$DETECTOR" 2>/dev/null || exit 1
         printf "%s|%s|%s|%s|%s\n" \
             "${KH_TOOLCHAIN_KIND:-}" "${KH_CC:-}" "${KH_LD:-}" \
             "${KH_ANDROID_API_LEVEL:-}" "${KH_ANDROID_SDK:-}"
