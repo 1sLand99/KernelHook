@@ -202,20 +202,17 @@ extern void *memmove(void *dst, const void *src, unsigned long n);
  *     [print(hex(struct.unpack('<I',d[i:i+4])[0]),d[i+8:i+64].split(b'\0')[0]) \
  *      for i in range(0,len(d),64)]"
  *
- * Override at build time: -DMODULE_LAYOUT_CRC=0x... etc.
+ * Plan 2 (runtime resolver + device database) makes these values
+ * runtime-resolved. The .ko is built with placeholder sentinel values
+ * (0xDEADBE01..04) which kmod_loader's resolver chain overwrites before
+ * calling init_module. See tools/kmod_loader/resolver.{h,c} and
+ * kmod/devices/ *.conf for the resolution path.
+ *
+ * The sentinels exist only so a mis-patched module fails LOUDLY with a
+ * "disagrees about version" error instead of silently accepting random
+ * garbage. The kernel's modversion check will reject these values and
+ * surface the bug instead of misloading.
  */
-#ifndef MODULE_LAYOUT_CRC
-#define MODULE_LAYOUT_CRC 0xea759d7f  /* GKI 6.1, Pixel 6 default */
-#endif
-#ifndef PRINTK_CRC
-#define PRINTK_CRC 0x92997ed8         /* GKI 6.1, Pixel 6 default */
-#endif
-#ifndef MEMCPY_CRC
-#define MEMCPY_CRC 0x4829a47e         /* GKI 6.1, Pixel 6 default */
-#endif
-#ifndef MEMSET_CRC
-#define MEMSET_CRC 0xdcb764ad         /* GKI 6.1, Pixel 6 default */
-#endif
 
 struct modversion_info {
     unsigned int crc;
@@ -229,11 +226,11 @@ struct modversion_info {
             .crc = (crc_val), .pad = 0, .name = (sym_name),            \
         }
 
-#define MODULE_VERSIONS()                                               \
-    _MODVER_ENTRY(__modver_module_layout, MODULE_LAYOUT_CRC, "module_layout"); \
-    _MODVER_ENTRY(__modver_printk,        PRINTK_CRC,        "_printk");       \
-    _MODVER_ENTRY(__modver_memcpy,        MEMCPY_CRC,        "memcpy");        \
-    _MODVER_ENTRY(__modver_memset,        MEMSET_CRC,        "memset")
+#define MODULE_VERSIONS()                                                     \
+    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout");      \
+    _MODVER_ENTRY(__modver_printk,        0xDEADBE02u, "_printk");            \
+    _MODVER_ENTRY(__modver_memcpy,        0xDEADBE03u, "memcpy");             \
+    _MODVER_ENTRY(__modver_memset,        0xDEADBE04u, "memset")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING

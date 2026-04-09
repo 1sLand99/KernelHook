@@ -39,8 +39,23 @@ $(KH_CRC):
 $(KH_GEN_DIR):
 	mkdir -p $@
 
+# KH_KSYMTAB_LAYOUT selects the on-disk __ksymtab layout:
+#   prel32 (default) — 12-byte struct with PREL32 relocs. Matches kernels
+#                      built with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y (GKI
+#                      6.1+ on arm64, modern upstream).
+#   abs64            — 24-byte struct with ABS64 pointers. Required for
+#                      kernels where HAVE_ARCH_PREL32_RELOCATIONS is OFF
+#                      (e.g. Android 11 GKI 5.4). Mismatched layout causes
+#                      strcmp crashes in find_symbol at load time.
+KH_KSYMTAB_LAYOUT ?= prel32
+ifeq ($(KH_KSYMTAB_LAYOUT),abs64)
+  KH_CRC_ASM_MODE := asm-abs64
+else
+  KH_CRC_ASM_MODE := asm
+endif
+
 $(KH_EXPORTS_S): $(KH_CRC) $(KH_MANIFEST) | $(KH_GEN_DIR)
-	$(KH_CRC) --mode=asm --manifest=$(KH_MANIFEST) --output=$@
+	$(KH_CRC) --mode=$(KH_CRC_ASM_MODE) --manifest=$(KH_MANIFEST) --output=$@
 
 $(KH_SYMVERS_H): $(KH_CRC) $(KH_MANIFEST)
 	$(KH_CRC) --mode=header --manifest=$(KH_MANIFEST) --output=$@
@@ -77,18 +92,18 @@ CROSS_COMPILE := $(KH_CROSS_COMPILE)
 KERNELRELEASE ?= unknown
 VERMAGIC ?= $(KERNELRELEASE) SMP preempt mod_unload modversions aarch64
 
-# ---------- CRC overrides (for __versions section) ----------
-
-MODULE_LAYOUT_CRC ?=
-PRINTK_CRC ?=
-
-# ---------- struct module offset overrides ----------
-
-THIS_MODULE_SIZE   ?=
-MODULE_INIT_OFFSET ?=
-MODULE_EXIT_OFFSET ?=
-
 # ---------- Compile flags ----------
+#
+# Plan 2 (runtime resolver) made MODULE_LAYOUT_CRC / PRINTK_CRC /
+# THIS_MODULE_SIZE / MODULE_INIT_OFFSET / MODULE_EXIT_OFFSET overrides
+# obsolete — those values are resolved at load time by kmod_loader's
+# strategy chain and patched directly into the .ko buffer before
+# init_module. The .ko compiles with placeholder sentinels defined
+# in kmod/shim/shim.h (MODULE_VERSIONS macro).
+#
+# If a consumer still passes any of those variables via `make VAR=val`,
+# the build silently ignores them — harmless, but they no longer affect
+# the produced .ko.
 
 KH_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
@@ -104,25 +119,6 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
              -fsanitize=kcfi
-
-# Append CRC defines if provided
-ifneq ($(MODULE_LAYOUT_CRC),)
-  KH_CFLAGS += -DMODULE_LAYOUT_CRC=$(MODULE_LAYOUT_CRC)
-endif
-ifneq ($(PRINTK_CRC),)
-  KH_CFLAGS += -DPRINTK_CRC=$(PRINTK_CRC)
-endif
-
-# Append struct module offset defines if provided
-ifneq ($(THIS_MODULE_SIZE),)
-  KH_CFLAGS += -DTHIS_MODULE_SIZE=$(THIS_MODULE_SIZE)
-endif
-ifneq ($(MODULE_INIT_OFFSET),)
-  KH_CFLAGS += -DMODULE_INIT_OFFSET=$(MODULE_INIT_OFFSET)
-endif
-ifneq ($(MODULE_EXIT_OFFSET),)
-  KH_CFLAGS += -DMODULE_EXIT_OFFSET=$(MODULE_EXIT_OFFSET)
-endif
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)

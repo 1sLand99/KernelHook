@@ -14,6 +14,9 @@
  * Usage: kmod_loader <module.ko> [param=value ...]
  */
 
+#include "resolver.h"
+#include "subcommands.h"
+
 #include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -48,26 +51,10 @@ struct kver_preset {
     uint32_t exit_off;
 };
 
-/* ARM64 kernel struct module layout presets.
- * 4.x: pre-GKI, computed from AOSP source (unverified).
- * 5.x+: GKI with ANDROID_KABI_RESERVE=y, ANDROID_VENDOR_OEM_DATA=y. */
-static const struct kver_preset presets[] = {
-    /* Linux 4.x — pre-GKI, no ANDROID_KABI_RESERVE on most builds.
-     * Offsets computed from AOSP source; unverified on real devices. */
-    { 4, 4,  0x340, 0x158, 0x2d0 },  /* AVD android-28 verified */
-    { 4, 9,  0x358, 0x150, 0x2e8 },
-    { 4, 14, 0x370, 0x150, 0x2f8 },  /* AVD android-29, init verified via disasm */
-    { 4, 19, 0x390, 0x168, 0x318 },
-    /* Linux 5.x — ANDROID_KABI_RESERVE inflates struct module */
-    { 5, 4,  0x400, 0x178, 0x340 },  /* AVD android-30 verified (exit was 0x350→0x340) */
-    { 5, 10, 0x440, 0x190, 0x3c8 },  /* AVD android12-5.10 verified */
-    { 5, 15, 0x3c0, 0x178, 0x378 },  /* AVD android13-5.15 verified */
-    /* Linux 6.x — kCFI replaces shadow CFI */
-    { 6, 1,  0x400, 0x140, 0x3d8 },  /* AVD android14-6.1 verified */
-    { 6, 6,  0x600, 0x188, 0x5b8 },  /* AVD android15-6.6 verified */
-    { 6, 12, 0x640, 0x188, 0x5f8 },  /* AVD API 37 (16K pages) verified */
-};
-#define NUM_PRESETS (sizeof(presets) / sizeof(presets[0]))
+/* Note: the ARM64 struct module layout presets[] table that used to
+ * live here has been migrated to kmod/devices (.conf files) and is now
+ * consumed by the resolver's config_* strategies. See Plan 2
+ * Milestone A for the migration. */
 
 /* ---- Persistent probe state ----
  *
@@ -169,7 +156,7 @@ static Shdr *elf_find_section(uint8_t *buf, const Ehdr *eh, const char *name)
 
 /* ---- Parse kernel version from uname ---- */
 
-static int parse_kver(int *major, int *minor)
+int parse_kver(int *major, int *minor)
 {
     struct utsname u;
     if (uname(&u) < 0) return -1;
@@ -177,7 +164,7 @@ static int parse_kver(int *major, int *minor)
     return 0;
 }
 
-static const char *get_vermagic(void)
+const char *get_vermagic(void)
 {
     static char vm[256];
     struct utsname u;
@@ -186,31 +173,6 @@ static const char *get_vermagic(void)
     /* Common GKI vermagic flags. TODO: detect from loaded modules. */
     snprintf(vm, sizeof(vm), "%s SMP preempt mod_unload modversions aarch64", u.release);
     return vm;
-}
-
-/* ---- Find best preset for kernel version ---- */
-
-/* Exact major.minor match — no "nearest lower" fallback.
- * Unknown versions fall through to disasm/probe methods. */
-static const struct kver_preset *find_preset(int major, int minor)
-{
-    for (int i = 0; i < (int)NUM_PRESETS; i++) {
-        if (presets[i].major == major && presets[i].minor == minor)
-            return &presets[i];
-    }
-    return NULL;
-}
-
-/* Best-effort nearest preset (for exit offset fallback when init is probed). */
-static const struct kver_preset *find_nearest_preset(int major, int minor)
-{
-    const struct kver_preset *best = NULL;
-    for (int i = 0; i < (int)NUM_PRESETS; i++) {
-        if (presets[i].major < major ||
-            (presets[i].major == major && presets[i].minor <= minor))
-            best = &presets[i];
-    }
-    return best;
 }
 
 /* ---- ELF symbol patching ----
@@ -306,7 +268,7 @@ static int crc_from_override(const char *sym, uint32_t *out)
 }
 
 /* Method 2: /proc/kallsyms __crc_<sym> (address IS the CRC on old kernels) */
-static int crc_from_kallsyms(const char *sym, uint32_t *out)
+int crc_from_kallsyms(const char *sym, uint32_t *out)
 {
     char crc_name[128];
     snprintf(crc_name, sizeof(crc_name), "__crc_%s", sym);
@@ -319,8 +281,49 @@ static int crc_from_kallsyms(const char *sym, uint32_t *out)
     return -1;
 }
 
+/* Parse a single .ko file, extract CRC for `sym` from its __versions
+ * section. Returns 0 on success (sym found), -1 on failure. Stateless;
+ * unlike crc_from_vendor_ko this does NOT cache. Used by the resolver's
+ * strategy_probe_loaded_module to target a specific .ko path.
+ */
+int crc_from_vendor_ko_file(const char *path, const char *sym, uint32_t *out)
+{
+    int rc = -1;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) < 0 || st.st_size <= 0 || st.st_size > 8 * 1024 * 1024) {
+        close(fd);
+        return -1;
+    }
+    uint8_t *buf = malloc(st.st_size);
+    if (!buf) { close(fd); return -1; }
+    if (read(fd, buf, st.st_size) != st.st_size) goto done;
+    if (st.st_size < (off_t)sizeof(Ehdr)) goto done;
+    Ehdr *keh = (Ehdr *)buf;
+    if (memcmp(keh->e_ident, ELFMAG, SELFMAG) != 0) goto done;
+    Shdr *ver = elf_find_section(buf, keh, "__versions");
+    if (!ver || ver->sh_size == 0) goto done;
+    int n = ver->sh_size / 64;
+    for (int i = 0; i < n; i++) {
+        uint8_t *ent = buf + ver->sh_offset + i * 64;
+        const char *ename = (const char *)(ent + 8);
+        if (strncmp(ename, sym, 55) == 0 && ename[strlen(sym)] == '\0') {
+            uint32_t crc;
+            memcpy(&crc, ent, 4);
+            *out = crc;
+            rc = 0;
+            break;
+        }
+    }
+done:
+    free(buf);
+    close(fd);
+    return rc;
+}
+
 /* Method 3: Scan vendor .ko files for __versions CRC */
-static int crc_from_vendor_ko(const char *sym, uint32_t *out)
+int crc_from_vendor_ko(const char *sym, uint32_t *out)
 {
     /* Common paths where vendor modules live */
     static const char *ko_dirs[] = {
@@ -411,7 +414,7 @@ static ssize_t read_at(const char *path, void *buf, size_t len, off_t offset)
     return n;
 }
 
-static int crc_from_boot_image(const char *sym, uint32_t *out)
+int crc_from_boot_image(const char *sym, uint32_t *out)
 {
     /* Cache the kernel image across calls */
     static uint8_t *img = NULL;
@@ -520,15 +523,8 @@ static int crc_from_boot_image(const char *sym, uint32_t *out)
     return -1;
 }
 
-/* Resolve CRC for a symbol using all methods in priority order */
-static int resolve_crc(const char *sym, uint32_t *out)
-{
-    if (crc_from_override(sym, out) == 0) return 0;
-    if (crc_from_kallsyms(sym, out) == 0) return 0;
-    if (crc_from_vendor_ko(sym, out) == 0) return 0;
-    if (crc_from_boot_image(sym, out) == 0) return 0;
-    return -1;
-}
+/* Forward declaration — defined alongside patch_crcs_via_resolver below. */
+static int crc_fallback_chain(const char *sym, uint32_t *out);
 
 /* Patch all CRC values in __versions */
 /* ---- kCFI hash patching ----
@@ -694,13 +690,99 @@ static int patch_crcs(uint8_t *mod, const Ehdr *eh)
         const char *sym = (const char *)(ent + 8);
         uint32_t new_crc;
 
-        if (resolve_crc(sym, &new_crc) == 0) {
+        if (crc_fallback_chain(sym, &new_crc) == 0) {
             uint32_t old_crc;
             memcpy(&old_crc, ent, 4);
             if (old_crc != new_crc) {
                 memcpy(ent, &new_crc, 4);
                 fprintf(stderr, "kmod_loader: CRC %s: 0x%08x -> 0x%08x\n",
                         sym, old_crc, new_crc);
+            }
+            patched++;
+        } else {
+            fprintf(stderr, "kmod_loader: CRC %s: not found (keeping 0x%08x)\n",
+                    sym, *(uint32_t *)ent);
+        }
+    }
+    return patched;
+}
+
+/* ---- patch_crcs_via_resolver (Plan 2 M-C T13) ----
+ *
+ * Resolver-driven variant of patch_crcs(). Iterates __versions the same
+ * way, but for each of the four known symbols (module_layout, _printk,
+ * memcpy, memset) it routes the lookup through resolve(VAL_*_CRC) so the
+ * CLI / probe_loaded_module / probe_ondisk_module / config strategies all
+ * get a shot. For symbols outside that set it falls back to the legacy
+ * crc_from_* helper chain (crc_from_override → crc_from_kallsyms →
+ * crc_from_vendor_ko → crc_from_boot_image), which is the same chain the
+ * old resolve_crc() used.
+ *
+ * Behavior is identical when __versions contains only the four known
+ * symbols — which is the case for freestanding kh_test.ko — and a strict
+ * superset otherwise (unknown syms still use the old chain). Defined in
+ * this commit but not called yet; a later commit wires it into main().
+ */
+static int crc_fallback_chain(const char *sym, uint32_t *out)
+{
+    if (crc_from_override(sym, out) == 0) return 0;
+    if (crc_from_kallsyms(sym, out) == 0) return 0;
+    if (crc_from_vendor_ko(sym, out) == 0) return 0;
+    if (crc_from_boot_image(sym, out) == 0) return 0;
+    return -1;
+}
+
+static int sym_to_crc_value_id(const char *sym, value_id_t *out)
+{
+    if (strcmp(sym, "module_layout") == 0) { *out = VAL_MODULE_LAYOUT_CRC; return 0; }
+    if (strcmp(sym, "_printk") == 0 || strcmp(sym, "printk") == 0) {
+        *out = VAL_PRINTK_CRC; return 0;
+    }
+    if (strcmp(sym, "memcpy") == 0) { *out = VAL_MEMCPY_CRC; return 0; }
+    if (strcmp(sym, "memset") == 0) { *out = VAL_MEMSET_CRC; return 0; }
+    return -1;
+}
+
+static int patch_crcs_via_resolver(uint8_t *mod, const Ehdr *eh,
+                                   resolve_ctx_t *ctx,
+                                   trace_entry_t *trace, int *trace_count)
+{
+    Shdr *ver = elf_find_section(mod, eh, "__versions");
+    if (!ver || ver->sh_size == 0) return 0;
+
+    int patched = 0;
+    int num_entries = ver->sh_size / 64;
+    for (int i = 0; i < num_entries; i++) {
+        uint8_t *ent = mod + ver->sh_offset + i * 64;
+        const char *sym = (const char *)(ent + 8);
+        uint32_t new_crc = 0;
+        int ok = 0;
+        const char *src = NULL;
+
+        value_id_t vid;
+        if (sym_to_crc_value_id(sym, &vid) == 0) {
+            trace_entry_t t;
+            resolved_t r = resolve(vid, ctx, &t);
+            if (trace && trace_count && *trace_count < KH_TRACE_MAX)
+                trace[(*trace_count)++] = t;
+            if (r.available) {
+                new_crc = (uint32_t)r.u64_val;
+                src = r.source_label;
+                ok = 1;
+            }
+        }
+        if (!ok && crc_fallback_chain(sym, &new_crc) == 0) {
+            src = "legacy_chain";
+            ok = 1;
+        }
+
+        if (ok) {
+            uint32_t old_crc;
+            memcpy(&old_crc, ent, 4);
+            if (old_crc != new_crc) {
+                memcpy(ent, &new_crc, 4);
+                fprintf(stderr, "kmod_loader: CRC %s: 0x%08x -> 0x%08x [%s]\n",
+                        sym, old_crc, new_crc, src ? src : "?");
             }
             patched++;
         } else {
@@ -750,6 +832,60 @@ static void patch_vermagic(uint8_t *mod, const Ehdr *eh)
     }
 }
 
+/* ---- patch_vermagic_via_resolver (Plan 2 M-C T13) ----
+ *
+ * Resolver-driven variant of patch_vermagic(). Calls resolve(VAL_VERMAGIC)
+ * to obtain the target string, then applies the same .modinfo slot-rewrite
+ * logic as patch_vermagic(). Behavior is identical on kernels where the
+ * resolver's probe_procfs strategy returns the same string get_vermagic()
+ * would return (which is the only strategy for VAL_VERMAGIC besides CLI and
+ * device config, both of which are additive opt-ins).
+ *
+ * Defined in this commit but not yet called; a later commit wires it into
+ * main(). Keeping the definition inert here keeps each commit trivially
+ * reviewable.
+ */
+static void patch_vermagic_via_resolver(uint8_t *mod, const Ehdr *eh,
+                                        resolve_ctx_t *ctx,
+                                        trace_entry_t *trace, int *trace_count)
+{
+    Shdr *mi = elf_find_section(mod, eh, ".modinfo");
+    if (!mi) return;
+
+    trace_entry_t t;
+    resolved_t r = resolve(VAL_VERMAGIC, ctx, &t);
+    if (trace && trace_count) trace[(*trace_count)++] = t;
+    if (!r.available || !r.str_val[0]) return;
+    const char *new_vm = r.str_val;
+
+    uint8_t *base = mod + mi->sh_offset;
+    uint8_t *end = base + mi->sh_size;
+
+    for (uint8_t *p = base; p < end; ) {
+        if (strncmp((char *)p, "vermagic=", 9) == 0) {
+            char *old_vm = (char *)p + 9;
+            size_t str_len = strlen(old_vm);
+            char *slot_end = old_vm + str_len + 1;
+            while (slot_end < (char *)end && *slot_end == '\0')
+                slot_end++;
+            size_t avail = (size_t)(slot_end - old_vm - 1);
+            size_t new_len = strlen(new_vm);
+            if (new_len <= avail) {
+                memcpy(old_vm, new_vm, new_len);
+                memset(old_vm + new_len, 0, avail - new_len + 1);
+                fprintf(stderr, "kmod_loader: vermagic patched via resolver "
+                                "(avail=%zu, src=%s)\n",
+                        avail, r.source_label);
+            } else {
+                fprintf(stderr, "kmod_loader: new vermagic too long (%zu > %zu)\n",
+                        new_len, avail);
+            }
+            return;
+        }
+        p += strlen((char *)p) + 1;
+    }
+}
+
 /* ---- Patch struct module layout ---- */
 
 static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
@@ -763,63 +899,28 @@ static int patch_module_layout(uint8_t *mod, size_t mod_size, const Ehdr *eh,
         return -1;
     }
 
-    /* Zero out the entire section to ensure all unknown fields (num_ei_funcs,
-     * ei_funcs, trace_events, etc.) are NULL/0, preventing kernel crashes in
-     * module_notifier callbacks. Then restore the module name from .modinfo
-     * (kernel expects it at offset 24 in struct module, max 56 bytes). */
-    memset(mod + this_mod->sh_offset, 0, this_mod->sh_size);
-
-    /* Restore module name at offset 24 (MODULE_NAME_LEN is 56 on all kernels) */
-    {
-        Shdr *mi = elf_find_section(mod, eh, ".modinfo");
-        if (mi) {
-            uint8_t *base = mod + mi->sh_offset;
-            uint8_t *mend = base + mi->sh_size;
-            for (uint8_t *p = base; p < mend; ) {
-                if (strncmp((char *)p, "name=", 5) == 0) {
-                    const char *name = (char *)p + 5;
-                    size_t nlen = strlen(name);
-                    if (nlen > 55) nlen = 55;
-                    memcpy(mod + this_mod->sh_offset + 24, name, nlen);
-                    break;
-                }
-                p += strlen((char *)p) + 1;
-            }
-        }
-    }
-
-    uint32_t old_size = (uint32_t)this_mod->sh_size;
-    uint32_t new_size = preset->mod_size;
-
-    if (old_size == new_size) {
-        fprintf(stderr, "kmod_loader: struct module size already correct (0x%x)\n", new_size);
-    } else {
-        fprintf(stderr, "kmod_loader: struct module size 0x%x -> 0x%x\n", old_size, new_size);
-
-        if (new_size > old_size) {
-            /* Check there's room: both file size and no adjacent section overlap */
-            if (this_mod->sh_offset + new_size > mod_size) {
-                fprintf(stderr, "kmod_loader: cannot expand .this_module (file too small)\n");
-                return -1;
-            }
-            /* Verify no section starts within the expansion range */
-            uint64_t expand_end = this_mod->sh_offset + new_size;
-            for (int i = 0; i < eh->e_shnum; i++) {
-                Shdr *sh = (Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
-                if (sh == this_mod || sh->sh_size == 0) continue;
-                if (sh->sh_offset > this_mod->sh_offset &&
-                    sh->sh_offset < expand_end) {
-                    fprintf(stderr, "kmod_loader: cannot expand .this_module "
-                            "(overlaps section at 0x%llx)\n",
-                            (unsigned long long)sh->sh_offset);
-                    return -1;
-                }
-            }
-            memset(mod + this_mod->sh_offset + old_size, 0, new_size - old_size);
-        }
-        /* If shrinking, just change the section header size. Data beyond is ignored. */
-        this_mod->sh_size = new_size;
-    }
+    /* Historical note: prior versions of this function memset the entire
+     * .gnu.linkonce.this_module section to zero "to prevent kernel crashes in
+     * module_notifier callbacks" and then shrank sh_size to preset->mod_size.
+     * Both of those writes broke real modules on kernel 6.1 (Pixel_34, GKI
+     * android14): exporter.ko's init function never ran because the zeroing
+     * clobbered data the kernel-side loader depends on (beyond what the
+     * relocations re-populate), and the shrink truncated the section below
+     * relocation targets in some build flavors. Plan 2 M-E T17 isolates the
+     * root cause via a bisect (KH_DBG_SKIP_LAYOUT=1 → load succeeds;
+     * KH_DBG_LAYOUT_RELA_ONLY=1 → load AND init succeed), and the fix is to
+     * patch only the init/exit relocation r_offset values — the kernel copies
+     * and initializes struct module itself from relocated pointers, so our
+     * only responsibility is ensuring the init/exit function pointers land at
+     * the offsets the running kernel's struct module expects.
+     *
+     * The compile-time THIS_MODULE macro already places the module name at
+     * offset 24 of .gnu.linkonce.this_module, so no name restore is needed.
+     * We also do NOT modify sh_size: the kernel allocates its own struct
+     * module (sized by the running kernel, not our build kernel) and copies
+     * fields based on relocations; truncating sh_size in the ELF only risks
+     * chopping off relocation targets the kernel still needs to apply. */
+    (void)mod_size;
 
     /* Patch relocation offsets for init/exit.
      * Only patch relocations whose symbol resolves to init_module or
@@ -983,31 +1084,63 @@ static void patch_printk_symbol(uint8_t *mod, const Ehdr *eh)
         }
     }
 
-    /* Patch string table entry for the _printk symbol */
-    Shdr *strtab = NULL;
+    /* Patch strtab in place: find the UND symbol named "_printk" and
+     * overwrite the 7 bytes starting at its st_name offset with "printk\0"
+     * (shifting the name left by 1 byte within strtab).
+     *
+     * This works whether the string is standalone or aliased into a longer
+     * LOCAL symbol's name:
+     *   (a) kh_test.ko has a standalone "_printk\0" — shift produces
+     *       "printk\0\0" which reads as "printk".
+     *   (b) export_link_test/exporter.ko has "_printk" aliased inside
+     *       "__modver_printk\0" (at offset +8). Shifting those 7 bytes in
+     *       place renames that local OBJECT symbol from "__modver_printk"
+     *       to "__modverprintk" — a cosmetic change. Local symbols are
+     *       only read by diagnostic paths (kallsyms, oops backtraces); the
+     *       kernel's find_symbol / resolve path does NOT consult them. So
+     *       the corrupted local name has no functional effect, while the
+     *       UND _printk lookup now correctly resolves to "printk".
+     *
+     * We DO NOT bump st_name. An earlier attempt at that caused a kernel
+     * panic in find_symbol → bsearch → strcmp on Pixel_30 (kernel 5.4),
+     * suspected to be cascading effects from other symbol table fields
+     * becoming inconsistent with the new offset. Patching the bytes in
+     * place is the safer minimum-diff approach.
+     */
+    Shdr *symtab_sh = NULL, *linked_strtab = NULL;
     for (int i = 0; i < eh->e_shnum; i++) {
         Shdr *sh = (Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
-        if (sh->sh_type == SHT_STRTAB && i != eh->e_shstrndx) {
-            strtab = sh;
+        if (sh->sh_type == SHT_SYMTAB && sh->sh_link < eh->e_shnum) {
+            symtab_sh = sh;
+            linked_strtab = (Shdr *)(mod + eh->e_shoff +
+                                     sh->sh_link * eh->e_shentsize);
             break;
         }
     }
-    if (strtab) {
-        char *base = (char *)(mod + strtab->sh_offset);
-        char *end = base + strtab->sh_size;
-        for (char *p = base; p < end; ) {
-            if (strcmp(p, "_printk") == 0) {
-                memmove(p, p + 1, strlen(p)); /* Remove leading underscore */
-                fprintf(stderr, "kmod_loader: strtab _printk -> printk\n");
+    if (symtab_sh && linked_strtab) {
+        int num_syms = symtab_sh->sh_size / symtab_sh->sh_entsize;
+        Elf64_Sym *syms = (Elf64_Sym *)(mod + symtab_sh->sh_offset);
+        char *strs = (char *)(mod + linked_strtab->sh_offset);
+        int patched = 0;
+        for (int i = 0; i < num_syms; i++) {
+            if (syms[i].st_shndx != SHN_UNDEF) continue;  /* only UND */
+            char *name = strs + syms[i].st_name;
+            if (strcmp(name, "_printk") == 0) {
+                /* Shift "printk\0" left by 1, overwriting the leading '_'. */
+                memmove(name, name + 1, strlen(name));
+                patched++;
             }
-            p += strlen(p) + 1;
+        }
+        if (patched) {
+            fprintf(stderr, "kmod_loader: strtab UND _printk -> printk (%d)\n",
+                    patched);
         }
     }
 }
 
 /* ---- Probe stubs (Method A: disassembly, Method B: binary probe) ---- */
 
-static int probe_init_offset_disasm(uint32_t *out_init)
+int probe_init_offset_disasm(uint32_t *out_init)
 {
     uint64_t do_init = ksym_addr("do_init_module");
     if (!do_init) return -1;
@@ -1087,7 +1220,7 @@ static uint32_t probe_cand_offset(int idx)
 #define __NR_delete_module 106
 #endif
 
-static int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
+int probe_init_offset_binary(const char *self_path, uint8_t *main_mod,
                                     size_t main_mod_size, const Ehdr *main_eh,
                                     const char *params, uint32_t *out_init)
 {
@@ -1326,116 +1459,11 @@ static int introspect_vendor_module(struct kver_preset *out)
     return -1;
 }
 
-/* ---- Resolve init/exit offsets (tiered: CLI → vendor → preset → cache → disasm → probe) ---- */
-
-static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int kminor,
-                                          uint32_t cli_init, uint32_t cli_exit,
-                                          int force_probe,
-                                          uint8_t *mod, size_t mod_size,
-                                          const Ehdr *eh, const char *params)
-{
-    struct utsname u;
-    uname(&u);
-    uint32_t vhash = hash_version(u.release);
-    struct kver_preset result = {kmajor, kminor, 0, 0, 0};
-
-    /* Tier 0: CLI override (still look up mod_size from preset/vendor) */
-    if (cli_init && cli_exit) {
-        result.init_off = cli_init;
-        result.exit_off = cli_exit;
-        /* Try to get mod_size from vendor introspection or preset */
-        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
-        if (introspect_vendor_module(&vendor) == 0) {
-            result.mod_size = vendor.mod_size;
-        } else {
-            const struct kver_preset *p = find_preset(kmajor, kminor);
-            if (p) result.mod_size = p->mod_size;
-        }
-        fprintf(stderr, "kmod_loader: CLI offsets init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Tier 1: Vendor module introspection (most accurate for physical devices).
-     * Read a vendor .ko's ELF to determine the actual struct module layout.
-     * This handles devices where GKI presets don't match (e.g. Pixel kernels). */
-    {
-        struct kver_preset vendor = {kmajor, kminor, 0, 0, 0};
-        if (introspect_vendor_module(&vendor) == 0) {
-            result = vendor;
-            return result;
-        }
-    }
-
-    /* Tier 2: Preset table (verified for GKI/AVD kernels) */
-    const struct kver_preset *preset = find_preset(kmajor, kminor);
-    if (preset && !force_probe) {
-        result = *preset;
-        fprintf(stderr, "kmod_loader: preset %d.%d: size=0x%x init=0x%x exit=0x%x\n",
-                preset->major, preset->minor,
-                preset->mod_size, preset->init_off, preset->exit_off);
-        return result;
-    }
-
-    /* Tier 3: Persistent cache (for kernels without preset) */
-    probe_load(self_path);
-    if (!force_probe && g_probe.magic == PROBE_MAGIC &&
-        g_probe.confirmed && g_probe.version_hash == vhash) {
-        result.init_off = g_probe.found_init;
-        result.exit_off = g_probe.found_exit;
-        fprintf(stderr, "kmod_loader: cached offsets init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* (preset already checked in Tier 2) */
-
-    /* Tier 4: Disassembly */
-    uint32_t disasm_init = 0;
-    if (probe_init_offset_disasm(&disasm_init) == 0 && disasm_init) {
-        result.init_off = disasm_init;
-        result.exit_off = cli_exit ? cli_exit : (find_nearest_preset(kmajor, kminor) ?
-                              find_nearest_preset(kmajor, kminor)->exit_off : 0x3c8);
-        g_probe.version_hash = vhash;
-        g_probe.found_init = result.init_off;
-        g_probe.found_exit = result.exit_off;
-        g_probe.confirmed = 1;
-        probe_persist(self_path);
-        fprintf(stderr, "kmod_loader: disasm init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Tier 5: Binary probe */
-    if (force_probe) {
-        /* --probe: reset persistent state to re-probe all candidates */
-        memset(&g_probe, 0, sizeof(g_probe));
-        g_probe.probing_idx = PROBE_IDLE;
-    }
-    uint32_t probe_init = 0;
-    if (probe_init_offset_binary(self_path, mod, mod_size, eh, params,
-                                 &probe_init) == 0 && probe_init) {
-        result.init_off = probe_init;
-        result.exit_off = cli_exit ? cli_exit : (find_nearest_preset(kmajor, kminor) ?
-                              find_nearest_preset(kmajor, kminor)->exit_off : 0x3c8);
-        g_probe.version_hash = vhash;
-        g_probe.found_init = result.init_off;
-        g_probe.found_exit = result.exit_off;
-        g_probe.confirmed = 1;
-        probe_persist(self_path);
-        fprintf(stderr, "kmod_loader: probed init=0x%x exit=0x%x\n",
-                result.init_off, result.exit_off);
-        return result;
-    }
-
-    /* Fallback: use whatever we have */
-    if (cli_init) result.init_off = cli_init;
-    if (cli_exit) result.exit_off = cli_exit;
-    if (!result.init_off)
-        fprintf(stderr, "kmod_loader: WARNING: could not determine init offset. "
-                "Use --init-off 0xHEX\n");
-    return result;
-}
+/* Note: the tiered resolve_offsets() function that lived here
+ * (CLI → vendor → preset → cache → disasm → binary probe) has been
+ * replaced by resolve(VAL_MODULE_INIT_OFFSET / ..._EXIT_OFFSET /
+ * VAL_THIS_MODULE_SIZE) via the resolver framework. See Plan 2
+ * Milestone C Task T13 for the rewire. */
 
 /* ---- kallsyms auto-discovery ----
  *
@@ -1445,7 +1473,7 @@ static struct kver_preset resolve_offsets(const char *self_path, int kmajor, int
  * addresses provided kptr_restrict <= 1. Returns 0 on failure; caller
  * can override with kallsyms_addr=0xHEX on the CLI.
  */
-static uint64_t auto_fetch_kallsyms_addr(void)
+uint64_t auto_fetch_kallsyms_addr(void)
 {
     FILE *fp = fopen("/proc/kallsyms", "r");
     if (!fp) {
@@ -1477,9 +1505,170 @@ static uint64_t auto_fetch_kallsyms_addr(void)
     return addr;
 }
 
-/* ---- Main ---- */
+/* ---- Argv → resolve_ctx_t (Plan 2 M-C T13) ----
+ *
+ * Behavior-neutral helper: parses the same argv flags that main() has always
+ * parsed and populates a resolve_ctx_t. Added as a standalone helper in this
+ * commit so reviewers can diff it in isolation; it is wired into main() in a
+ * later commit. No existing call site is touched.
+ *
+ * Returns 0 on success, non-zero on unrecoverable parse error. Fills:
+ *   *out_ctx       — populated ctx (kmajor/kminor/uname_release, CLI flags)
+ *   *out_mod_path  — argv[1]
+ *   params[]       — concatenated module param string (kallsyms_addr= stripped)
+ *   *out_have_k    — 1 if kallsyms_addr= was intercepted from argv
+ *   *out_kaddr     — value for kallsyms_addr if intercepted
+ *   *out_force_probe — 1 if --probe was passed
+ *   *out_cli_mod_size — 0 or parsed --mod-size value
+ */
+static int build_ctx_from_argv(int argc, char *argv[],
+                               resolve_ctx_t *out_ctx,
+                               const char **out_mod_path,
+                               char *params, size_t params_sz,
+                               int *out_have_k, uint64_t *out_kaddr,
+                               int *out_force_probe, uint32_t *out_cli_mod_size)
+{
+    memset(out_ctx, 0, sizeof(*out_ctx));
+    params[0] = '\0';
+    *out_have_k = 0;
+    *out_kaddr = 0;
+    *out_force_probe = 0;
+    *out_cli_mod_size = 0;
 
-int main(int argc, char *argv[])
+    if (argc < 2) return -1;
+    *out_mod_path = argv[1];
+
+    /* Kernel identity */
+    struct utsname u;
+    if (uname(&u) == 0) {
+        strncpy(out_ctx->uname_release, u.release, sizeof(out_ctx->uname_release) - 1);
+        sscanf(u.release, "%d.%d", &out_ctx->kmajor, &out_ctx->kminor);
+    }
+
+    for (int i = 2; i < argc; i++) {
+        if (strncmp(argv[i], "--init-off", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    out_ctx->have_module_init_offset = 1;
+                    out_ctx->cli_module_init_offset = v;
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--exit-off", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    out_ctx->have_module_exit_offset = 1;
+                    out_ctx->cli_module_exit_offset = v;
+                }
+            }
+            continue;
+        }
+        if (strcmp(argv[i], "--probe") == 0) {
+            *out_force_probe = 1;
+            continue;
+        }
+        if (strncmp(argv[i], "--mod-size", 10) == 0) {
+            const char *val = NULL;
+            if (argv[i][10] == '=') val = &argv[i][11];
+            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) {
+                uint32_t v = 0;
+                sscanf(val, "0x%x", &v);
+                if (v) {
+                    *out_cli_mod_size = v;
+                    out_ctx->have_this_module_size = 1;
+                    out_ctx->cli_this_module_size = v;
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--device", 8) == 0) {
+            const char *val = NULL;
+            if (argv[i][8] == '=') val = &argv[i][9];
+            else if (argv[i][8] == '\0' && i + 1 < argc) val = argv[++i];
+            if (val) out_ctx->device_override = val;
+            continue;
+        }
+        if (strcmp(argv[i], "--no-probe") == 0)    { out_ctx->no_probe = 1; continue; }
+        if (strcmp(argv[i], "--no-config") == 0)   { out_ctx->no_config = 1; continue; }
+        if (strcmp(argv[i], "--strict-config") == 0) { out_ctx->strict_config = 1; continue; }
+        if (strcmp(argv[i], "--prefer-config") == 0) { out_ctx->prefer_config = 1; continue; }
+
+        if (strncmp(argv[i], "--crc", 5) == 0) {
+            const char *spec = NULL;
+            if (argv[i][5] == '=') spec = &argv[i][6];
+            else if (argv[i][5] == '\0' && i + 1 < argc) spec = argv[++i];
+            if (spec) {
+                /* Keep populating legacy crc_overrides[] so the existing
+                 * crc_from_override() path still sees unknown-sym overrides. */
+                if (num_crc_overrides < MAX_CRC_OVERRIDES) {
+                    char name[56] = {0};
+                    uint32_t crc = 0;
+                    if (sscanf(spec, "%55[^=]=0x%x", name, &crc) == 2 ||
+                        sscanf(spec, "%55[^=]=%u", name, &crc) == 2) {
+                        strncpy(crc_overrides[num_crc_overrides].name, name, 55);
+                        crc_overrides[num_crc_overrides].crc = crc;
+                        num_crc_overrides++;
+
+                        /* Mirror known CRCs into ctx so strategy_cli_override
+                         * can return them via the resolver chain. */
+                        if (strcmp(name, "module_layout") == 0) {
+                            out_ctx->have_module_layout_crc = 1;
+                            out_ctx->cli_module_layout_crc = crc;
+                        } else if (strcmp(name, "_printk") == 0 ||
+                                   strcmp(name, "printk") == 0) {
+                            out_ctx->have_printk_crc = 1;
+                            out_ctx->cli_printk_crc = crc;
+                        } else if (strcmp(name, "memcpy") == 0) {
+                            out_ctx->have_memcpy_crc = 1;
+                            out_ctx->cli_memcpy_crc = crc;
+                        } else if (strcmp(name, "memset") == 0) {
+                            out_ctx->have_memset_crc = 1;
+                            out_ctx->cli_memset_crc = crc;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "kallsyms_addr=", 14) == 0) {
+            uint64_t a = 0;
+            sscanf(argv[i] + 14, "0x%lx", (unsigned long *)&a);
+            if (!a) sscanf(argv[i] + 14, "%lu", (unsigned long *)&a);
+            *out_kaddr = a;
+            *out_have_k = 1;
+            out_ctx->have_kallsyms_addr = 1;
+            out_ctx->cli_kallsyms_addr = a;
+            continue;
+        }
+        if (params[0]) strlcat(params, " ", params_sz);
+        strlcat(params, argv[i], params_sz);
+    }
+    return 0;
+}
+
+/* ---- Load / info shared implementation ----
+ *
+ * This function is the old main() body: parse argv, read the module,
+ * run the resolver for every VAL_*, patch the in-memory buffer, then
+ * try finit_module / init_module.
+ *
+ * dry_run == 1 (info subcommand): perform resolution and buffer patching
+ * exactly the same way as load, then dump the trace and return WITHOUT
+ * calling init_module/finit_module. This lets users see what WOULD happen.
+ */
+static int do_load(int argc, char *argv[], int dry_run)
 {
     if (argc < 2) {
         fprintf(stderr,
@@ -1489,76 +1678,29 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Parse --crc overrides and module parameters.
-     * kallsyms_addr=0xHEX is intercepted and patched directly into the ELF
-     * (avoids module_param callbacks that trigger CFI on shadow-CFI kernels). */
+    /* Parse --crc overrides and module parameters via the resolver ctx
+     * helper (Plan 2 M-C T13). kallsyms_addr=0xHEX is intercepted and
+     * patched directly into the ELF (avoids module_param callbacks that
+     * trigger CFI on shadow-CFI kernels). */
     char params[4096] = "";
     uint64_t kallsyms_addr = 0;
     int have_kallsyms_addr = 0;
-    uint32_t cli_init_off = 0, cli_exit_off = 0, cli_mod_size = 0;
+    uint32_t cli_mod_size = 0;
     int force_probe = 0;
-    for (int i = 2; i < argc; i++) {
-        if (strncmp(argv[i], "--init-off", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') {
-                val = &argv[i][11];
-            } else if (argv[i][10] == '\0' && i + 1 < argc) {
-                val = argv[++i];
-            }
-            if (val) sscanf(val, "0x%x", &cli_init_off);
-            continue;
-        }
-        if (strncmp(argv[i], "--exit-off", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') {
-                val = &argv[i][11];
-            } else if (argv[i][10] == '\0' && i + 1 < argc) {
-                val = argv[++i];
-            }
-            if (val) sscanf(val, "0x%x", &cli_exit_off);
-            continue;
-        }
-        if (strcmp(argv[i], "--probe") == 0) {
-            force_probe = 1;
-            continue;
-        }
-        if (strncmp(argv[i], "--mod-size", 10) == 0) {
-            const char *val = NULL;
-            if (argv[i][10] == '=') val = &argv[i][11];
-            else if (argv[i][10] == '\0' && i + 1 < argc) val = argv[++i];
-            if (val) sscanf(val, "0x%x", &cli_mod_size);
-            continue;
-        }
-        if (strncmp(argv[i], "--crc", 5) == 0) {
-            /* --crc sym=0xHEX  or  --crc=sym=0xHEX */
-            const char *spec = NULL;
-            if (argv[i][5] == '=') {
-                spec = &argv[i][6];
-            } else if (argv[i][5] == '\0' && i + 1 < argc) {
-                spec = argv[++i];
-            }
-            if (spec && num_crc_overrides < MAX_CRC_OVERRIDES) {
-                char name[56] = {0};
-                uint32_t crc = 0;
-                if (sscanf(spec, "%55[^=]=0x%x", name, &crc) == 2 ||
-                    sscanf(spec, "%55[^=]=%u", name, &crc) == 2) {
-                    strncpy(crc_overrides[num_crc_overrides].name, name, 55);
-                    crc_overrides[num_crc_overrides].crc = crc;
-                    num_crc_overrides++;
-                }
-            }
-            continue;
-        }
-        /* Intercept kallsyms_addr — patch via ELF, not module_param */
-        if (strncmp(argv[i], "kallsyms_addr=", 14) == 0) {
-            sscanf(argv[i] + 14, "0x%lx", &kallsyms_addr);
-            if (!kallsyms_addr) sscanf(argv[i] + 14, "%lu", &kallsyms_addr);
-            have_kallsyms_addr = 1;
-            continue;
-        }
-        if (params[0]) strlcat(params, " ", sizeof(params));
-        strlcat(params, argv[i], sizeof(params));
+    resolve_ctx_t ctx;
+    const char *mod_path = NULL;
+    if (build_ctx_from_argv(argc, argv, &ctx, &mod_path,
+                            params, sizeof(params),
+                            &have_kallsyms_addr, &kallsyms_addr,
+                            &force_probe, &cli_mod_size) != 0) {
+        fprintf(stderr, "kmod_loader: argv parse failed\n");
+        return 1;
     }
+
+    /* Trace buffer for resolver calls; dumped on verbose paths (future). */
+    trace_entry_t trace[VAL__COUNT * 2];
+    int trace_count = 0;
+    (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
     /* Read module binary */
     int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
@@ -1605,9 +1747,15 @@ int main(int argc, char *argv[])
     if (kptr) { fputs("0", kptr); fclose(kptr); }
 
     /* Determine kernel version */
-    int kmajor = 0, kminor = 0;
-    parse_kver(&kmajor, &kminor);
+    int kmajor = ctx.kmajor, kminor = ctx.kminor;
+    if (!kmajor) parse_kver(&kmajor, &kminor);
     fprintf(stderr, "kmod_loader: kernel %d.%d\n", kmajor, kminor);
+
+    /* Hand the loaded ELF to the resolver ctx so probe_binary_search and
+     * strategies that inspect the module buffer can do their job. */
+    ctx.mod_buf  = mod;
+    ctx.mod_size = mod_size;
+    ctx.mod_eh   = eh;
 
     /* Quick path: check if vermagic already matches. If so, skip all patching. */
     {
@@ -1626,7 +1774,7 @@ int main(int argc, char *argv[])
                 p += strlen((char *)p) + 1;
             }
         }
-        if (vm_match) {
+        if (vm_match && !dry_run) {
             fprintf(stderr, "kmod_loader: vermagic matches, loading directly\n");
             int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
             if (ret == 0) {
@@ -1639,16 +1787,30 @@ int main(int argc, char *argv[])
         }
     }
 
-    /* Step 1: Patch vermagic */
-    patch_vermagic(mod, eh);
+    /* Step 1: Patch vermagic via resolver */
+    patch_vermagic_via_resolver(mod, eh, &ctx, trace, &trace_count);
 
     /* Step 2: Patch printk symbol name (_printk vs printk) */
     patch_printk_symbol(mod, eh);
 
-    /* Step 3: Resolve init/exit offsets (cache -> preset -> disasm -> probe) */
-    struct kver_preset resolved = resolve_offsets(
-        argv[0], kmajor, kminor, cli_init_off, cli_exit_off, force_probe,
-        mod, mod_size, eh, params);
+    /* Step 3: Resolve init/exit offsets + this_module size via resolver. */
+    struct kver_preset resolved = { kmajor, kminor, 0, 0, 0 };
+    {
+        trace_entry_t t;
+        resolved_t r;
+
+        r = resolve(VAL_MODULE_INIT_OFFSET, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.init_off = (uint32_t)r.u64_val;
+
+        r = resolve(VAL_MODULE_EXIT_OFFSET, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.exit_off = (uint32_t)r.u64_val;
+
+        r = resolve(VAL_THIS_MODULE_SIZE, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available) resolved.mod_size = (uint32_t)r.u64_val;
+    }
 
     /* Patch struct module layout using resolved offsets */
     if (cli_mod_size) resolved.mod_size = cli_mod_size;
@@ -1669,11 +1831,16 @@ int main(int argc, char *argv[])
      * for the common case. Failure is non-fatal — the loader still runs
      * and lets the in-kernel init report the missing symbol. */
     if (!have_kallsyms_addr) {
-        kallsyms_addr = auto_fetch_kallsyms_addr();
-        if (kallsyms_addr) have_kallsyms_addr = 1;
-        else
+        trace_entry_t t;
+        resolved_t r = resolve(VAL_KALLSYMS_LOOKUP_NAME_ADDR, &ctx, &t);
+        if (trace_count < (int)(sizeof(trace)/sizeof(trace[0]))) trace[trace_count++] = t;
+        if (r.available && r.u64_val) {
+            kallsyms_addr = r.u64_val;
+            have_kallsyms_addr = 1;
+        } else {
             fprintf(stderr, "kmod_loader: WARNING: no kallsyms_addr= given and "
                             "auto-fetch failed; pass kallsyms_addr=0xHEX manually\n");
+        }
     }
     if (have_kallsyms_addr && kallsyms_addr) {
         if (patch_elf_symbol(mod, alloc_size, eh, "kallsyms_addr", kallsyms_addr) == 0)
@@ -1686,13 +1853,22 @@ int main(int argc, char *argv[])
     /* Note: cfi_check is now handled at compile time via MODULE_CFI_CHECK_OFFSET
      * in shim.h — no runtime injection needed. */
 
-    /* Step 4: Try to patch CRCs from kernel Image (best-effort) */
-    patch_crcs(mod, eh);
+    /* Step 4: Try to patch CRCs via the resolver framework. */
+    patch_crcs_via_resolver(mod, eh, &ctx, trace, &trace_count);
 
     /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS).
      * Only applicable to 6.1+ kernels which use kCFI; pre-6.1 uses shadow CFI. */
     if (kmajor > 6 || (kmajor == 6 && kminor >= 1))
         patch_kcfi_hashes(mod, mod_size, eh);
+
+    /* Dry-run (info subcommand): dump the resolution trace and exit. */
+    if (dry_run) {
+        trace_dump(trace, trace_count);
+        fprintf(stderr, "kmod_loader: dry-run — would call init_module (size=%lu, alloc=%zu)\n",
+                (unsigned long)st.st_size, mod_size);
+        free(mod);
+        return 0;
+    }
 
     /* Step 5: Try finit_module with IGNORE flags (bypasses CRC/vermagic on supported kernels) */
     {
@@ -1739,4 +1915,66 @@ int main(int argc, char *argv[])
 
     printf("Module %s loaded (init_module, patched)\n", argv[1]);
     return 0;
+}
+
+/* ---- Subcommand wrappers ----
+ *
+ * subcmd_load and subcmd_info live in kmod_loader.c (not subcommands.c)
+ * because do_load references many static helpers in this file. The other
+ * four subcommands (unload, list, devices, probe) live in subcommands.c
+ * and only depend on the public resolver + devices_table headers. */
+
+int subcmd_load(int argc, char **argv)
+{
+    return do_load(argc, argv, 0);
+}
+
+int subcmd_info(int argc, char **argv)
+{
+    return do_load(argc, argv, 1);
+}
+
+/* ---- Main — dispatcher ---- */
+
+static void usage_dispatcher(const char *argv0)
+{
+    fprintf(stderr,
+        "Usage: %s <subcommand> [args...]\n"
+        "\n"
+        "Subcommands:\n"
+        "  load <module.ko> [opts]  — resolve + patch + init_module\n"
+        "  unload <name>            — delete_module\n"
+        "  list                     — list loaded modules\n"
+        "  info <module.ko> [opts]  — dry-run resolve + patch (no load)\n"
+        "  devices                  — list bundled device profiles\n"
+        "  probe                    — dump all probe-strategy outputs\n"
+        "\n"
+        "Legacy form (backwards compat):\n"
+        "  %s <module.ko> [opts]    — equivalent to `%s load <module.ko> [opts]`\n",
+        argv0, argv0, argv0);
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc < 2) { usage_dispatcher(argv[0]); return 1; }
+    const char *sub = argv[1];
+
+    if (strcmp(sub, "load") == 0)    return subcmd_load(argc - 1, argv + 1);
+    if (strcmp(sub, "unload") == 0)  return subcmd_unload(argc - 1, argv + 1);
+    if (strcmp(sub, "list") == 0)    return subcmd_list(argc - 1, argv + 1);
+    if (strcmp(sub, "info") == 0)    return subcmd_info(argc - 1, argv + 1);
+    if (strcmp(sub, "devices") == 0) return subcmd_devices(argc - 1, argv + 1);
+    if (strcmp(sub, "probe") == 0)   return subcmd_probe(argc - 1, argv + 1);
+
+    /* Legacy positional: kmod_loader <module.ko> [params...]
+     * Detected by .ko suffix on argv[1]. Falls through to subcmd_load
+     * with the original argv so the existing parser (build_ctx_from_argv)
+     * still sees argv[1] as the module path. */
+    size_t n = strlen(sub);
+    if (n > 3 && strcmp(sub + n - 3, ".ko") == 0) {
+        return subcmd_load(argc, argv);
+    }
+
+    usage_dispatcher(argv[0]);
+    return 1;
 }
