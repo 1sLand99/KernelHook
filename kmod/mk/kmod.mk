@@ -77,18 +77,18 @@ CROSS_COMPILE := $(KH_CROSS_COMPILE)
 KERNELRELEASE ?= unknown
 VERMAGIC ?= $(KERNELRELEASE) SMP preempt mod_unload modversions aarch64
 
-# ---------- CRC overrides (for __versions section) ----------
-
-MODULE_LAYOUT_CRC ?=
-PRINTK_CRC ?=
-
-# ---------- struct module offset overrides ----------
-
-THIS_MODULE_SIZE   ?=
-MODULE_INIT_OFFSET ?=
-MODULE_EXIT_OFFSET ?=
-
 # ---------- Compile flags ----------
+#
+# Plan 2 (runtime resolver) made MODULE_LAYOUT_CRC / PRINTK_CRC /
+# THIS_MODULE_SIZE / MODULE_INIT_OFFSET / MODULE_EXIT_OFFSET overrides
+# obsolete — those values are resolved at load time by kmod_loader's
+# strategy chain and patched directly into the .ko buffer before
+# init_module. The .ko compiles with placeholder sentinels defined
+# in kmod/shim/shim.h (MODULE_VERSIONS macro).
+#
+# If a consumer still passes any of those variables via `make VAR=val`,
+# the build silently ignores them — harmless, but they no longer affect
+# the produced .ko.
 
 KH_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
@@ -104,25 +104,6 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
              -fsanitize=kcfi
-
-# Append CRC defines if provided
-ifneq ($(MODULE_LAYOUT_CRC),)
-  KH_CFLAGS += -DMODULE_LAYOUT_CRC=$(MODULE_LAYOUT_CRC)
-endif
-ifneq ($(PRINTK_CRC),)
-  KH_CFLAGS += -DPRINTK_CRC=$(PRINTK_CRC)
-endif
-
-# Append struct module offset defines if provided
-ifneq ($(THIS_MODULE_SIZE),)
-  KH_CFLAGS += -DTHIS_MODULE_SIZE=$(THIS_MODULE_SIZE)
-endif
-ifneq ($(MODULE_INIT_OFFSET),)
-  KH_CFLAGS += -DMODULE_INIT_OFFSET=$(MODULE_INIT_OFFSET)
-endif
-ifneq ($(MODULE_EXIT_OFFSET),)
-  KH_CFLAGS += -DMODULE_EXIT_OFFSET=$(MODULE_EXIT_OFFSET)
-endif
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)
