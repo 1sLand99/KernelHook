@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
 
 #define KH_CRC_VERSION "1"
 
@@ -117,6 +118,138 @@ static uint32_t crc32_string(const char *s)
     return crc32_bytes((const unsigned char *)s, strlen(s));
 }
 
+/* ---- Manifest parser ---- */
+
+#define KH_MAX_ARGS    16
+#define KH_MAX_NAME    64
+#define KH_MAX_TOKEN   16
+#define KH_MAX_ENTRIES 128
+
+typedef struct {
+    char name[KH_MAX_NAME];
+    char ret_tok[KH_MAX_TOKEN];
+    char arg_toks[KH_MAX_ARGS][KH_MAX_TOKEN];
+    int  nargs;
+} kh_entry_t;
+
+/* Strip leading/trailing whitespace in place. Returns pointer into original buffer. */
+static char *strip(char *s)
+{
+    char *end;
+    while (*s == ' ' || *s == '\t') s++;
+    if (*s == '\0') return s;
+    end = s + strlen(s) - 1;
+    while (end >= s && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
+        *end = '\0';
+        if (end == s) break;
+        end--;
+    }
+    return s;
+}
+
+/* Parse one non-comment, non-empty line. Returns 0 on success, -1 on parse error. */
+static int parse_line(const char *filename, int lineno, char *line, kh_entry_t *out)
+{
+    char *p, *name, *ret, *args;
+    char *colon1, *colon2;
+
+    colon1 = strchr(line, ':');
+    if (!colon1) {
+        fprintf(stderr, "%s:%d: missing first ':'\n", filename, lineno);
+        return -1;
+    }
+    *colon1 = '\0';
+    colon2 = strchr(colon1 + 1, ':');
+    if (!colon2) {
+        fprintf(stderr, "%s:%d: missing second ':'\n", filename, lineno);
+        return -1;
+    }
+    *colon2 = '\0';
+
+    name = strip(line);
+    ret  = strip(colon1 + 1);
+    args = strip(colon2 + 1);
+
+    if (*name == '\0' || *ret == '\0') {
+        fprintf(stderr, "%s:%d: empty name or return type\n", filename, lineno);
+        return -1;
+    }
+    if (strlen(name) >= KH_MAX_NAME) {
+        fprintf(stderr, "%s:%d: name too long: '%s'\n", filename, lineno, name);
+        return -1;
+    }
+    if (strlen(ret) >= KH_MAX_TOKEN) {
+        fprintf(stderr, "%s:%d: return token too long: '%s'\n", filename, lineno, ret);
+        return -1;
+    }
+
+    memset(out, 0, sizeof(*out));
+    strncpy(out->name, name, sizeof(out->name) - 1);
+    strncpy(out->ret_tok, ret, sizeof(out->ret_tok) - 1);
+    out->nargs = 0;
+
+    /* Parse comma-separated arg list (empty → nargs=0). */
+    p = args;
+    while (*p != '\0') {
+        char *comma = strchr(p, ',');
+        char *tok;
+        if (comma) *comma = '\0';
+        tok = strip(p);
+        if (*tok != '\0') {
+            if (out->nargs >= KH_MAX_ARGS) {
+                fprintf(stderr, "%s:%d: too many args (max %d)\n",
+                        filename, lineno, KH_MAX_ARGS);
+                return -1;
+            }
+            if (strlen(tok) >= KH_MAX_TOKEN) {
+                fprintf(stderr, "%s:%d: arg token too long: '%s'\n",
+                        filename, lineno, tok);
+                return -1;
+            }
+            strncpy(out->arg_toks[out->nargs], tok, KH_MAX_TOKEN - 1);
+            out->nargs++;
+        }
+        if (!comma) break;
+        p = comma + 1;
+    }
+    return 0;
+}
+
+/* Parse a whole manifest file. On success fills entries[], sets *nentries, returns 0. */
+static int parse_manifest(const char *path, kh_entry_t *entries, int max_entries, int *nentries)
+{
+    FILE *f = fopen(path, "r");
+    char line[1024];
+    int lineno = 0;
+    int count = 0;
+
+    if (!f) {
+        fprintf(stderr, "parse_manifest: cannot open '%s'\n", path);
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char *s;
+        lineno++;
+        s = strip(line);
+        if (*s == '\0' || *s == '#') continue;
+        if (count >= max_entries) {
+            fprintf(stderr, "%s:%d: too many entries (max %d)\n",
+                    path, lineno, max_entries);
+            fclose(f);
+            return -1;
+        }
+        if (parse_line(path, lineno, s, &entries[count]) != 0) {
+            fclose(f);
+            return -1;
+        }
+        count++;
+    }
+    fclose(f);
+    *nentries = count;
+    return 0;
+}
+
 static void usage(const char *argv0)
 {
     fprintf(stderr,
@@ -197,6 +330,47 @@ static int self_test_canonicalize(void)
     return failed;
 }
 
+static int self_test_parser(void)
+{
+    const char *tmpname = "/tmp/kh_crc_parse_test.txt";
+    FILE *f = fopen(tmpname, "w");
+    kh_entry_t entries[16];
+    int n = 0;
+    int failed = 0;
+    if (!f) { perror("tmpfile"); return 1; }
+    fputs(
+        "# comment\n"
+        "\n"
+        "hook_wrap : enum : ptr, i32, ptr, ptr, ptr, i32\n"
+        "unhook    : void : ptr\n"
+        "ksyms_lookup:u64:ptr\n"     /* whitespace-robust */
+        "no_args : void :\n"          /* empty arg list */
+        , f);
+    fclose(f);
+
+    if (parse_manifest(tmpname, entries, 16, &n) != 0) {
+        fprintf(stderr, "FAIL parse_manifest\n");
+        return 1;
+    }
+    if (n != 4) { fprintf(stderr, "FAIL nentries=%d expected 4\n", n); failed++; }
+    if (strcmp(entries[0].name, "hook_wrap") != 0) {
+        fprintf(stderr, "FAIL entries[0].name=%s\n", entries[0].name); failed++;
+    }
+    if (entries[0].nargs != 6) {
+        fprintf(stderr, "FAIL entries[0].nargs=%d\n", entries[0].nargs); failed++;
+    }
+    if (strcmp(entries[0].arg_toks[1], "i32") != 0) {
+        fprintf(stderr, "FAIL entries[0].arg_toks[1]=%s\n", entries[0].arg_toks[1]); failed++;
+    }
+    if (strcmp(entries[1].name, "unhook") != 0) { failed++; }
+    if (strcmp(entries[2].name, "ksyms_lookup") != 0) { failed++; }
+    if (entries[3].nargs != 0) { failed++; }
+
+    unlink(tmpname);
+    if (failed == 0) printf("parser: OK (4 cases)\n");
+    return failed;
+}
+
 int main(int argc, char **argv)
 {
     int i;
@@ -209,6 +383,7 @@ int main(int argc, char **argv)
         int rc = 0;
         rc |= self_test_crc32();
         rc |= self_test_canonicalize();
+        rc |= self_test_parser();
         return rc ? 1 : 0;
     }
     fprintf(stderr, "unknown mode: %s\n", mode);
