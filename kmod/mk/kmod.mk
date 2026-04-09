@@ -39,8 +39,23 @@ $(KH_CRC):
 $(KH_GEN_DIR):
 	mkdir -p $@
 
+# KH_KSYMTAB_LAYOUT selects the on-disk __ksymtab layout:
+#   prel32 (default) — 12-byte struct with PREL32 relocs. Matches kernels
+#                      built with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y (GKI
+#                      6.1+ on arm64, modern upstream).
+#   abs64            — 24-byte struct with ABS64 pointers. Required for
+#                      kernels where HAVE_ARCH_PREL32_RELOCATIONS is OFF
+#                      (e.g. Android 11 GKI 5.4). Mismatched layout causes
+#                      strcmp crashes in find_symbol at load time.
+KH_KSYMTAB_LAYOUT ?= prel32
+ifeq ($(KH_KSYMTAB_LAYOUT),abs64)
+  KH_CRC_ASM_MODE := asm-abs64
+else
+  KH_CRC_ASM_MODE := asm
+endif
+
 $(KH_EXPORTS_S): $(KH_CRC) $(KH_MANIFEST) | $(KH_GEN_DIR)
-	$(KH_CRC) --mode=asm --manifest=$(KH_MANIFEST) --output=$@
+	$(KH_CRC) --mode=$(KH_CRC_ASM_MODE) --manifest=$(KH_MANIFEST) --output=$@
 
 $(KH_SYMVERS_H): $(KH_CRC) $(KH_MANIFEST)
 	$(KH_CRC) --mode=header --manifest=$(KH_MANIFEST) --output=$@
