@@ -66,7 +66,8 @@ jobs:
             bc bison flex libssl-dev libelf-dev cpio kmod python3 ccache \
             clang lld llvm llvm-dev \
             gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            rsync zstd xz-utils
+            rsync zstd xz-utils \
+            dwarves
           clang --version
           ld.lld --version
 
