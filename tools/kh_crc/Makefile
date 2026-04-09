@@ -13,7 +13,14 @@ kh_crc: kh_crc.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 test: kh_crc
-	./tests/run_tests.sh
+	@# Minimal test target: run the built-in self-test. The full test driver
+	@# (tests/run_tests.sh) is added in Task 7 with golden regression and
+	@# Contract 1 independence checks. Once present, `test` delegates to it.
+	@if [ -x ./tests/run_tests.sh ]; then                                  \
+	    ./tests/run_tests.sh;                                              \
+	else                                                                   \
+	    ./kh_crc --mode=self-test;                                         \
+	fi
 
 clean:
 	rm -f kh_crc *.o

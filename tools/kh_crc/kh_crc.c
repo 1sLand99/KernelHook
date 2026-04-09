@@ -43,7 +43,43 @@ static char abi_class(const char *token)
 /* Write the canonical CRC input string for a symbol into `out`.
  *   "<name>(<arg_classes>)-><ret_class>"
  * Example: "hook_wrap(x,w,x,x,x,w)->w"
- * Returns 0 on success, -1 on any invalid token (and prints an error to stderr). */
+ * Returns 0 on success, -1 on any invalid token or buffer overflow.
+ *
+ * Buffer accounting: each write to `out` is checked for both the
+ * error return and full truncation before `pos` is advanced. Truncation
+ * is treated as a hard error so Contract 4 (algorithm freeze) cannot
+ * silently produce host/libc-dependent output. In practice callers size
+ * out generously and truncation never occurs, but the defensive check
+ * turns that from an assumption into a verifiable property. */
+
+/* Append a single character safely. Returns 0 on success, -1 on overflow. */
+static int canon_putc(char *out, size_t out_size, size_t *pos, char c,
+                      const char *name)
+{
+    if (*pos + 1 >= out_size) {
+        fprintf(stderr, "canonicalize: output buffer overflow for '%s'\n", name);
+        return -1;
+    }
+    out[(*pos)++] = c;
+    out[*pos] = '\0';
+    return 0;
+}
+
+/* Append a null-terminated string safely. Returns 0 on success, -1 on overflow. */
+static int canon_puts(char *out, size_t out_size, size_t *pos, const char *s,
+                      const char *name)
+{
+    size_t len = strlen(s);
+    if (*pos + len >= out_size) {
+        fprintf(stderr, "canonicalize: output buffer overflow for '%s'\n", name);
+        return -1;
+    }
+    memcpy(out + *pos, s, len);
+    *pos += len;
+    out[*pos] = '\0';
+    return 0;
+}
+
 static int canonicalize(const char *name, const char *ret_tok,
                         char arg_toks[][16], int nargs,
                         char *out, size_t out_size)
@@ -57,8 +93,11 @@ static int canonicalize(const char *name, const char *ret_tok,
                 ret_tok, name);
         return -1;
     }
+    if (out_size == 0) return -1;
+    out[0] = '\0';
 
-    pos += (size_t)snprintf(out + pos, out_size - pos, "%s(", name);
+    if (canon_puts(out, out_size, &pos, name, name) != 0) return -1;
+    if (canon_putc(out, out_size, &pos, '(', name) != 0) return -1;
     for (i = 0; i < nargs; i++) {
         char c = abi_class(arg_toks[i]);
         if (c == 0) {
@@ -71,15 +110,11 @@ static int canonicalize(const char *name, const char *ret_tok,
                     name);
             return -1;
         }
-        if (i > 0)
-            pos += (size_t)snprintf(out + pos, out_size - pos, ",");
-        pos += (size_t)snprintf(out + pos, out_size - pos, "%c", c);
-        if (pos >= out_size) {
-            fprintf(stderr, "canonicalize: output buffer overflow for '%s'\n", name);
-            return -1;
-        }
+        if (i > 0 && canon_putc(out, out_size, &pos, ',', name) != 0) return -1;
+        if (canon_putc(out, out_size, &pos, c, name) != 0) return -1;
     }
-    snprintf(out + pos, out_size - pos, ")->%c", ret_c);
+    if (canon_puts(out, out_size, &pos, ")->", name) != 0) return -1;
+    if (canon_putc(out, out_size, &pos, ret_c, name) != 0) return -1;
     return 0;
 }
 
@@ -188,14 +223,27 @@ static int parse_line(const char *filename, int lineno, char *line, kh_entry_t *
     strncpy(out->ret_tok, ret, sizeof(out->ret_tok) - 1);
     out->nargs = 0;
 
-    /* Parse comma-separated arg list (empty → nargs=0). */
+    /* Parse comma-separated arg list.
+     *
+     * An entirely empty args field (nothing after the second ':') means
+     * "no arguments" → nargs=0. This is the ONLY case in which empty is
+     * allowed. Once the field is non-empty, every comma-separated slot
+     * must contain a non-empty token: malformed forms like "ptr,,i32",
+     * "ptr," and ",ptr" are rejected. Silently accepting them would let
+     * manifest typos produce a DIFFERENT signature than intended and
+     * freeze the wrong CRC forever (Contract 3/4). */
     p = args;
-    while (*p != '\0') {
-        char *comma = strchr(p, ',');
-        char *tok;
-        if (comma) *comma = '\0';
-        tok = strip(p);
-        if (*tok != '\0') {
+    if (*p != '\0') {
+        for (;;) {
+            char *comma = strchr(p, ',');
+            char *tok;
+            if (comma) *comma = '\0';
+            tok = strip(p);
+            if (*tok == '\0') {
+                fprintf(stderr, "%s:%d: empty argument token in arg list\n",
+                        filename, lineno);
+                return -1;
+            }
             if (out->nargs >= KH_MAX_ARGS) {
                 fprintf(stderr, "%s:%d: too many args (max %d)\n",
                         filename, lineno, KH_MAX_ARGS);
@@ -208,9 +256,9 @@ static int parse_line(const char *filename, int lineno, char *line, kh_entry_t *
             }
             strncpy(out->arg_toks[out->nargs], tok, KH_MAX_TOKEN - 1);
             out->nargs++;
+            if (!comma) break;
+            p = comma + 1;
         }
-        if (!comma) break;
-        p = comma + 1;
     }
     return 0;
 }
