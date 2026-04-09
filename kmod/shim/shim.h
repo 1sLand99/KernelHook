@@ -247,9 +247,38 @@ struct modversion_info {
 #define MODULE_NAME "kh_test"
 #endif
 
+/* Pad vermagic with trailing spaces so kmod_loader can replace it at load
+ * time with any kernel's vermagic string (which may be longer than the
+ * compiled-in value). The kernel's check_modinfo() uses strcmp on vermagic,
+ * so the trailing spaces are not tolerated at match time — kmod_loader MUST
+ * rewrite the slot before calling init_module. */
+#define _KH_VM_PAD \
+    "                                                                "
+
 #define MODULE_VERMAGIC()                                               \
-    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING);                 \
+    __MODULE_INFO(vermagic, vermagic, VERMAGIC_STRING _KH_VM_PAD);       \
     __MODULE_INFO(name, modulename, MODULE_NAME)
+
+/* Shadow-CFI permissive stub (CONFIG_CFI_CLANG + CONFIG_CFI_CLANG_SHADOW).
+ *
+ * On 5.4/5.10/5.15 GKI kernels, shadow-based CFI uses mod->cfi_check to
+ * validate indirect calls into modules. find_module_sections() sets it by
+ * looking up the GLOBAL symbol "__cfi_check" in the module's symtab. Without
+ * it, any indirect call (including do_one_initcall → mod->init) panics with
+ * "CFI failure (target: init_module)" in __cfi_slowpath.
+ *
+ * On 6.1+ kCFI kernels, this symbol is found but the field is unused — kCFI
+ * validates calls via inline type-hash checks, not the shadow + callback
+ * mechanism. So this stub is harmless (and redundant) on kCFI.
+ *
+ * Must be non-weak GLOBAL: 5.4 GKI's find_module_sections() skips weak
+ * symbols when setting mod->cfi_check. Emitted via MODULE_THIS_MODULE() to
+ * guarantee exactly one definition per module. */
+#define MODULE_CFI_CHECK()                                                    \
+    void __attribute__((used, visibility("default"), section(".text")))        \
+    __cfi_check(unsigned long id, void *ptr, void *diag) { (void)id; (void)ptr; (void)diag; } \
+    void __attribute__((weak, used, visibility("default"), section(".text")))  \
+    __cfi_check_fail(void *data, void *ptr) { (void)data; (void)ptr; }
 
 /*
  * MODULE_THIS_MODULE — define the __this_module symbol with init/exit
@@ -309,6 +338,33 @@ struct modversion_info {
             .name = MODULE_NAME,                                        \
             .init = init_module,                                        \
             .exit = cleanup_module,                                     \
-        }
+        };                                                              \
+    MODULE_CFI_CHECK();                                                 \
+    /* Force a 1-byte _error_injection_whitelist section.                \
+     * CONFIG_FUNCTION_ERROR_INJECTION kernels call                      \
+     * populate_error_injection_list() which does section_objs() /       \
+     * sizeof(struct error_injection_entry). Missing section causes a    \
+     * NULL deref on some builds; emitting exactly 1 byte makes          \
+     * section_objs() return 0 entries (1/sizeof(entry) = 0). */         \
+    __asm__(".pushsection _error_injection_whitelist, \"aw\"\n"         \
+            ".byte 0\n"                                                 \
+            ".popsection\n");                                           \
+    /* Shadow-CFI jump table stubs for 5.4/5.10/5.15 GKI.               \
+     * The kernel's module loader replaces init_module/cleanup_module    \
+     * function pointers with their .cfi_jt jump table entries when      \
+     * applying relocations to .gnu.linkonce.this_module. Without these  \
+     * symbols, mod->init is set to NULL and do_init_module → 0 deref. */\
+    __asm__(                                                            \
+        ".pushsection .text, \"ax\"\n"                                  \
+        ".global init_module.cfi_jt\n"                                  \
+        ".type init_module.cfi_jt, %function\n"                         \
+        "init_module.cfi_jt: b init_module\n"                           \
+        ".size init_module.cfi_jt, . - init_module.cfi_jt\n"           \
+        ".global cleanup_module.cfi_jt\n"                               \
+        ".type cleanup_module.cfi_jt, %function\n"                      \
+        "cleanup_module.cfi_jt: b cleanup_module\n"                     \
+        ".size cleanup_module.cfi_jt, . - cleanup_module.cfi_jt\n"     \
+        ".popsection\n"                                                 \
+    )
 
 #endif /* _SHIM_H_ */

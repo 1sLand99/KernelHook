@@ -602,12 +602,16 @@ static int emit_asm_abs64(kh_entry_t *entries, int n, FILE *out)
     for (i = 0; i < n; i++) {
         fprintf(out,
             "__kstr_%s:\n"
-            "\t.asciz \"%s\"\n"
-            "__kstrns_%s:\n"
-            "\t.asciz \"\"\n",
-            entries[i].name, entries[i].name, entries[i].name);
+            "\t.asciz \"%s\"\n",
+            entries[i].name, entries[i].name);
     }
 
+    /* Each entry: { value, name, namespace=NULL }. Namespace MUST be NULL
+     * (not a pointer to ""), because 5.4 __KSYMTAB_ENTRY (the non-NS
+     * variant) emits NULL there, and the kernel's modpost-generated import
+     * check rejects non-NULL namespaces with
+     *   "module uses symbol (X) from namespace , but does not import it"
+     * when a consuming module doesn't explicitly MODULE_IMPORT_NS(""). */
     for (i = 0; i < n; i++) {
         fprintf(out,
             "\n"
@@ -619,10 +623,9 @@ static int emit_asm_abs64(kh_entry_t *entries, int n, FILE *out)
             "__ksymtab_%s:\n"
             "\t.quad %s            /* value (ABS64) */\n"
             "\t.quad __kstr_%s     /* name  (ABS64) */\n"
-            "\t.quad __kstrns_%s   /* namespace (ABS64) */\n",
+            "\t.quad 0             /* namespace = NULL (no-NS export) */\n",
             entries[i].name,
             entries[i].name, entries[i].name, entries[i].name, entries[i].name,
-            entries[i].name,
             entries[i].name,
             entries[i].name);
     }

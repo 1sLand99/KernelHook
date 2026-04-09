@@ -94,7 +94,7 @@ check_not_contains() {
 }
 
 check_contains "export_link_test exporter: loaded"
-check_contains "export_link_test importer: do_sys_openat2"
+check_contains "export_link_test importer: vfs_open"
 check_not_contains "Unknown symbol"
 
 # Clean up in reverse order.

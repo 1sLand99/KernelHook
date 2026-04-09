@@ -105,6 +105,21 @@ VERMAGIC ?= $(KERNELRELEASE) SMP preempt mod_unload modversions aarch64
 # the build silently ignores them — harmless, but they no longer affect
 # the produced .ko.
 
+# KH_CFI_MODE selects the control-flow integrity build mode:
+#   kcfi  (default) — clang -fsanitize=kcfi, matches GKI 6.1+ arm64 kernels
+#                     built with CONFIG_CFI_CLANG=y + kCFI (new scheme)
+#   none            — no CFI sanitizer. Needed for kernels built with
+#                     the older shadow CFI (CONFIG_CFI_CLANG=y on GKI 5.4
+#                     arm64); those reject kCFI-compiled modules with
+#                     "CFI failure (target: init_module)" panic in
+#                     __cfi_slowpath at do_one_initcall time.
+KH_CFI_MODE ?= kcfi
+ifeq ($(KH_CFI_MODE),none)
+  KH_CFI_CFLAGS :=
+else
+  KH_CFI_CFLAGS := -fsanitize=kcfi
+endif
+
 KH_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
              -DMODULE_NAME='"$(MODULE_NAME)"' \
@@ -118,7 +133,7 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-parameter \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
-             -fsanitize=kcfi
+             $(KH_CFI_CFLAGS)
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)

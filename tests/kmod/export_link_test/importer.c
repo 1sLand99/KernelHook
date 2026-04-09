@@ -24,8 +24,11 @@ extern int hook_wrap(void *func, int argno, void *before, void *after,
 
 static int __init importer_init(void)
 {
-    uint64_t addr = ksyms_lookup("do_sys_openat2");
-    pr_info("export_link_test importer: do_sys_openat2 = 0x%llx\n",
+    /* Use vfs_open — present on all kernels from 4.x through 6.x, unlike
+     * do_sys_openat2 which only exists on 5.6+. Test must pass on GKI 5.4
+     * (Pixel_30) through 6.1+ (Pixel_34+). */
+    uint64_t addr = ksyms_lookup("vfs_open");
+    pr_info("export_link_test importer: vfs_open = 0x%llx\n",
             (unsigned long long)addr);
     /* Force an UND reference to hook_wrap so the symbol survives linking.
      * We never actually call it — addr==0 path returns before reaching it. */

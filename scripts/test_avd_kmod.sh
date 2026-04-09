@@ -212,13 +212,31 @@ test_avd() {
 
         # ---- Ring 3: export_link_test (exporter + importer) ----
         printf "  Running export_link_test (Ring 3)...\n"
+        # Select __ksymtab layout based on the LIVE kernel config rather
+        # than a version heuristic. `struct kernel_symbol` is a 12-byte
+        # PREL32 struct when CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y and a
+        # 24-byte absolute-pointer struct otherwise. A mismatch causes a
+        # strcmp crash inside find_symbol → bsearch at load time (verified
+        # on Pixel_30 GKI 5.4 android11 where PREL32 is OFF). AVDs in the
+        # wild can go either way — 5.4 android11 = abs64, 5.15 android13
+        # = prel32, 6.1+ = prel32 — so probe at test time.
+        local kh_layout="prel32"
+        if adb -s emulator-5554 shell 'su 0 sh -c "zcat /proc/config.gz 2>/dev/null | grep -q CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y"' 2>/dev/null; then
+            kh_layout="prel32"
+        else
+            kh_layout="abs64"
+        fi
+        printf "  Ring 3 __ksymtab layout: %s\n" "$kh_layout"
         (
             cd "$ROOT/tests/kmod/export_link_test" && \
-            make clean >/dev/null 2>&1; \
+            rm -rf _kh_kmod _kh_core exporter.ko importer.ko \
+                   exporter.kmod.o importer.kmod.o \
+                   "$ROOT/kmod/generated/kh_exports.S" 2>/dev/null; \
             KERNELRELEASE="$uname" \
             CC="$KH_CC" \
             LD="$KH_LD" \
             CROSS_COMPILE="$KH_CROSS_COMPILE" \
+            KH_KSYMTAB_LAYOUT="$kh_layout" \
             make >/dev/null 2>&1
         )
         if [ ! -f "$ROOT/tests/kmod/export_link_test/exporter.ko" ] || \
