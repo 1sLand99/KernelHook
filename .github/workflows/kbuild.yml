@@ -40,15 +40,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - branch: common-android12-5.10
+          - branch: android12-5.10
             kver: '5.10'
-          - branch: common-android13-5.15
+          - branch: android13-5.15
             kver: '5.15'
-          - branch: common-android14-6.1
+          - branch: android14-6.1
             kver: '6.1'
-          - branch: common-android15-6.6
+          - branch: android15-6.6
             kver: '6.6'
-          - branch: common-android16-6.12
+          - branch: android16-6.12
             kver: '6.12'
     name: ${{ matrix.branch }}
     env:
