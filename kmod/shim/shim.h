@@ -306,7 +306,7 @@ struct modversion_info {
  * Override at build time: -DTHIS_MODULE_SIZE=0x440 etc.
  */
 #ifndef THIS_MODULE_SIZE
-#define THIS_MODULE_SIZE 0x440
+#define THIS_MODULE_SIZE 0x800
 #endif
 
 #ifndef MODULE_NAME_OFFSET
