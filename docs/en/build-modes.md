@@ -231,6 +231,32 @@ insmod kernelhook.ko                 # or kallsyms_addr=0x... if no kprobes
 insmod kbuild_hello.ko
 ```
 
+### Running the kbuild path locally
+
+CI builds Mode C modules inside pre-built DDK containers
+(`ghcr.io/ylarod/ddk-min:<branch>`), so you don't need to clone or compile the
+kernel yourself. Reproduce any CI build locally with Docker:
+
+```bash
+# One-liner: build kh_test.ko against GKI 6.1
+bash scripts/build/build_with_docker.sh android14-6.1
+
+# Build for all five GKI branches
+for branch in android12-5.10 android13-5.15 android14-6.1 android15-6.6 android16-6.12; do
+    bash scripts/build/build_with_docker.sh $branch
+done
+
+# Build kernelhook.ko + the SDK consumer (kbuild_hello.ko)
+bash scripts/build/build_with_docker.sh android14-6.1 kernelhook kbuild_hello
+```
+
+Output lands in `build/output/<branch>/`. The first run downloads the DDK
+image (~500 MB, cached locally afterwards).
+
+See [`scripts/build/README.md`](../../scripts/build/README.md) for full
+options including custom registries, Linux-host-without-Docker builds, and
+troubleshooting.
+
 ### Important compatibility note
 
 A Mode C `kernelhook.ko` uses real kernel-emitted CRCs and **cannot** be

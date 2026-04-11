@@ -227,6 +227,30 @@ insmod kernelhook.ko                 # 或 kallsyms_addr=0x...（无 kprobes 场
 insmod kbuild_hello.ko
 ```
 
+### 本地运行 kbuild 路径
+
+CI 在预构建的 DDK 容器（`ghcr.io/ylarod/ddk-min:<branch>`）内构建 Mode C
+模块，无需自己克隆或编译内核。使用 Docker 在本地复现任意 CI 构建：
+
+```bash
+# 针对 GKI 6.1 构建 kh_test.ko
+bash scripts/build/build_with_docker.sh android14-6.1
+
+# 五个 GKI 分支全量构建
+for branch in android12-5.10 android13-5.15 android14-6.1 android15-6.6 android16-6.12; do
+    bash scripts/build/build_with_docker.sh $branch
+done
+
+# 构建 kernelhook.ko + SDK 消费者（kbuild_hello.ko）
+bash scripts/build/build_with_docker.sh android14-6.1 kernelhook kbuild_hello
+```
+
+产出放在 `build/output/<branch>/`。首次运行会下载 DDK 镜像（约 500 MB，
+之后本地缓存）。
+
+完整选项（自定义镜像源、不用 Docker 的 Linux 主机构建、故障排查）见
+[`scripts/build/README.md`](../../scripts/build/README.md)。
+
 ### 重要兼容性说明
 
 Mode C 的 `kernelhook.ko` 使用的是真实 kernel 生成的 CRC，**不能**与
