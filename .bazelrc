@@ -6,20 +6,13 @@
 common --enable_workspace
 
 # ---- Architecture ----
-# All GKI modules target arm64.
-build --define=kleaf_build_arch=arm64
-
-# ---- kleaf config alias ----
-# Build config that sets arm64 defaults understood by ddk_module().
-# Import kleaf's own bazelrc if available (DDK container may provide it).
-try-import %workspace%/build/kernel/kleaf/common.bazelrc
-
-# Fallback: define the :kleaf config inline for containers without the import.
-build:kleaf --define=kleaf_build_arch=arm64
+# All GKI modules target arm64.  Passed as a make variable inside ddk_module()
+# genrules (ARCH=arm64).
+build --define=ddk_arch=arm64
 
 # ---- Output ----
-# Artifacts land in bazel-bin/ (standard).
-# Access built modules at: bazel-bin/{kmod,tests/kmod,examples/kbuild_hello}/*.ko
+# Artifacts land in bazel-bin/ (standard Bazel output directory).
+# Built modules: bazel-bin/{kmod,tests/kmod,examples/kbuild_hello}/*.ko
 
 # ---- Quieter CI output ----
 build --ui_event_filters=-DEBUG,-INFO

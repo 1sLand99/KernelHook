@@ -7,7 +7,7 @@
 # Module.symvers is written to bazel-bin/kmod/Module.symvers and is
 # consumed by the kbuild_hello consumer via deps=[].
 
-load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_headers", "ddk_module")
+load("//bazel:ddk.bzl", "ddk_headers", "ddk_module")
 
 # ---- Exported headers ----
 # KernelHook's public API headers consumed by SDK modules (kbuild_hello,

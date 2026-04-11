@@ -4,7 +4,7 @@
 # Usage (inside DDK container after setup_bazel_ddk.sh):
 #   bazel build //tests/kmod:kh_test
 
-load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module")
+load("//bazel:ddk.bzl", "ddk_module")
 
 ddk_module(
     name = "kh_test",

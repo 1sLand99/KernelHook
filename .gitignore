@@ -53,6 +53,7 @@ kmod/generated/
 # Bazel
 bazel-*
 bazel/kernel_build/files
+bazel/kernel_build/kdir.txt
 
 # OS
 .DS_Store

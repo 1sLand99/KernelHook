@@ -1,47 +1,25 @@
 workspace(name = "kernelhook")
 
-# ---- Kleaf (AOSP kernel build rules) ----
-#
-# Kleaf provides ddk_module(), kernel_filegroup(), and related rules for
-# building out-of-tree GKI kernel modules with Bazel.
-#
-# The googlesource archive has no wrapping root directory — files are at
-# the archive root (no strip_prefix needed).  The kleaf Bazel rules live
-# in the kleaf/ subdirectory of the kernel/build repo.
-#
-# Current pin: main-kernel-build-2024 branch (android16 era)
-
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
-http_archive(
-    name = "kleaf",
-    # AOSP googlesource tarballs have no root directory — files are at the
-    # archive root, so no strip_prefix.  kleaf rules are under kleaf/.
-    urls = [
-        "https://android.googlesource.com/kernel/build/+archive/refs/heads/main-kernel-build-2024.tar.gz",
-    ],
-    # sha256 omitted: AOSP regenerates the tarball on each request.
-    # For reproducible CI, use a commit-SHA URL instead of a branch ref.
-    build_file_content = "",  # The repo has its own BUILD files.
-)
-
-# Load kleaf's transitive dependency declarations.
-# This pulls in rules_cc, bazel_skylib, and other deps.
-load("@kleaf//kleaf:repositories.bzl", "kleaf_repositories")
-kleaf_repositories()
-
 # ---- GKI kernel repository ----
 #
 # @gki_kernel is a local_repository pointing to the pre-built kernel
-# artifacts inside the DDK container.  It is generated at build time by
-# scripts/build/setup_bazel_ddk.sh.
+# artifacts inside the DDK container.  It is populated at build time by
+# scripts/build/setup_bazel_ddk.sh which:
+#   1. Finds the kernel build directory (KDIR, contains Module.symvers).
+#   2. Writes bazel/kernel_build/kdir.txt with the KDIR path.
+#   3. Writes bazel/kernel_build/BUILD.bazel with a kdir_file() target.
 #
-# After running that script, bazel/kernel_build/ will contain:
-#   BUILD.bazel       — kernel_filegroup(:kernel_build) target
-#   WORKSPACE         — marks the local_repository root
-#   files/            — symlink → KDIR (kernel build dir in DDK container)
+# The ddk_module() rule in //bazel:ddk.bzl reads kdir.txt to invoke make.
 
 local_repository(
     name = "gki_kernel",
     path = "bazel/kernel_build",
 )
+
+# Note: kleaf (AOSP's official ddk_module Bazel rules) is NOT fetched here.
+# KernelHook provides its own ddk_module() implementation in //bazel:ddk.bzl
+# which delegates to make -C KDIR M=<pkg> — no AOSP workspace needed.
+#
+# Migration to upstream kleaf: add an http_archive for
+#   https://android.googlesource.com/kernel/build
+# and update each BUILD.bazel load() to @kleaf//build/kernel/kleaf:kernel.bzl.

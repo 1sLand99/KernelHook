@@ -9,7 +9,7 @@
 # The dependency on //kmod:kernelhook causes Bazel to build kernelhook.ko
 # first and wire Module.symvers automatically — no manual ordering needed.
 
-load("@kleaf//build/kernel/kleaf:kernel.bzl", "ddk_module")
+load("//bazel:ddk.bzl", "ddk_module")
 
 ddk_module(
     name = "kbuild_hello",
