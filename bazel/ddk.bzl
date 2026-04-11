@@ -113,10 +113,21 @@ if [ ! -f "$$KDIR/Module.symvers" ]; then
 fi
 
 # ---- Locate the package source directory ----
-# $(execpath <anchor>) gives the absolute execroot path to the anchor file.
-# The package dir is its dirname.
-ANCHOR="$(execpath {anchor})"
-PKG_DIR="$$(dirname "$$ANCHOR")"
+# Bazel's sandbox uses symlinks, so:
+#   $(execpath <anchor>) = sandbox symlink → original source file
+#   realpath($(execpath)) = original source file absolute path
+#   dirname(realpath) = original package directory with ALL source files
+#
+# Using realpath ensures make -C KDIR M=<pkg> can access the full source
+# tree including relative paths (../../src/hook.c etc.) in Kbuild files.
+ANCHOR_EXEC="$(execpath {anchor})"
+if [ -L "$$ANCHOR_EXEC" ]; then
+    ANCHOR_REAL=$$(realpath "$$ANCHOR_EXEC")
+else
+    ANCHOR_REAL="$$ANCHOR_EXEC"
+fi
+PKG_DIR="$$(dirname "$$ANCHOR_REAL")"
+echo "ddk_module: PKG_DIR=$$PKG_DIR KDIR=$$KDIR"
 
 # ---- Build via make ----
 make -C "$$KDIR" \
@@ -133,7 +144,7 @@ if [ ! -f "$$KO" ]; then
     exit 1
 fi
 cp "$$KO" "$@"
-echo "==> Built $@ from $$KDIR (via ddk_module)"
+echo "==> Bazel ddk_module: $@ built from $$KDIR"
 """.format(anchor = anchor, ko_name = ko_name),
         visibility = visibility or ["//visibility:public"],
     )
