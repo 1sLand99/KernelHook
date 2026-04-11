@@ -72,8 +72,11 @@ def ddk_module(
     ko_name = out or (name + ".ko")
     pkg_path = native.package_name()  # e.g. "tests/kmod" or "kmod"
 
-    # Collect genrule inputs: kdir_file + any upstream module outputs.
-    genrule_srcs = ["//bazel/kernel_build:kdir_file"]
+    # Collect genrule inputs: kdir_file + clangdir_file + upstream deps.
+    genrule_srcs = [
+        "//bazel/kernel_build:kdir_file",
+        "//bazel/kernel_build:clangdir_file",
+    ]
     for d in deps:
         genrule_srcs.append(d)
 
@@ -86,6 +89,15 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
+        # ---- Prepend DDK clang to PATH ----
+        # Ensures check-local-export uses llvm-nm from the same clang that
+        # compiled the kernel (not the system clang which may have a different
+        # version and fail on DDK-compiled objects with exit 143 / SIGTERM).
+        "DDK_CLANG=$$(cat $(location //bazel/kernel_build:clangdir_file) 2>/dev/null || true)\n" +
+        "if [ -n \"$$DDK_CLANG\" ] && [ -d \"$$DDK_CLANG\" ]; then\n" +
+        "    export PATH=\"$$DDK_CLANG:$$PATH\"\n" +
+        "    echo \"ddk_module: DDK clang path: $$DDK_CLANG\"\n" +
+        "fi\n" +
         # ---- Locate the real workspace root ----
         # With --genrule_strategy=local, $(RULEDIR) is inside Bazel's execroot
         # (e.g. /home/.cache/bazel/.../execroot/_main/bazel-out/.../bin/<pkg>).

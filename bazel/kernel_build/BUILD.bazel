@@ -1,15 +1,21 @@
 # Generated (or updated) by scripts/build/setup_bazel_ddk.sh.
-# Exposes the kernel build directory path to ddk_module() rules.
+# Exposes the kernel build directory path and DDK clang directory to
+# ddk_module() genrules.
 
-# kdir_file: a text file containing the absolute path to the kernel build
-# directory (KDIR) inside the DDK container.  Read by ddk_module() genrules
-# to invoke: make -C $KDIR M=<pkg-dir> ARCH=arm64 LLVM=1 modules
-exports_files(["kdir.txt"], visibility = ["//visibility:public"])
+# kdir_file: text file with the absolute path to KDIR (Module.symvers parent).
+exports_files(["kdir.txt", "clangdir.txt"], visibility = ["//visibility:public"])
 
-# Convenience alias so BUILD.bazel files can reference this without knowing
-# the path — used as $(location //bazel/kernel_build:kdir_file) in genrules.
 filegroup(
     name = "kdir_file",
     srcs = ["kdir.txt"],
+    visibility = ["//visibility:public"],
+)
+
+# clangdir_file: text file with the DDK clang bin directory path.
+# Used by ddk_module() to prepend to PATH before running make, ensuring
+# llvm-nm from the DDK clang is used instead of the system llvm-nm.
+filegroup(
+    name = "clangdir_file",
+    srcs = ["clangdir.txt"],
     visibility = ["//visibility:public"],
 )
