@@ -89,15 +89,18 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
-        # ---- Toolchain selection ----
-        # Use the DDK container's PATH-configured clang via LLVM=1.
-        # The Bazel daemon (started by setup_bazel_ddk.sh) inherits the full
-        # container PATH which already has the correct clang for each KMI.
-        # Do NOT manipulate PATH here — the container's toolchain ordering is
-        # intentional and KMI-specific (e.g., 5.10 uses a different clang than
-        # 6.x for out-of-tree module builds).
-        "echo \"ddk_module: clang=$$(which clang 2>/dev/null || echo not-found)\"\n" +
-        "echo \"ddk_module: clang --version: $$(clang --version 2>&1 | head -1 || true)\"\n" +
+        # ---- Restore DDK container clang in Bazel's sanitized PATH ----
+        # Bazel local-strategy genrules do NOT inherit the container shell PATH.
+        # setup_bazel_ddk.sh captures the correct non-system clang into
+        # clangdir.txt (while still in the container shell).  We read it here
+        # and prepend it so LLVM=1 picks the right clang + llvm-nm.
+        "DDK_CLANG=$$(cat $(location //bazel/kernel_build:clangdir_file) 2>/dev/null | head -1 | tr -d '\\n' || true)\n" +
+        "if [ -n \"$$DDK_CLANG\" ] && [ -d \"$$DDK_CLANG\" ]; then\n" +
+        "    export PATH=\"$$DDK_CLANG:$$PATH\"\n" +
+        "    echo \"ddk_module: restored DDK clang path: $$DDK_CLANG\"\n" +
+        "fi\n" +
+        "echo \"ddk_module: clang=$$(which clang 2>/dev/null)\"\n" +
+        "echo \"ddk_module: clang ver=$$(clang --version 2>&1 | head -1 || true)\"\n" +
         # ---- Locate the real workspace root ----
         # With --genrule_strategy=local, $(RULEDIR) is inside Bazel's execroot
         # (e.g. /home/.cache/bazel/.../execroot/_main/bazel-out/.../bin/<pkg>).
