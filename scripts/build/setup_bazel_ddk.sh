@@ -93,39 +93,39 @@ ok "Wrote ${KBUILD_DIR}/kdir.txt (KDIR=$KDIR)"
 
 DDK_CLANG_DIR=""
 
-# Walk the shell's PATH to find the first non-system clang.
-# The container shell has PATH set up with the correct module-build clang;
-# we capture that here (where PATH is correct) for use in Bazel genrules
-# (where PATH is sanitized and lacks the container's toolchain).
-IFS=: read -ra PATH_DIRS <<< "$PATH"
-for pdir in "${PATH_DIRS[@]:-}"; do
-    [ -z "$pdir" ] && continue
-    clang_bin="$pdir/clang"
-    [ -x "$clang_bin" ] || continue
-    # Skip system clang locations
-    case "$pdir" in
-        /bin|/usr/bin|/usr/local/bin|/sbin|/usr/sbin)
-            continue ;;
-    esac
-    DDK_CLANG_DIR="$pdir"
-    break
-done
+# ---- Primary: ask kbuild which CC it would use ----
+# Run 'make -n' (dry run) against the KDIR with LLVM=1 to see the full
+# CC path that kbuild resolves.  This gives us the exact compiler the DDK
+# intends for module builds — handles KMI-specific toolchains correctly.
+KBUILD_CC_PATH=$(
+    ARCH=arm64 LLVM=1 make -C "$KDIR" -n \
+        KBUILD_MODPOST_WARN=1 \
+        modules 2>/dev/null | \
+    grep -oE '[^ ]*/clang[^ ]*' | \
+    grep -v '\.d$\|\.o$\|\.ko$' | \
+    head -1 || true
+)
+if [ -n "$KBUILD_CC_PATH" ] && [ -x "$KBUILD_CC_PATH" ]; then
+    DDK_CLANG_DIR=$(dirname "$KBUILD_CC_PATH")
+    ok "Detected kbuild CC: $KBUILD_CC_PATH"
+fi
 
-# Fallback: check common DDK locations if PATH walk didn't find anything
+# ---- Fallback: walk PATH for first non-system clang ----
+# The kbuild dry-run may not always work (e.g., missing dependencies).
+# Walk the container shell's PATH — it has the right clang for module builds.
 if [ -z "$DDK_CLANG_DIR" ]; then
-    for candidate_dir in \
-        /opt/ddk/clang/*/bin \
-        /opt/ddk/toolchain/*/bin \
-        /opt/android-kernel/*/bin \
-        /usr/local/clang/bin \
-        "$(dirname "$(command -v clang 2>/dev/null || true)")" ; do
-        if [ -n "$candidate_dir" ] && [ -x "$candidate_dir/clang" ]; then
-            case "$candidate_dir" in
-                /bin|/usr/bin|/usr/local/bin) continue ;;
-            esac
-            DDK_CLANG_DIR="$candidate_dir"
-            break
-        fi
+    IFS=: read -ra PATH_DIRS <<< "$PATH"
+    for pdir in "${PATH_DIRS[@]:-}"; do
+        [ -z "$pdir" ] && continue
+        clang_bin="$pdir/clang"
+        [ -x "$clang_bin" ] || continue
+        # Skip bare system clang locations
+        case "$pdir" in
+            /bin|/usr/bin|/usr/local/bin|/sbin|/usr/sbin)
+                continue ;;
+        esac
+        DDK_CLANG_DIR="$pdir"
+        break
     done
 fi
 
