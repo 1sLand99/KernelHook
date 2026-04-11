@@ -89,19 +89,15 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
-        # ---- Use PATH from DDK container ----
-        # The DDK container sets up PATH with the correct clang version for
-        # both compilation (LLVM=1 → PATH clang) and llvm-nm (check-local-export).
-        # We trust the container's PATH by prepending the detected DDK clang dir,
-        # but fall back to unmodified PATH if no custom clang dir was detected.
-        # Always use LLVM=1 (not LLVM=<dir>/) to let kbuild use PATH clang, which
-        # the DDK container configures correctly for each KMI.
-        "DDK_CLANG=$$(cat $(location //bazel/kernel_build:clangdir_file) 2>/dev/null | head -1 || true)\n" +
-        "if [ -n \"$$DDK_CLANG\" ] && [ -d \"$$DDK_CLANG\" ]; then\n" +
-        "    export PATH=\"$$DDK_CLANG:$$PATH\"\n" +
-        "    echo \"ddk_module: prepended $$DDK_CLANG to PATH\"\n" +
-        "fi\n" +
-        "LLVM_ARG=\"LLVM=1\"\n" +
+        # ---- Toolchain selection ----
+        # Use the DDK container's PATH-configured clang via LLVM=1.
+        # The Bazel daemon (started by setup_bazel_ddk.sh) inherits the full
+        # container PATH which already has the correct clang for each KMI.
+        # Do NOT manipulate PATH here — the container's toolchain ordering is
+        # intentional and KMI-specific (e.g., 5.10 uses a different clang than
+        # 6.x for out-of-tree module builds).
+        "echo \"ddk_module: clang=$$(which clang 2>/dev/null || echo not-found)\"\n" +
+        "echo \"ddk_module: clang --version: $$(clang --version 2>&1 | head -1 || true)\"\n" +
         # ---- Locate the real workspace root ----
         # With --genrule_strategy=local, $(RULEDIR) is inside Bazel's execroot
         # (e.g. /home/.cache/bazel/.../execroot/_main/bazel-out/.../bin/<pkg>).
@@ -125,9 +121,7 @@ def ddk_module(
         # ---- Clean first (avoid stale .o from previous make invocations) ----
         "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 clean " +
         "2>/dev/null || true\n" +
-        # ---- Build via make (same flags as Path A) ----
-        "echo \"ddk_module: PATH=$$(echo $$PATH | tr : \\n | head -3 | tr \\n :)\"\n" +
-        "echo \"ddk_module: clang=$$(which clang 2>/dev/null || echo not-found)\"\n" +
+        # ---- Build via make (same flags as Path A / regular CI make) ----
         "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 " +
         "KBUILD_MODPOST_WARN=1 modules -j$$(nproc)\n" +
         # ---- Copy output .ko ----
