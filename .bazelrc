@@ -5,6 +5,14 @@
 # Keep WORKSPACE.bazel active in Bazel 9 which defaults to Bzlmod-only.
 common --enable_workspace
 
+# ---- Genrule execution strategy ----
+# Use "local" (non-sandboxed) for genrules so that:
+#   1. $(RULEDIR) refers to the real bazel-out directory in the workspace.
+#   2. Walking up from $(RULEDIR) finds WORKSPACE.bazel at the workspace root.
+#   3. make -C KDIR M=<workspace>/<pkg> can write .ko to the source tree.
+# This is appropriate because ddk_module() delegates to make (non-hermetic).
+build --genrule_strategy=local
+
 # ---- Architecture ----
 # All GKI modules target arm64.  Passed as a make variable inside ddk_module()
 # genrules (ARCH=arm64).
