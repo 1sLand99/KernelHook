@@ -8,13 +8,6 @@
  *   KMOD_FREESTANDING:    resolves all symbols via ksyms_lookup() at runtime
  */
 
-#ifdef KMOD_FREESTANDING
-#include "../shim/shim.h"
-#include <hmem.h>
-#include <hook.h>
-#include <ksyms.h>
-#include <log.h>
-#else
 #include <linux/vmalloc.h>
 #include <linux/mm.h>
 #include <linux/version.h>
@@ -23,9 +16,10 @@
 #else
 #include <asm/set_memory.h>
 #endif
-#include "../../include/hmem.h"
-#include "../../include/log.h"
-#endif /* KMOD_FREESTANDING */
+#include <hmem.h>
+#include <hook.h>
+#include <ksyms.h>
+#include <log.h>
 
 /* ========================================================================
  * Freestanding path: resolve vmalloc/vfree/set_memory_* via ksyms

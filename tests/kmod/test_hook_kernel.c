@@ -15,11 +15,7 @@
 /* Mode B: SDK — kernelhook.ko provides the API */
 #include <kernelhook/hook.h>
 #include <kernelhook/types.h>
-#elif defined(KMOD_FREESTANDING)
-/* Mode A: freestanding shim */
-#include "shim.h"
 #else
-/* Mode C: standard kernel headers */
 #include <linux/kernel.h>
 #endif
 

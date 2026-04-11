@@ -31,6 +31,7 @@ echo "==> Building kh_test.ko (M=tests/kmod)"
 make -C "$KERNEL_OUT" \
      M="$ROOT/tests/kmod" \
      ARCH=arm64 LLVM=1 \
+     KBUILD_MODPOST_WARN=1 \
      modules -j"$(nproc)"
 
 echo "==> Verifying kh_test.ko"

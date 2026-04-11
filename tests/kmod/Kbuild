@@ -9,17 +9,22 @@
 #   make -C /path/to/android-kernel/out/common M=$(pwd) ARCH=arm64 \
 #        CROSS_COMPILE=aarch64-linux-gnu- modules
 
-KH_ROOT := $(src)/../..
+# kbuild resolves -y entries relative to $(src). Use relative paths, not
+# $(src)/.. which produces doubled absolute paths in out-of-tree builds.
+# See kmod/Kbuild for the same pattern and rationale.
 
 obj-m := kh_test.o
 kh_test-y := test_main.o test_hook_kernel.o \
     mem_ops.o log.o transit_setup.o plt_stub.o \
-    $(KH_ROOT)/src/hook.o \
-    $(KH_ROOT)/src/hmem.o \
-    $(KH_ROOT)/src/ksyms.o \
-    $(KH_ROOT)/src/arch/arm64/inline.o \
-    $(KH_ROOT)/src/arch/arm64/transit.o \
-    $(KH_ROOT)/src/arch/arm64/insn.o \
-    $(KH_ROOT)/src/arch/arm64/pgtable.o
+    ../../src/hook.o \
+    ../../src/hmem.o \
+    ../../src/ksyms.o \
+    ../../src/arch/arm64/inline.o \
+    ../../src/arch/arm64/transit.o \
+    ../../src/arch/arm64/insn.o \
+    ../../src/arch/arm64/pgtable.o
 
-ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src)
+ccflags-y := -I$(src)/../../include -I$(src)/../../include/arch/arm64 -I$(src) \
+             -Wno-declaration-after-statement \
+             -Wno-unknown-sanitizers \
+             -Wno-gcc-compat

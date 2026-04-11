@@ -53,3 +53,6 @@ kmod/generated/
 # OS
 .DS_Store
 Thumbs.db
+
+# local-only: followup tracking docs (deliberately not in repo)
+docs/followups/

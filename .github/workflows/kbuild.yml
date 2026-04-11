@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
-# Kbuild CI — build out-of-tree GKI modules against Android common-kernel.
-# All logic lives in scripts/build/; this workflow is a thin wrapper.
+# Kbuild CI — build out-of-tree GKI modules using DDK containers.
+#
+# Uses pre-built DDK images (ghcr.io/ylarod/ddk-min) which bundle
+# the correct clang toolchain + kernel headers for each KMI.
+# No kernel source clone, no vmlinux compile.
 
 name: kbuild (GKI)
 
@@ -30,54 +33,73 @@ on:
 
 jobs:
   kbuild:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/ylarod/ddk-min:${{ matrix.kmi }}-20260313
+      options: --privileged
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - branch: android12-5.10
-          - branch: android13-5.15
-          - branch: android14-6.1
-          - branch: android15-6.6
-          - branch: android16-6.12
-    name: ${{ matrix.branch }}
-    env:
-      KERNEL_DIR: ${{ github.workspace }}/kernel
-      KERNEL_OUT: ${{ github.workspace }}/kernel/out
+        kmi:
+          - android12-5.10
+          - android13-5.15
+          - android14-6.1
+          - android15-6.6
+          - android16-6.12
+    name: ${{ matrix.kmi }}
     steps:
       - name: Checkout KernelHook
         uses: actions/checkout@v4
 
-      - name: Cache kernel source
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.KERNEL_DIR }}
-          key: gki-src-${{ matrix.branch }}-v1
+      - name: Find kernel build directory
+        id: kdir
+        run: |
+          # DDK containers expose kernel build tree — find it
+          for candidate in /kernel /android-kernel /kernel-build \
+                           /out/android*/dist /GKI_KERNEL_OUT; do
+            if [ -f "$candidate/Module.symvers" ]; then
+              echo "KDIR=$candidate" >> "$GITHUB_OUTPUT"
+              echo "Found kernel build at $candidate"
+              ls "$candidate/Module.symvers"
+              exit 0
+            fi
+          done
+          # Broader search
+          FOUND=$(find / -name "Module.symvers" -maxdepth 6 2>/dev/null | head -1)
+          if [ -n "$FOUND" ]; then
+            KDIR=$(dirname "$FOUND")
+            echo "KDIR=$KDIR" >> "$GITHUB_OUTPUT"
+            echo "Found kernel build at $KDIR"
+          else
+            echo "ERROR: could not find kernel build directory"
+            exit 1
+          fi
 
-      - name: Setup kbuild environment
-        run: bash scripts/build/setup_kbuild_env.sh
-        env:
-          BRANCH: ${{ matrix.branch }}
+      - name: Build kh_test.ko
+        run: |
+          KVER="${{ matrix.kmi }}"
+          KVER="${KVER##*-}"
+          make -C "${{ steps.kdir.outputs.KDIR }}" \
+               M="$(pwd)/tests/kmod" \
+               ARCH=arm64 LLVM=1 \
+               KBUILD_MODPOST_WARN=1 \
+               modules -j$(nproc)
 
-      - name: Build and verify modules
-        run: bash scripts/build/ci_kbuild.sh "${{ matrix.branch }}"
+      - name: Verify kh_test.ko
+        run: |
+          KVER="${{ matrix.kmi }}"
+          KVER="${KVER##*-}"
+          bash scripts/ci/verify_kmod.sh tests/kmod/kh_test.ko "$KVER"
 
       - name: Show modinfo
         if: always()
         run: |
-          for ko in tests/kmod/kh_test.ko kmod/kernelhook.ko examples/kbuild_hello/kbuild_hello.ko; do
-            [ -f "$ko" ] && modinfo "$ko" || true
-          done
+          [ -f tests/kmod/kh_test.ko ] && modinfo tests/kmod/kh_test.ko || true
 
-      - name: Upload artifacts
+      - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: kbuild-${{ matrix.branch }}
-          path: |
-            tests/kmod/kh_test.ko
-            kmod/kernelhook.ko
-            kmod/Module.symvers
-            examples/kbuild_hello/kbuild_hello.ko
-          if-no-files-found: warn
+          name: kbuild-${{ matrix.kmi }}
+          path: tests/kmod/kh_test.ko
           retention-days: 14

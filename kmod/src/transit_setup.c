@@ -8,11 +8,7 @@
  * caller already holds the ROX write-enable.
  */
 
-#ifdef KMOD_FREESTANDING
-#include "../shim/shim.h"
-#else
 #include <linux/string.h>
-#endif
 
 #include <ktypes.h>
 #include <hook.h>

@@ -8,11 +8,8 @@
 #include <insn.h>
 #include <pgtable.h>
 #include <log.h>
-#ifdef KMOD_FREESTANDING
 #include <ksyms.h>
-#else
 #include <linux/set_memory.h>
-#endif
 
 typedef uint32_t inst_type_t;
 typedef uint32_t inst_mask_t;
@@ -297,8 +294,10 @@ hook_err_t hook_prepare(hook_t *hook)
                                                 hook->origin_addr, hook->replace_addr);
     }
 
-    for (uint32_t i = 0; i < sizeof(hook->relo_insts) / sizeof(hook->relo_insts[0]); i++) {
-        hook->relo_insts[i] = ARM64_NOP;
+    {
+        uint32_t i;
+        for (i = 0; i < sizeof(hook->relo_insts) / sizeof(hook->relo_insts[0]); i++)
+            hook->relo_insts[i] = ARM64_NOP;
     }
 
     uint32_t *bti = hook->relo_insts + hook->relo_insts_num;
@@ -306,13 +305,16 @@ hook_err_t hook_prepare(hook_t *hook)
     bti[1] = ARM64_NOP;
     hook->relo_insts_num += 2;
 
-    for (int i = 0; i < hook->tramp_insts_num; i++) {
+    {
+    int i;
+    for (i = 0; i < hook->tramp_insts_num; i++) {
         uint64_t inst_addr = hook->origin_addr + i * 4;
         uint32_t inst = hook->origin_insts[i];
         hook_err_t relo_res = relocate_inst(hook, inst_addr, inst);
         if (relo_res) {
             return HOOK_BAD_RELO;
         }
+    }
     }
 
     uint64_t back_src_addr = hook->relo_addr + hook->relo_insts_num * 4;

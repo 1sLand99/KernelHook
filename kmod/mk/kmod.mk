@@ -125,6 +125,7 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -DMODULE_NAME='"$(MODULE_NAME)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
+             -I$(KERNELHOOK_DIR)/shim/include \
              -I$(KH_ROOT)/include \
              -I$(KH_ROOT)/include/arch/arm64 \
              -I$(KERNELHOOK_DIR)/shim \

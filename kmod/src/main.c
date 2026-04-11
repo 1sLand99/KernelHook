@@ -6,13 +6,9 @@
  *   insmod kernelhook.ko [kallsyms_addr=0x...]
  */
 
-#ifdef KMOD_FREESTANDING
-#include "../shim/shim.h"
-#else
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#endif
 
 #include <ktypes.h>
 #include <hook.h>

@@ -17,13 +17,9 @@
 #include <hook.h>
 #include <hmem.h>
 #include <ksyms.h>
+#include <linux/export.h>
 
-#ifdef KMOD_FREESTANDING
-  #define KH_EXPORT(sym) /* provided by kh_exports.S */
-#else
-  #include <linux/export.h>
-  #define KH_EXPORT(sym) EXPORT_SYMBOL(sym)
-#endif
+#define KH_EXPORT(sym) EXPORT_SYMBOL(sym)
 
 KH_EXPORT(hook_prepare);
 KH_EXPORT(hook_install);

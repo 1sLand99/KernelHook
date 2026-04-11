@@ -4,14 +4,10 @@
  * Resolves kallsyms_lookup_name, detects kernel version, initializes logging.
  */
 
-#ifdef KMOD_FREESTANDING
-#include "../shim/shim.h"
-#else
 #include <linux/module.h>
 #include <linux/kernel.h>
 #ifdef CONFIG_KPROBES
 #include <linux/kprobes.h>
-#endif
 #endif
 
 #include <ktypes.h>

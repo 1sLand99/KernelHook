@@ -5,15 +5,14 @@
  * Kbuild: direct printk reference.
  */
 
-#ifdef KMOD_FREESTANDING
-#include "shim.h"
-#include <ksyms.h>
-#include <stdarg.h>
-#else
 #include <linux/kernel.h>
 #include <linux/printk.h>
+#if __has_include(<linux/stdarg.h>)
 #include <linux/stdarg.h>
+#else
+#include <stdarg.h>
 #endif
+#include <ksyms.h>
 
 #include <hook.h>
 #include <log.h>
@@ -49,7 +48,13 @@ int kmod_log_init(void)
         kp_log_func = (log_func_t)(uintptr_t)ksyms_lookup("printk");
     if (!kp_log_func && !kp_vprintk_func) return -1;
 #else
+    /* 5.15+ defines printk as a function-like macro; _printk is the real
+     * exported symbol. On older kernels printk is a plain function. */
+#ifdef printk
     kp_log_func = (log_func_t)_printk;
+#else
+    kp_log_func = (log_func_t)printk;
+#endif
 #endif
     return 0;
 }

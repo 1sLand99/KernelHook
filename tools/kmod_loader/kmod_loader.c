@@ -318,7 +318,8 @@ done:
 }
 
 /* Cached sizeof(struct module) from vendor .ko, populated by crc_from_vendor_ko */
-static uint32_t g_g_ko_this_module_size = 0;
+static uint32_t g_ko_this_module_size = 0;
+static int ko_loaded = 0;
 
 /* Method 3: Scan vendor .ko files for __versions CRC */
 int crc_from_vendor_ko(const char *sym, uint32_t *out)
@@ -334,7 +335,6 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
     };
     /* Cache: read one .ko file and extract ALL its CRCs */
     static uint8_t *ko_buf = NULL;
-    static int ko_loaded = 0;
     static struct { char name[56]; uint32_t crc; } ko_crcs[64];
     static int ko_crc_count = 0;
 
@@ -810,6 +810,120 @@ static int patch_crcs_via_resolver(uint8_t *mod, const Ehdr *eh,
         }
     }
     return patched;
+}
+
+/* ---- Kbuild .ko detection ----
+ *
+ * Freestanding .ko files have sentinel CRC values (0xDEADBE01..04) in the
+ * __versions section. Real kbuild .ko files have CRCs from Module.symvers.
+ * We detect kbuild mode by the absence of any sentinel value.
+ */
+static int is_kbuild_ko(const uint8_t *mod, const Ehdr *eh)
+{
+    /* Freestanding .ko files have sentinel CRCs (0xDEADBE01..04) in __versions
+     * AND a __modver_module_layout symbol. Kbuild .ko files have either an
+     * empty __versions section (KBUILD_MODPOST_WARN=1) or real CRCs. */
+    Shdr *ver = elf_find_section(mod, eh, "__versions");
+
+    /* If __versions is absent or empty, check for freestanding sentinel symbol */
+    if (!ver || ver->sh_size < 8) {
+        /* Look for __modver_module_layout in symbol table — freestanding only */
+        for (int i = 0; i < eh->e_shnum; i++) {
+            const Shdr *sh = (const Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
+            if (sh->sh_type != SHT_SYMTAB) continue;
+            const Shdr *strtab = (const Shdr *)(mod + eh->e_shoff +
+                                                 sh->sh_link * eh->e_shentsize);
+            const char *strs = (const char *)(mod + strtab->sh_offset);
+            const Elf64_Sym *syms = (const Elf64_Sym *)(mod + sh->sh_offset);
+            int nsyms = (int)(sh->sh_size / sh->sh_entsize);
+            for (int s = 0; s < nsyms; s++) {
+                const char *name = strs + syms[s].st_name;
+                if (strcmp(name, "__modver_module_layout") == 0)
+                    return 0; /* freestanding sentinel symbol found */
+            }
+        }
+        return 1; /* no sentinel symbol — kbuild with empty __versions */
+    }
+
+    /* __versions has entries: check for sentinel CRC values */
+    const uint8_t *p = mod + ver->sh_offset;
+    const uint8_t *end = p + ver->sh_size;
+    while (p + 8 <= end) {
+        uint32_t crc;
+        memcpy(&crc, p, 4);
+        if (crc == 0xDEADBE01u || crc == 0xDEADBE02u ||
+            crc == 0xDEADBE03u || crc == 0xDEADBE04u)
+            return 0; /* sentinel CRC — freestanding */
+        p += 64;
+    }
+    return 1; /* real CRCs — kbuild */
+}
+
+/* ---- Expand .modinfo section to make room for a longer vermagic ----
+ *
+ * Returns a newly allocated buffer (caller must free) with the .modinfo
+ * section enlarged by `extra` bytes, all ELF offsets adjusted.
+ */
+/* Expand .modinfo by inserting `extra` zero bytes right after the vermagic
+ * entry (or at end of section if no vermagic found). Adjusts all ELF offsets.
+ * Returns new buffer (caller must free) or NULL on failure. */
+static uint8_t *expand_modinfo_section(const uint8_t *mod, size_t mod_size,
+                                        size_t extra, size_t *new_size_out)
+{
+    const Ehdr *eh = (const Ehdr *)mod;
+    int mi_idx = -1;
+    uint64_t mi_off = 0, mi_size = 0;
+
+    for (int i = 0; i < eh->e_shnum; i++) {
+        const Shdr *sh = (const Shdr *)(mod + eh->e_shoff + i * eh->e_shentsize);
+        const Shdr *shstr_sh = (const Shdr *)(mod + eh->e_shoff +
+                                               eh->e_shstrndx * eh->e_shentsize);
+        const char *name = (const char *)(mod + shstr_sh->sh_offset + sh->sh_name);
+        if (strcmp(name, ".modinfo") == 0) {
+            mi_idx = i;
+            mi_off  = sh->sh_offset;
+            mi_size = sh->sh_size;
+            break;
+        }
+    }
+    if (mi_idx < 0) return NULL;
+
+    /* Find insertion point: right after vermagic entry's null terminator */
+    uint64_t insert_at = mi_off + mi_size; /* default: end of section */
+    const uint8_t *base = mod + mi_off;
+    const uint8_t *end  = base + mi_size;
+    for (const uint8_t *p = base; p < end; ) {
+        if (strncmp((const char *)p, "vermagic=", 9) == 0) {
+            size_t len = strlen((const char *)p);
+            insert_at = mi_off + (uint64_t)(p - base) + len + 1; /* after \0 */
+            break;
+        }
+        p += strlen((const char *)p) + 1;
+    }
+
+    *new_size_out = mod_size + extra;
+    uint8_t *newmod = malloc(*new_size_out);
+    if (!newmod) return NULL;
+
+    memcpy(newmod, mod, insert_at);
+    memset(newmod + insert_at, 0, extra);
+    memcpy(newmod + insert_at + extra, mod + insert_at, mod_size - insert_at);
+
+    /* Update ELF: e_shoff first, then section headers */
+    Ehdr *neh = (Ehdr *)newmod;
+    if (neh->e_shoff >= insert_at)
+        neh->e_shoff += extra;
+
+    for (int i = 0; i < neh->e_shnum; i++) {
+        Shdr *sh = (Shdr *)(newmod + neh->e_shoff + i * neh->e_shentsize);
+        if (i == mi_idx) {
+            sh->sh_size += extra;
+        } else if (sh->sh_offset >= insert_at) {
+            sh->sh_offset += extra;
+        }
+    }
+
+    return newmod;
 }
 
 /* ---- Patch vermagic in .modinfo ---- */
@@ -1786,6 +1900,65 @@ static int do_load(int argc, char *argv[], int dry_run)
     ctx.mod_buf  = mod;
     ctx.mod_size = mod_size;
     ctx.mod_eh   = eh;
+
+    /* ---- Kbuild .ko fast path ----
+     *
+     * Kbuild .ko files have real CRCs from Module.symvers (GKI KMI stable ABI).
+     * The only thing that doesn't match is the vermagic string. Expand .modinfo
+     * to fit the device vermagic, patch it, then load directly — no CRC or
+     * this_module patching needed.
+     */
+    if (!dry_run && is_kbuild_ko(mod, eh)) {
+        fprintf(stderr, "kmod_loader: detected kbuild .ko — only patching vermagic\n");
+        const char *new_vm = get_vermagic();
+        size_t needed = new_vm ? (strlen(new_vm) + 32) : 0;
+
+        /* Check if existing slot is large enough */
+        int slot_ok = 0;
+        Shdr *mi = elf_find_section(mod, eh, ".modinfo");
+        if (mi && new_vm) {
+            uint8_t *base = mod + mi->sh_offset;
+            uint8_t *mend = base + mi->sh_size;
+            for (uint8_t *p = base; p < mend; ) {
+                if (strncmp((char *)p, "vermagic=", 9) == 0) {
+                    char *old_vm = (char *)p + 9;
+                    size_t str_len = strlen(old_vm);
+                    char *slot_end = old_vm + str_len + 1;
+                    while (slot_end < (char *)mend && *slot_end == '\0') slot_end++;
+                    size_t avail = (size_t)(slot_end - old_vm - 1);
+                    if (strlen(new_vm) <= avail) slot_ok = 1;
+                    break;
+                }
+                p += strlen((char *)p) + 1;
+            }
+        }
+
+        /* Expand .modinfo if slot too small */
+        if (!slot_ok && needed > 0) {
+            size_t new_mod_size;
+            uint8_t *newmod = expand_modinfo_section(mod, st.st_size, needed, &new_mod_size);
+            if (newmod) {
+                free(mod);
+                mod = newmod;
+                eh = (Ehdr *)mod;
+                st.st_size = (off_t)new_mod_size;
+                mod_size = new_mod_size;
+                fprintf(stderr, "kmod_loader: expanded .modinfo by %zu bytes\n", needed);
+            }
+        }
+
+        patch_vermagic(mod, eh);
+
+        int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
+        if (ret == 0) {
+            printf("Module %s loaded (kbuild mode)\n", argv[1]);
+            free(mod);
+            return 0;
+        }
+        fprintf(stderr, "kmod_loader: kbuild load failed: %s (errno=%d)\n",
+                strerror(errno), errno);
+        /* Fall through to freestanding path as last resort */
+    }
 
     /* Quick path: check if vermagic already matches. If so, skip all patching. */
     {
