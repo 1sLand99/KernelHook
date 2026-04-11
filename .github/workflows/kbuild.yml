@@ -119,51 +119,46 @@ jobs:
           retention-days: 14
 
       # ================================================================
-      # Path B: Bazel ddk_module() — Phase 3 (experimental)
-      # continue-on-error: true until kleaf integration is fully validated
+      # Path B: Bazel ddk_module() — Phase 3 (validated, all 5 KMIs green)
       # ================================================================
 
       - name: Setup Bazel DDK workspace
         id: bazel_setup
-        continue-on-error: true
         run: |
           bash scripts/build/setup_bazel_ddk.sh \
               "${{ steps.kdir.outputs.KDIR }}"
 
       - name: Bazel build kh_test.ko (ddk_module)
-        if: steps.bazel_setup.outcome == 'success'
-        continue-on-error: true
         run: |
           set -o pipefail
-          bazel build //tests/kmod:kh_test 2>&1 | tail -40
+          bazel build //tests/kmod:kh_test 2>&1 | tail -60
           if [ -f bazel-bin/tests/kmod/kh_test.ko ]; then
             echo "==> kh_test.ko produced by Bazel:"
             modinfo bazel-bin/tests/kmod/kh_test.ko | grep -E '(filename|vermagic|depends)'
           else
-            echo "==> kh_test.ko NOT produced by Bazel (ddk_module() may need tuning)"
+            echo "ERROR: kh_test.ko NOT produced by Bazel" >&2
+            exit 1
           fi
 
       - name: Bazel build kernelhook.ko (ddk_module)
-        if: steps.bazel_setup.outcome == 'success' && matrix.kmi == 'android14-6.1'
-        continue-on-error: true
         run: |
           set -o pipefail
-          bazel build //kmod:kernelhook 2>&1 | tail -40
+          bazel build //kmod:kernelhook 2>&1 | tail -60
           if [ -f bazel-bin/kmod/kernelhook.ko ]; then
             echo "==> kernelhook.ko produced by Bazel:"
             modinfo bazel-bin/kmod/kernelhook.ko | grep -E '(filename|vermagic|depends)'
           else
-            echo "==> kernelhook.ko NOT produced by Bazel"
+            echo "ERROR: kernelhook.ko NOT produced by Bazel" >&2
+            exit 1
           fi
 
-      - name: Upload artifact (bazel, if produced)
-        if: steps.bazel_setup.outcome == 'success'
-        continue-on-error: true
+      - name: Upload artifact (bazel)
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: kbuild-bazel-${{ matrix.kmi }}
           path: |
             bazel-bin/tests/kmod/kh_test.ko
             bazel-bin/kmod/kernelhook.ko
-          if-no-files-found: ignore
-          retention-days: 7
+          if-no-files-found: error
+          retention-days: 14
