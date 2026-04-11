@@ -89,14 +89,18 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
-        # ---- Prepend DDK clang to PATH ----
-        # Ensures check-local-export uses llvm-nm from the same clang that
-        # compiled the kernel (not the system clang which may have a different
-        # version and fail on DDK-compiled objects with exit 143 / SIGTERM).
+        # ---- Set DDK clang toolchain ----
+        # Use LLVM=<dir>/ (with trailing slash) so kbuild picks CC, LD, NM
+        # etc. from the exact DDK clang directory rather than relying on PATH.
+        # This avoids mismatches between the DDK clang (which compiled the
+        # kernel) and the system clang (which may reject kernel 5.10 asm
+        # patterns or produce llvm-nm that exits 143 on DDK objects).
         "DDK_CLANG=$$(cat $(location //bazel/kernel_build:clangdir_file) 2>/dev/null || true)\n" +
         "if [ -n \"$$DDK_CLANG\" ] && [ -d \"$$DDK_CLANG\" ]; then\n" +
-        "    export PATH=\"$$DDK_CLANG:$$PATH\"\n" +
-        "    echo \"ddk_module: DDK clang path: $$DDK_CLANG\"\n" +
+        "    LLVM_ARG=\"LLVM=$$DDK_CLANG/\"\n" +
+        "    echo \"ddk_module: LLVM=$$DDK_CLANG/\"\n" +
+        "else\n" +
+        "    LLVM_ARG=\"LLVM=1\"\n" +
         "fi\n" +
         # ---- Locate the real workspace root ----
         # With --genrule_strategy=local, $(RULEDIR) is inside Bazel's execroot
@@ -119,12 +123,10 @@ def ddk_module(
         "PKG_DIR=\"$$REAL_WS/" + pkg_path + "\"\n" +
         "echo \"ddk_module: PKG_DIR=$$PKG_DIR\"\n" +
         # ---- Clean first (avoid stale .o from previous make invocations) ----
-        # If the same source directory was already built by a different clang
-        # version, stale .o files cause check-local-export (llvm-nm) to fail.
-        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 clean " +
+        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 $$LLVM_ARG clean " +
         "2>/dev/null || true\n" +
         # ---- Build via make ----
-        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 LLVM=1 " +
+        "make -C \"$$KDIR\" M=\"$$PKG_DIR\" ARCH=arm64 $$LLVM_ARG " +
         "KBUILD_MODPOST_WARN=1 modules -j$$(nproc)\n" +
         # ---- Copy output .ko ----
         "KO=\"$$PKG_DIR/" + ko_name + "\"\n" +
