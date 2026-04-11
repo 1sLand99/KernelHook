@@ -86,8 +86,10 @@ def ddk_module(
         "KDIR=$$(cat $(location //bazel/kernel_build:kdir_file))\n" +
         "[ -f \"$$KDIR/Module.symvers\" ] || " +
         "{ echo 'ERROR: no Module.symvers in '\"$$KDIR\"; exit 1; }\n" +
-        # ---- Locate workspace root ----
-        "WS=\"$(RULEDIR)\"\n" +
+        # ---- Locate workspace root (absolute path) ----
+        # $(RULEDIR) may be a relative path in --genrule_strategy=local mode.
+        # Resolve to an absolute path first so dirname walk is deterministic.
+        "WS=$$(realpath \"$(RULEDIR)\" 2>/dev/null || (cd \"$(RULEDIR)\" && pwd))\n" +
         "while [ ! -f \"$$WS/WORKSPACE.bazel\" ] && [ \"$$WS\" != \"/\" ]; do\n" +
         "    WS=$$(dirname \"$$WS\")\n" +
         "done\n" +
