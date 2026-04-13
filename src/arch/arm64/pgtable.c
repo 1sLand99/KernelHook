@@ -5,7 +5,7 @@
  */
 
 #include <types.h>
-#include <log.h>
+#include <kh_log.h>
 #include <pgtable.h>
 
 #ifdef KMOD_FREESTANDING
@@ -62,7 +62,7 @@ int kh_pgtable_init(void)
     /* Detect page size first — other components need this even if
      * the rest of kh_pgtable_init fails (e.g., set_memory mode). */
     detect_page_size();
-    logki("pgtable: page_size=%llu page_shift=%llu",
+    pr_info("pgtable: page_size=%llu page_shift=%llu",
           (unsigned long long)page_size, (unsigned long long)page_shift);
 
     /* Resolve flush functions via ksyms */
@@ -75,31 +75,31 @@ int kh_pgtable_init(void)
     if (!__flush_dcache_area)
         __flush_dcache_area = (flush_dcache_area_func_t)(uintptr_t)ksyms_lookup_cache("dcache_clean_inval_poc");
 
-    logki("pgtable: flush_tlb_kernel_page=%llx flush_icache_all=%llx flush_icache_range=%llx dcache=%llx",
+    pr_info("pgtable: flush_tlb_kernel_page=%llx flush_icache_all=%llx flush_icache_range=%llx dcache=%llx",
           (unsigned long long)(uintptr_t)flush_tlb_kernel_page,
           (unsigned long long)(uintptr_t)flush_icache_all,
           (unsigned long long)(uintptr_t)flush_icache_range,
           (unsigned long long)(uintptr_t)__flush_dcache_area);
 
     if (!flush_tlb_kernel_page || !__flush_dcache_area) {
-        logke("pgtable: failed to resolve required flush symbols");
+        pr_err("pgtable: failed to resolve required flush symbols");
         return -1;
     }
 
     /* Resolve kimage_voffset - kernel exports this as a variable */
     uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("kimage_voffset");
-    logki("pgtable: kimage_voffset sym=%llx", (unsigned long long)(uintptr_t)voffset_ptr);
+    pr_info("pgtable: kimage_voffset sym=%llx", (unsigned long long)(uintptr_t)voffset_ptr);
     if (voffset_ptr) {
         kimage_voffset = *voffset_ptr;
-        logki("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
+        pr_info("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
     } else {
-        logke("pgtable: failed to resolve kimage_voffset");
+        pr_err("pgtable: failed to resolve kimage_voffset");
         return -1;
     }
 
     /* Validate kimage_voffset is in kernel VA range */
     if (kimage_voffset == 0) {
-        logke("pgtable: kimage_voffset is zero — invalid");
+        pr_err("pgtable: kimage_voffset is zero — invalid");
         return -1;
     }
 
@@ -107,9 +107,9 @@ int kh_pgtable_init(void)
     uint64_t *memstart_ptr = (uint64_t *)(uintptr_t)ksyms_lookup_cache("memstart_addr");
     if (memstart_ptr) {
         phys_offset = *memstart_ptr;
-        logki("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
+        pr_info("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
     } else {
-        logkw("pgtable: memstart_addr not found, assuming PHYS_OFFSET=0");
+        pr_warn("pgtable: memstart_addr not found, assuming PHYS_OFFSET=0");
     }
 
     /* Resolve swapper_pg_dir for kernel page table walks.
@@ -119,7 +119,7 @@ int kh_pgtable_init(void)
     if (kernel_pgd) {
         pgd_source = "swapper_pg_dir";
     } else {
-        logke("pgtable: swapper_pg_dir not found — cannot walk kernel page tables");
+        pr_err("pgtable: swapper_pg_dir not found — cannot walk kernel page tables");
         return -1;
     }
 
@@ -127,7 +127,7 @@ int kh_pgtable_init(void)
      * Kernel VA starts at 0xffffff8000000000 for 39-bit VA,
      * 0xffff000000000000 for 48-bit VA. Use the lower bound. */
     if (kernel_pgd < 0xffffff8000000000ULL) {
-        logke("pgtable: kernel_pgd=%llx looks invalid (not in kernel VA range)",
+        pr_err("pgtable: kernel_pgd=%llx looks invalid (not in kernel VA range)",
               (unsigned long long)kernel_pgd);
         return -1;
     }
@@ -148,13 +148,13 @@ int kh_pgtable_init(void)
         /* PAGE_OFFSET = sign-extension of bit (VA_BITS - 1)
          * For 39-bit: 0xFFFFFF8000000000, for 48-bit: 0xFFFF000000000000 */
         page_offset = ~((1ULL << va_bits) - 1);
-        logki("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
+        pr_info("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
               (unsigned long long)tcr, (unsigned long long)t1sz,
               (unsigned long long)va_bits, (unsigned long long)page_level,
               (unsigned long long)page_offset);
     }
 
-    logki("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu levels=%llu",
+    pr_info("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu levels=%llu",
           (unsigned long long)kernel_pgd, pgd_source,
           (unsigned long long)kimage_voffset,
           (unsigned long long)page_shift,
@@ -179,7 +179,7 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
      * Use page_offset (computed from VA_BITS) as the lower bound. */
     uint64_t kva_min = page_offset ? page_offset : 0xffffff8000000000ULL;
     if (pxd_va < kva_min || va < kva_min) {
-        logke("pgtable_entry: invalid addr pgd=%llx va=%llx",
+        pr_err("pgtable_entry: invalid addr pgd=%llx va=%llx",
               (unsigned long long)pxd_va, (unsigned long long)va);
         return 0;
     }

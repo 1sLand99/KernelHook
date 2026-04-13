@@ -7,7 +7,7 @@
 #include <hook.h>
 #include <insn.h>
 #include <pgtable.h>
-#include <log.h>
+#include <kh_log.h>
 #include <symbol.h>
 #include <linux/set_memory.h>
 
@@ -390,9 +390,9 @@ void kh_write_insts_init(void)
     kh_set_memory_x  = (set_memory_fn_t)set_memory_x;
     kh_write_mode = 1;
 #endif
-    logki("write_insts: mode=%s", kh_write_mode ? "set_memory" : "pte_modify");
+    pr_info("write_insts: mode=%s", kh_write_mode ? "set_memory" : "pte_modify");
 
-    logki("write_insts: set_memory rw=%llx ro=%llx x=%llx",
+    pr_info("write_insts: set_memory rw=%llx ro=%llx x=%llx",
           (unsigned long long)(uintptr_t)kh_set_memory_rw,
           (unsigned long long)(uintptr_t)kh_set_memory_ro,
           (unsigned long long)(uintptr_t)kh_set_memory_x);
@@ -440,7 +440,7 @@ static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
         unsigned long page_va = va & ~(page_size - 1);
 
         if (!kh_set_memory_rw || !kh_set_memory_ro) {
-            logke("write_insts_at: set_memory functions not resolved");
+            pr_err("write_insts_at: set_memory functions not resolved");
             return;
         }
 

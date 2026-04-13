@@ -12,7 +12,7 @@
 
 #include <types.h>
 #include <hook.h>
-#include <log.h>
+#include <linux/printk.h>
 
 extern uint64_t _transit(void);
 extern void _transit_end(void);
@@ -33,7 +33,7 @@ static void setup_transit(void *rox, uint32_t *transit,
     uint64_t sz = stub_size(stub_start, stub_end);
     uint64_t avail = (TRANSIT_INST_NUM - 2) * sizeof(uint32_t);
     if (sz > avail) {
-        logke("transit stub (%llu) exceeds buffer (%llu)",
+        pr_err("transit stub (%llu) exceeds buffer (%llu)",
               (unsigned long long)sz, (unsigned long long)avail);
         return;
     }

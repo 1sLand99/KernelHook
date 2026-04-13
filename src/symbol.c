@@ -6,7 +6,7 @@
 #include <types.h>
 #include <symbol.h>
 #include <hook.h>
-#include <log.h>
+#include <kh_log.h>
 
 #define KSYM_CACHE_MAX 64
 
@@ -67,7 +67,7 @@ uint64_t ksyms_lookup_cache(const char *name)
         ksym_cache[ksym_cache_count].addr = addr;
         ksym_cache_count++;
     } else if (addr && ksym_cache_count >= KSYM_CACHE_MAX) {
-        logkw("ksyms: cache full (%d entries), lookup for '%s' not cached", KSYM_CACHE_MAX, name);
+        pr_warn("ksyms: cache full (%d entries), lookup for '%s' not cached", KSYM_CACHE_MAX, name);
     }
 
     return addr;

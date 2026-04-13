@@ -19,7 +19,7 @@
 #include <memory.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
+#include <linux/printk.h>
 
 /* ========================================================================
  * Freestanding path: resolve vmalloc/vfree/set_memory_* via ksyms
@@ -60,31 +60,31 @@ static int resolve_freestanding_syms(void)
 
     sym_vmalloc = (vmalloc_fn_t)(uintptr_t)resolve_with_fallback(&fb_vmalloc);
     if (!sym_vmalloc) {
-        logke("kmod_mem_ops: failed to resolve vmalloc/vmalloc_noprof");
+        pr_err("kmod_mem_ops: failed to resolve vmalloc/vmalloc_noprof");
         return -1;
     }
 
     sym_vfree = (vfree_fn_t)(uintptr_t)resolve_with_fallback(&fb_vfree);
     if (!sym_vfree) {
-        logke("kmod_mem_ops: failed to resolve vfree/kvfree");
+        pr_err("kmod_mem_ops: failed to resolve vfree/kvfree");
         return -1;
     }
 
     sym_set_memory_rw = (set_memory_fn_t)(uintptr_t)resolve_with_fallback(&fb_set_rw);
     if (!sym_set_memory_rw) {
-        logke("kmod_mem_ops: failed to resolve set_memory_rw");
+        pr_err("kmod_mem_ops: failed to resolve set_memory_rw");
         return -1;
     }
 
     sym_set_memory_ro = (set_memory_fn_t)(uintptr_t)resolve_with_fallback(&fb_set_ro);
     if (!sym_set_memory_ro) {
-        logke("kmod_mem_ops: failed to resolve set_memory_ro");
+        pr_err("kmod_mem_ops: failed to resolve set_memory_ro");
         return -1;
     }
 
     sym_set_memory_x = (set_memory_fn_t)(uintptr_t)resolve_with_fallback(&fb_set_x);
     if (!sym_set_memory_x) {
-        logkw("kmod_mem_ops: set_memory_x/set_memory_exec not found — ROX pool may not be executable");
+        pr_warn("kmod_mem_ops: set_memory_x/set_memory_exec not found — ROX pool may not be executable");
     }
 
     return 0;

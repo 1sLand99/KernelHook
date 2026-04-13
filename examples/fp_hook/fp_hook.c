@@ -19,7 +19,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
@@ -32,7 +31,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #endif
@@ -68,11 +66,11 @@ static int __attribute__((noinline)) original_callback(int x, int y)
 
 static int replacement_callback(int x, int y)
 {
-	logki("fp_hook: replacement called with x=%d y=%d", x, y);
+	pr_info("fp_hook: replacement called with x=%d y=%d", x, y);
 	/* Call original via backup pointer */
 	if (backup_func) {
 		int orig_result = ((int (*)(int, int))backup_func)(x, y);
-		logki("fp_hook: original returned %d, we return %d", orig_result, x * y);
+		pr_info("fp_hook: original returned %d, we return %d", orig_result, x * y);
 	}
 	return x * y;
 }
@@ -96,13 +94,13 @@ static int __init fp_hook_init(void)
 
 	result = kmod_hook_mem_init();
 	if (result) {
-		logke("fp_hook: hook_mem init failed (%d)", result);
+		pr_err("fp_hook: hook_mem init failed (%d)", result);
 		return 0;
 	}
 
 	result = kh_pgtable_init();
 	if (result) {
-		logke("fp_hook: kh_pgtable_init failed (%d)", result);
+		pr_err("fp_hook: kh_pgtable_init failed (%d)", result);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}
@@ -115,16 +113,16 @@ static int __init fp_hook_init(void)
 
 	/* Call original before hooking */
 	result = ops.callback(3, 4);
-	logki("fp_hook: before hook: ops.callback(3,4) = %d", result);
+	pr_info("fp_hook: before hook: ops.callback(3,4) = %d", result);
 
 	/* Hook the function pointer */
 	fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
-	logki("fp_hook: function pointer hooked, backup=%llx",
+	pr_info("fp_hook: function pointer hooked, backup=%llx",
 	      (unsigned long long)(uintptr_t)backup_func);
 
 	/* Call through the struct — replacement should run */
 	result = ops.callback(3, 4);
-	logki("fp_hook: after hook: ops.callback(3,4) = %d", result);
+	pr_info("fp_hook: after hook: ops.callback(3,4) = %d", result);
 
 	return 0;
 }
@@ -134,12 +132,12 @@ static void __exit fp_hook_exit(void)
 	if (backup_func) {
 		fp_unhook((uintptr_t)&ops.callback, backup_func);
 		backup_func = NULL;
-		logki("fp_hook: unhooked");
+		pr_info("fp_hook: unhooked");
 	}
 
 	/* Verify original is restored */
 	int result = ops.callback(3, 4);
-	logki("fp_hook: after unhook: ops.callback(3,4) = %d", result);
+	pr_info("fp_hook: after unhook: ops.callback(3,4) = %d", result);
 
 #if !defined(KH_SDK_MODE)
 	kmod_hook_mem_cleanup();

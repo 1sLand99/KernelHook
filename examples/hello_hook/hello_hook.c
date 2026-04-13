@@ -22,7 +22,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
@@ -35,7 +34,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #endif
@@ -73,7 +71,7 @@ static void open_before(hook_fargs4_t *fargs, void *udata)
 {
     /* arg1 is the user-space filename pointer */
     const char *filename = (const char *)fargs->arg1;
-    logki("hello_hook: open called, filename ptr=%llx", (unsigned long long)(uintptr_t)filename);
+    pr_info("hello_hook: open called, filename ptr=%llx", (unsigned long long)(uintptr_t)filename);
 }
 
 /* ---- Module init / exit ---- */
@@ -91,13 +89,13 @@ static int __init hello_hook_init(void)
 
     rc = kmod_hook_mem_init();
     if (rc) {
-        logke("hello_hook: hook_mem init failed (%d)", rc);
+        pr_err("hello_hook: hook_mem init failed (%d)", rc);
         return rc;
     }
 
     rc = kh_pgtable_init();
     if (rc) {
-        logke("hello_hook: kh_pgtable_init failed (%d)", rc);
+        pr_err("hello_hook: kh_pgtable_init failed (%d)", rc);
         kmod_hook_mem_cleanup();
         return rc;
     }
@@ -115,7 +113,7 @@ static int __init hello_hook_init(void)
     if (!target)
         target = (void *)ksyms_lookup("do_sys_open");
     if (!target) {
-        logke("hello_hook: do_sys_openat2 / do_sys_open not found");
+        pr_err("hello_hook: do_sys_openat2 / do_sys_open not found");
 #if !defined(KH_SDK_MODE)
         kmod_hook_mem_cleanup();
 #endif
@@ -124,7 +122,7 @@ static int __init hello_hook_init(void)
 
     hook_err_t err = hook_wrap4(target, open_before, NULL, NULL);
     if (err != HOOK_NO_ERR) {
-        logke("hello_hook: hook_wrap4 failed (%d)", (int)err);
+        pr_err("hello_hook: hook_wrap4 failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
         kmod_hook_mem_cleanup();
 #endif
@@ -132,7 +130,7 @@ static int __init hello_hook_init(void)
     }
 
     hooked_func = target;
-    logki("hello_hook: hooked do_sys_open* at %llx", (unsigned long long)(uintptr_t)target);
+    pr_info("hello_hook: hooked do_sys_open* at %llx", (unsigned long long)(uintptr_t)target);
     return 0;
 }
 
@@ -141,7 +139,7 @@ static void __exit hello_hook_exit(void)
     if (hooked_func) {
         hook_unwrap(hooked_func, open_before, NULL);
         hooked_func = NULL;
-        logki("hello_hook: unhooked");
+        pr_info("hello_hook: unhooked");
     }
 #if !defined(KH_SDK_MODE)
     kmod_hook_mem_cleanup();

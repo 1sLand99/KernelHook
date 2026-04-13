@@ -7,7 +7,7 @@
 #include <types.h>
 #include <memory.h>
 #include <hook.h>
-#include <log.h>
+#include <kh_log.h>
 
 /* Pool configuration */
 #define ROX_POOL_SIZE       (1024 * 1024)   /* 1MB */
@@ -152,7 +152,7 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
                      uint64_t pool_size, const hook_mem_ops_t *ops, const char *label)
 {
     if (!ops || !ops->alloc) {
-        logke("hmem: %s pool has no allocator", label);
+        pr_err("hmem: %s pool has no allocator", label);
         return -1;
     }
 
@@ -160,7 +160,7 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
 
     void *base = ops->alloc(pool_size);
     if (!base) {
-        logke("hmem: failed to allocate %s pool", label);
+        pr_err("hmem: failed to allocate %s pool", label);
         return -1;
     }
 
@@ -183,7 +183,7 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
     pool->used_blocks = 0;
     pool->block_size = BLOCK_SIZE;
 
-    logki("hmem: %s pool at 0x%llx, size %llu", label,
+    pr_info("hmem: %s pool at 0x%llx, size %llu", label,
           (unsigned long long)pool->pool_base, (unsigned long long)pool_size);
     return 0;
 }
@@ -216,7 +216,7 @@ int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, u
         return rc;
     }
 
-    logki("hmem: memory manager initialized");
+    pr_info("hmem: memory manager initialized");
     return 0;
 }
 
@@ -225,7 +225,7 @@ void hook_mem_cleanup(void)
     pool_cleanup(&g_rox_pool);
     pool_cleanup(&g_rw_pool);
     origin_map_count = 0;
-    logki("hmem: memory manager cleaned up");
+    pr_info("hmem: memory manager cleaned up");
 }
 
 uint64_t hook_mem_rox_pool_base(void)
@@ -271,7 +271,7 @@ int hook_mem_rox_write_enable(void *ptr, size_t size)
     if (g_rox_pool.ops.set_memory_rw)
         return g_rox_pool.ops.set_memory_rw(ps, numpages);
 
-    logkw("hmem: set_memory_rw not available, fallback needed");
+    pr_warn("hmem: set_memory_rw not available, fallback needed");
     return -1;
 }
 
@@ -300,7 +300,7 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     }
 
     if (!g_rox_pool.ops.set_memory_ro && !g_rox_pool.ops.set_memory_x) {
-        logkw("hmem: set_memory_ro/x not available, fallback needed");
+        pr_warn("hmem: set_memory_ro/x not available, fallback needed");
         return -1;
     }
 
@@ -320,7 +320,7 @@ int hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
     }
 
     if (origin_map_count >= ORIGIN_MAP_MAX) {
-        logkw("hmem: origin map full (%d entries)", ORIGIN_MAP_MAX);
+        pr_warn("hmem: origin map full (%d entries)", ORIGIN_MAP_MAX);
         return -1;
     }
 

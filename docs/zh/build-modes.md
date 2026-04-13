@@ -42,7 +42,6 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"

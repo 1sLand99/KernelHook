@@ -2,22 +2,35 @@
 /*
  * Fake <linux/printk.h> for freestanding .ko builds.
  *
- * Kernel 6.1+ exports _printk; older kernels export printk.
- * We extern _printk and alias printk to it.
+ * Provides pr_err / pr_warn / pr_info / pr_debug macros that resolve
+ * printk at runtime via ksyms.  Compile-time CONFIG_LOG_LEVEL strips
+ * calls below the threshold; runtime log_level allows further filtering.
  */
 
 #ifndef _FAKE_LINUX_PRINTK_H
 #define _FAKE_LINUX_PRINTK_H
 
-extern int _printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-#define printk _printk
+#define LOG_ERR     3
+#define LOG_WARN    4
+#define LOG_INFO    6
+#define LOG_DEBUG   7
 
-#define KERN_INFO    "\001" "6"
-#define KERN_ERR     "\001" "3"
-#define KERN_WARNING "\001" "4"
+#ifndef CONFIG_LOG_LEVEL
+#define CONFIG_LOG_LEVEL LOG_INFO
+#endif
 
-#define pr_info(fmt, ...)  _printk(KERN_INFO fmt, ##__VA_ARGS__)
-#define pr_err(fmt, ...)   _printk(KERN_ERR fmt, ##__VA_ARGS__)
-#define pr_warn(fmt, ...)  _printk(KERN_WARNING fmt, ##__VA_ARGS__)
+extern int log_level;
+
+/* Resolved to _printk / vprintk at runtime via ksyms. KCFI-safe. */
+int printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+
+#define pr_err(fmt, ...)   do { if (LOG_ERR   <= CONFIG_LOG_LEVEL && \
+    LOG_ERR   <= log_level) printk("[KH/E] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define pr_warn(fmt, ...)  do { if (LOG_WARN  <= CONFIG_LOG_LEVEL && \
+    LOG_WARN  <= log_level) printk("[KH/W] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define pr_info(fmt, ...)  do { if (LOG_INFO  <= CONFIG_LOG_LEVEL && \
+    LOG_INFO  <= log_level) printk("[KH/I] " fmt "\n", ##__VA_ARGS__); } while (0)
+#define pr_debug(fmt, ...) do { if (LOG_DEBUG <= CONFIG_LOG_LEVEL && \
+    LOG_DEBUG <= log_level) printk("[KH/D] " fmt "\n", ##__VA_ARGS__); } while (0)
 
 #endif /* _FAKE_LINUX_PRINTK_H */

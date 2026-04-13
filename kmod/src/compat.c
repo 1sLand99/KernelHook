@@ -12,7 +12,7 @@
 
 #include <types.h>
 #include <symbol.h>
-#include <log.h>
+#include <linux/printk.h>
 
 int kmod_kernel_major = 0;
 int kmod_kernel_minor = 0;
@@ -58,15 +58,15 @@ static int detect_kernel_version(void)
 {
     uint64_t banner_addr = ksyms_lookup("linux_banner");
     if (!banner_addr) {
-        logke("compat: failed to find linux_banner");
+        pr_err("compat: failed to find linux_banner");
         return -1;
     }
     const char *banner = (const char *)banner_addr;
     if (parse_kernel_version(banner) != 0) {
-        logke("compat: failed to parse kernel version from banner");
+        pr_err("compat: failed to parse kernel version from banner");
         return -1;
     }
-    logki("compat: kernel version %d.%d.%d",
+    pr_info("compat: kernel version %d.%d.%d",
           kmod_kernel_major, kmod_kernel_minor, kmod_kernel_patch);
     return 0;
 }
@@ -85,7 +85,7 @@ static unsigned long find_kallsyms_via_kprobes(void)
 #endif
 
 /* Defined in kmod/src/log.c */
-extern int kmod_log_init(void);
+extern int log_init(void);
 
 int kmod_compat_init(unsigned long kallsyms_addr)
 {
@@ -108,13 +108,13 @@ int kmod_compat_init(unsigned long kallsyms_addr)
     }
 #endif
 
-    if (kmod_log_init() != 0) {
+    if (log_init() != 0) {
         pr_err("kernelhook: failed to initialize logging\n");
         return -1;
     }
 
     if (detect_kernel_version() != 0) {
-        logkw("compat: kernel version detection failed, continuing anyway");
+        pr_warn("compat: kernel version detection failed, continuing anyway");
     }
 
     return 0;

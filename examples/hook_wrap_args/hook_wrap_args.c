@@ -17,7 +17,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
@@ -30,7 +29,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #endif
@@ -63,7 +61,7 @@ static void *hooked_func = NULL;
  */
 static void openat2_before(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_wrap_args: BEFORE arg0(dfd)=%lld arg1(filename)=%llx "
+	pr_info("hook_wrap_args: BEFORE arg0(dfd)=%lld arg1(filename)=%llx "
 	      "arg2(how)=%llx arg3=%llx",
 	      (long long)fargs->arg0,
 	      (unsigned long long)fargs->arg1,
@@ -75,7 +73,7 @@ static void openat2_before(hook_fargs4_t *fargs, void *udata)
 
 static void openat2_after(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_wrap_args: AFTER original ret=%lld, overriding with 0",
+	pr_info("hook_wrap_args: AFTER original ret=%lld, overriding with 0",
 	      (long long)fargs->ret);
 	fargs->ret = 0;
 }
@@ -97,13 +95,13 @@ static int __init hook_wrap_args_init(void)
 
 	rc = kmod_hook_mem_init();
 	if (rc) {
-		logke("hook_wrap_args: hook_mem init failed (%d)", rc);
+		pr_err("hook_wrap_args: hook_mem init failed (%d)", rc);
 		return 0;
 	}
 
 	rc = kh_pgtable_init();
 	if (rc) {
-		logke("hook_wrap_args: kh_pgtable_init failed (%d)", rc);
+		pr_err("hook_wrap_args: kh_pgtable_init failed (%d)", rc);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}
@@ -119,7 +117,7 @@ static int __init hook_wrap_args_init(void)
 	if (!target)
 		target = (void *)ksyms_lookup("do_sys_open");
 	if (!target) {
-		logke("hook_wrap_args: target function not found");
+		pr_err("hook_wrap_args: target function not found");
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -128,7 +126,7 @@ static int __init hook_wrap_args_init(void)
 
 	err = hook_wrap4(target, openat2_before, openat2_after, NULL);
 	if (err != HOOK_NO_ERR) {
-		logke("hook_wrap_args: hook_wrap4 failed (%d)", (int)err);
+		pr_err("hook_wrap_args: hook_wrap4 failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -136,7 +134,7 @@ static int __init hook_wrap_args_init(void)
 	}
 
 	hooked_func = target;
-	logki("hook_wrap_args: hooked do_sys_open* at %llx",
+	pr_info("hook_wrap_args: hooked do_sys_open* at %llx",
 	      (unsigned long long)(uintptr_t)target);
 	return 0;
 }
@@ -146,7 +144,7 @@ static void __exit hook_wrap_args_exit(void)
 	if (hooked_func) {
 		hook_unwrap(hooked_func, (void *)openat2_before, (void *)openat2_after);
 		hooked_func = NULL;
-		logki("hook_wrap_args: unhooked");
+		pr_info("hook_wrap_args: unhooked");
 	}
 #if !defined(KH_SDK_MODE)
 	kmod_hook_mem_cleanup();

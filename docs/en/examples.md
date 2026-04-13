@@ -18,7 +18,7 @@ Hooks `do_sys_openat2` (or `do_sys_open` on older kernels) and logs the filename
 static void open_before(hook_fargs4_t *fargs, void *udata)
 {
     const char *filename = (const char *)fargs->arg1;
-    logki("hello_hook: open called, filename ptr=%llx",
+    pr_info("hello_hook: open called, filename ptr=%llx",
           (unsigned long long)(uintptr_t)filename);
 }
 
@@ -83,13 +83,13 @@ Hooks `do_sys_openat2` with both before and after callbacks. The before callback
 ```c
 static void openat2_before(hook_fargs4_t *fargs, void *udata)
 {
-    logki("BEFORE arg0(dfd)=%lld arg1(filename)=%llx",
+    pr_info("BEFORE arg0(dfd)=%lld arg1(filename)=%llx",
           (long long)fargs->arg0, (unsigned long long)fargs->arg1);
 }
 
 static void openat2_after(hook_fargs4_t *fargs, void *udata)
 {
-    logki("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
+    pr_info("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
     fargs->ret = 0;
 }
 ```

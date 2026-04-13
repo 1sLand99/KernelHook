@@ -81,7 +81,7 @@
 
 #if !defined(KH_SDK_MODE)
 /* log.c — no dedicated header */
-extern int kmod_log_init(void);
+extern int log_init(void);
 #endif
 
 MODULE_LICENSE("GPL");
@@ -281,9 +281,9 @@ static int kh_subsystem_init(void)
     }
 
     /* 2. log */
-    rc = kmod_log_init();
+    rc = log_init();
     if (rc) {
-        pr_err(KH_TEST_TAG "kmod_log_init failed: %d\n", rc);
+        pr_err(KH_TEST_TAG "log_init failed: %d\n", rc);
         return rc;
     }
 

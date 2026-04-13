@@ -14,7 +14,7 @@
 #include <hook.h>
 #include <memory.h>
 #include <symbol.h>
-#include <log.h>
+#include <linux/printk.h>
 
 #include <arch/arm64/pgtable.h>
 
@@ -58,7 +58,7 @@ static int __init kernelhook_init(void)
 
     rc = kmod_hook_mem_init();
     if (rc) {
-        logke("kernelhook: hook_mem init failed (%d)", rc);
+        pr_err("kernelhook: hook_mem init failed (%d)", rc);
         return rc;
     }
 
@@ -66,7 +66,7 @@ static int __init kernelhook_init(void)
      * modify kernel code pages via PTE manipulation. */
     rc = kh_pgtable_init();
     if (rc) {
-        logke("kernelhook: kh_pgtable_init failed (%d)", rc);
+        pr_err("kernelhook: kh_pgtable_init failed (%d)", rc);
         kmod_hook_mem_cleanup();
         return rc;
     }
@@ -75,7 +75,7 @@ static int __init kernelhook_init(void)
     kh_write_insts_init();
 
     kh_initialized = 1;
-    logki("kernelhook: loaded successfully (kernel %d.%d.%d)",
+    pr_info("kernelhook: loaded successfully (kernel %d.%d.%d)",
           kmod_kernel_major, kmod_kernel_minor, kmod_kernel_patch);
 
     return 0;
@@ -90,7 +90,7 @@ static void __exit kernelhook_exit(void)
 {
     if (kh_initialized) {
         kmod_hook_mem_cleanup();
-        logki("kernelhook: unloaded");
+        pr_info("kernelhook: unloaded");
     }
 }
 

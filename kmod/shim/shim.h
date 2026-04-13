@@ -143,23 +143,8 @@ static const struct kernel_param_ops __kmod_param_ops_ulong = {
 #define PAGE_SIZE 4096UL
 #endif
 
-/* ---- pr_info / pr_err ---- */
-/*
- * Kernel 6.1+ exports _printk; older kernels export printk.
- * We extern _printk and provide a printk alias so that both
- * our code and the log subsystem (which calls printk) resolve
- * to the same symbol the kernel actually exports.
- */
-extern int _printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
-#define printk _printk
-
-#define KERN_INFO    "\001" "6"
-#define KERN_ERR     "\001" "3"
-#define KERN_WARNING "\001" "4"
-
-#define pr_info(fmt, ...)  _printk(KERN_INFO fmt, ##__VA_ARGS__)
-#define pr_err(fmt, ...)   _printk(KERN_ERR fmt, ##__VA_ARGS__)
-#define pr_warn(fmt, ...)  _printk(KERN_WARNING fmt, ##__VA_ARGS__)
+/* ---- printk / pr_xxx ---- */
+#include <linux/printk.h>
 
 /* ---- Minimal bool ---- */
 #ifndef true

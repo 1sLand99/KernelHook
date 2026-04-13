@@ -18,7 +18,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
@@ -31,7 +30,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
 #endif
@@ -58,24 +56,24 @@ static void *hooked_func = NULL;
 
 static void before_high_priority(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_chain: [priority 0] HIGH priority before callback");
+	pr_info("hook_chain: [priority 0] HIGH priority before callback");
 }
 
 static void before_medium_priority(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_chain: [priority 50] MEDIUM priority before callback");
+	pr_info("hook_chain: [priority 50] MEDIUM priority before callback");
 }
 
 static void before_low_priority(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_chain: [priority 100] LOW priority before callback");
+	pr_info("hook_chain: [priority 100] LOW priority before callback");
 }
 
 /* ---- After callback ---- */
 
 static void after_callback(hook_fargs4_t *fargs, void *udata)
 {
-	logki("hook_chain: after callback, ret=%lld", (long long)fargs->ret);
+	pr_info("hook_chain: after callback, ret=%lld", (long long)fargs->ret);
 }
 
 /* ---- Module init / exit ---- */
@@ -95,13 +93,13 @@ static int __init hook_chain_init(void)
 
 	rc = kmod_hook_mem_init();
 	if (rc) {
-		logke("hook_chain: hook_mem init failed (%d)", rc);
+		pr_err("hook_chain: hook_mem init failed (%d)", rc);
 		return 0;
 	}
 
 	rc = kh_pgtable_init();
 	if (rc) {
-		logke("hook_chain: kh_pgtable_init failed (%d)", rc);
+		pr_err("hook_chain: kh_pgtable_init failed (%d)", rc);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}
@@ -117,7 +115,7 @@ static int __init hook_chain_init(void)
 	if (!target)
 		target = (void *)ksyms_lookup("do_sys_open");
 	if (!target) {
-		logke("hook_chain: target function not found");
+		pr_err("hook_chain: target function not found");
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -131,7 +129,7 @@ static int __init hook_chain_init(void)
 	 */
 	err = hook_wrap(target, 4, (void *)before_medium_priority, NULL, NULL, 50);
 	if (err != HOOK_NO_ERR) {
-		logke("hook_chain: hook_wrap medium failed (%d)", (int)err);
+		pr_err("hook_chain: hook_wrap medium failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -140,7 +138,7 @@ static int __init hook_chain_init(void)
 
 	err = hook_wrap(target, 4, (void *)before_low_priority, (void *)after_callback, NULL, 100);
 	if (err != HOOK_NO_ERR) {
-		logke("hook_chain: hook_wrap low failed (%d)", (int)err);
+		pr_err("hook_chain: hook_wrap low failed (%d)", (int)err);
 		hook_unwrap(target, (void *)before_medium_priority, NULL);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
@@ -150,7 +148,7 @@ static int __init hook_chain_init(void)
 
 	err = hook_wrap(target, 4, (void *)before_high_priority, NULL, NULL, 0);
 	if (err != HOOK_NO_ERR) {
-		logke("hook_chain: hook_wrap high failed (%d)", (int)err);
+		pr_err("hook_chain: hook_wrap high failed (%d)", (int)err);
 		hook_unwrap(target, (void *)before_medium_priority, NULL);
 		hook_unwrap(target, (void *)before_low_priority, (void *)after_callback);
 #if !defined(KH_SDK_MODE)
@@ -160,9 +158,9 @@ static int __init hook_chain_init(void)
 	}
 
 	hooked_func = target;
-	logki("hook_chain: registered 3 before callbacks + 1 after callback at %llx",
+	pr_info("hook_chain: registered 3 before callbacks + 1 after callback at %llx",
 	      (unsigned long long)(uintptr_t)target);
-	logki("hook_chain: execution order will be: high(0) -> medium(50) -> low(100)");
+	pr_info("hook_chain: execution order will be: high(0) -> medium(50) -> low(100)");
 	return 0;
 }
 
@@ -173,7 +171,7 @@ static void __exit hook_chain_exit(void)
 		hook_unwrap(hooked_func, (void *)before_medium_priority, NULL);
 		hook_unwrap(hooked_func, (void *)before_low_priority, (void *)after_callback);
 		hooked_func = NULL;
-		logki("hook_chain: all callbacks removed");
+		pr_info("hook_chain: all callbacks removed");
 	}
 #if !defined(KH_SDK_MODE)
 	kmod_hook_mem_cleanup();

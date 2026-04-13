@@ -9,7 +9,7 @@
 #include <hook.h>
 #include <memory.h>
 #include <platform.h>
-#include <log.h>
+#include <kh_log.h>
 
 /* Flush D-cache and I-cache for a memory region that contains code.
  * Required after writing instructions to the ROX pool — the I-cache

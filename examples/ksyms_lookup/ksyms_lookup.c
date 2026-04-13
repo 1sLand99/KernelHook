@@ -21,7 +21,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #include "../../kmod/src/compat.h"
 #else
 /* Mode C: standard kernel headers */
@@ -31,7 +30,6 @@
 #include <types.h>
 #include <hook.h>
 #include <symbol.h>
-#include <log.h>
 #endif
 
 MODULE_LICENSE("GPL");
@@ -66,33 +64,33 @@ static int __init ksyms_lookup_init(void)
 
 	/* Look up well-known kernel symbols */
 	addr = ksyms_lookup("vfs_read");
-	logki("ksyms_lookup: vfs_read = %llx", (unsigned long long)addr);
+	pr_info("ksyms_lookup: vfs_read = %llx", (unsigned long long)addr);
 
 	addr = ksyms_lookup("vfs_write");
-	logki("ksyms_lookup: vfs_write = %llx", (unsigned long long)addr);
+	pr_info("ksyms_lookup: vfs_write = %llx", (unsigned long long)addr);
 
 	addr = ksyms_lookup("do_sys_openat2");
-	logki("ksyms_lookup: do_sys_openat2 = %llx", (unsigned long long)addr);
+	pr_info("ksyms_lookup: do_sys_openat2 = %llx", (unsigned long long)addr);
 
 	/* Cached lookup — first call populates cache, second is fast */
 	addr = ksyms_lookup_cache("vfs_read");
-	logki("ksyms_lookup: vfs_read (cached, 1st) = %llx", (unsigned long long)addr);
+	pr_info("ksyms_lookup: vfs_read (cached, 1st) = %llx", (unsigned long long)addr);
 
 	addr = ksyms_lookup_cache("vfs_read");
-	logki("ksyms_lookup: vfs_read (cached, 2nd) = %llx", (unsigned long long)addr);
+	pr_info("ksyms_lookup: vfs_read (cached, 2nd) = %llx", (unsigned long long)addr);
 
 	/* Nonexistent symbol — should return 0 */
 	addr = ksyms_lookup("this_symbol_does_not_exist_xyz");
-	logki("ksyms_lookup: nonexistent symbol = %llx (expected 0)",
+	pr_info("ksyms_lookup: nonexistent symbol = %llx (expected 0)",
 	      (unsigned long long)addr);
 
-	logki("ksyms_lookup: all lookups complete");
+	pr_info("ksyms_lookup: all lookups complete");
 	return 0;
 }
 
 static void __exit ksyms_lookup_exit(void)
 {
-	logki("ksyms_lookup: module unloaded");
+	pr_info("ksyms_lookup: module unloaded");
 }
 
 module_init(ksyms_lookup_init);
