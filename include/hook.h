@@ -264,9 +264,10 @@ typedef struct hook_chain_rw
     hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
-    uint16_t occupied_mask;
-    int32_t sorted_indices[HOOK_CHAIN_NUM];
     int32_t sorted_count;
+    uint16_t occupied_mask;
+    /* 2 bytes implicit padding */
+    int32_t sorted_indices[HOOK_CHAIN_NUM];
     hook_chain_item_t items[HOOK_CHAIN_NUM];
 } hook_chain_rw_t __aligned(8);
 
@@ -295,9 +296,9 @@ typedef struct fp_hook_chain_rw
     fp_hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
+    int32_t sorted_count;
     uint32_t occupied_mask;
     int32_t sorted_indices[FP_HOOK_CHAIN_NUM];
-    int32_t sorted_count;
     hook_chain_item_t items[FP_HOOK_CHAIN_NUM];
 } fp_hook_chain_rw_t __aligned(8);
 
