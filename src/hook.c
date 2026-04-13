@@ -115,10 +115,10 @@ static int PREFIX##_chain_all_empty(RW_TYPE *rw)                                
     return rw->occupied_mask == 0;                                              \
 }
 
-/* Generate inline hook chain ops (il_ prefix, 16 slots → uint16_t mask) */
+/* Generate inline hook chain ops (il_ prefix, 8 slots, uint16_t mask) */
 DEFINE_CHAIN_OPS(il, hook_chain_rw_t, uint16_t)
 
-/* Generate FP hook chain ops (fp_ prefix, 32 slots → uint32_t mask) */
+/* Generate FP hook chain ops (fp_ prefix, 16 slots, uint32_t mask) */
 DEFINE_CHAIN_OPS(fp, fp_hook_chain_rw_t, uint32_t)
 
 /* Public API wrappers for inline hook chain */
