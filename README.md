@@ -1,5 +1,12 @@
 # KernelHook
 
+> **WARNING / 警告**
+>
+> This project is under active exploration and development. APIs are unstable
+> and may change without notice. **Do not use in production.**
+>
+> 本项目正处于探索开发阶段，接口不稳定，随时可能变更。**请勿用于生产环境。**
+
 ARM64 function hooking framework for Linux kernels.
 
 ## Features
