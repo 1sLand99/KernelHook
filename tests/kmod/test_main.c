@@ -371,6 +371,24 @@ static int __init kh_test_init(void)
     test_vfs_read_write_hook();
     test_dynamic_add_remove();
 
+    /* ------------------------------------------------------------------
+     * Phase 5c: Stress tests
+     * ---------------------------------------------------------------- */
+    pr_info(KH_TEST_TAG "--- Phase 5c: Stress tests ---\n");
+    test_stress_chain_fill_drain();
+    test_stress_rapid_hook_unhook();
+
+    /* ------------------------------------------------------------------
+     * Phase 5d: Concurrency tests
+     * ---------------------------------------------------------------- */
+#if defined(CONFIG_KH_CHAIN_RCU) && !defined(KMOD_FREESTANDING) && !defined(KH_SDK_MODE)
+    pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests ---\n");
+    test_concurrent_add_remove();
+#else
+    pr_info(KH_TEST_TAG "--- Phase 5d: Concurrency tests (SKIPPED) ---\n");
+    KH_SKIP("concurrent_add_remove (requires CONFIG_KH_CHAIN_RCU + kbuild mode)");
+#endif
+
 #if !defined(KH_SDK_MODE)
 results:
 #endif

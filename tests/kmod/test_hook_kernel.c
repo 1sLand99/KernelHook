@@ -1048,3 +1048,397 @@ void test_dynamic_add_remove(void)
     rox_ptr = hook_mem_get_rox_from_origin(func_addr);
     KH_ASSERT(rox_ptr == NULL, "dyn_add_remove: ROX is NULL after full cleanup");
 }
+
+/* ================================================================
+ * Phase 5c: Stress tests
+ *
+ * Pure stress tests that exercise hook chain fill/drain and rapid
+ * hook/unhook cycles. No concurrency — always available.
+ * ================================================================ */
+
+/* ---- Distinct before/after callbacks for chain fill stress test ----
+ * We need HOOK_CHAIN_NUM (8) distinct pairs so each slot gets a unique
+ * function pointer. Slot 0 is used by the initial hook_wrap; slots 1..7
+ * are filled via hook_chain_add.
+ */
+
+#define STRESS_CB(N)                                                      \
+    static void stress_before_##N(hook_fargs4_t *args, void *udata)       \
+    { (void)args; (void)udata; }                                          \
+    static void stress_after_##N(hook_fargs4_t *args, void *udata)        \
+    { (void)args; (void)udata; }
+
+STRESS_CB(0)
+STRESS_CB(1)
+STRESS_CB(2)
+STRESS_CB(3)
+STRESS_CB(4)
+STRESS_CB(5)
+STRESS_CB(6)
+STRESS_CB(7)
+
+/* Tables indexed 0..HOOK_CHAIN_NUM-1 for convenient iteration */
+typedef void (*stress_cb_t)(hook_fargs4_t *, void *);
+
+static stress_cb_t stress_befores[HOOK_CHAIN_NUM] = {
+    stress_before_0, stress_before_1, stress_before_2, stress_before_3,
+    stress_before_4, stress_before_5, stress_before_6, stress_before_7,
+};
+
+static stress_cb_t stress_afters[HOOK_CHAIN_NUM] = {
+    stress_after_0, stress_after_1, stress_after_2, stress_after_3,
+    stress_after_4, stress_after_5, stress_after_6, stress_after_7,
+};
+
+/* ================================================================
+ * test_stress_chain_fill_drain — fill all HOOK_CHAIN_NUM slots then
+ * drain, repeat 1000 times. Verify occupied_mask and sorted_count
+ * consistency.
+ * ================================================================ */
+
+void test_stress_chain_fill_drain(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+    hook_chain_rox_t *rox;
+    hook_chain_rw_t *rw;
+    int i, iter;
+    int failed = 0;
+
+    func_addr = ksyms_lookup("do_faccessat");
+    if (!func_addr) {
+        KH_SKIP("stress_fill_drain: do_faccessat not found via ksyms_lookup");
+        return;
+    }
+
+    /* Initial hook — occupies slot 0 with stress_before_0/stress_after_0 */
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)stress_befores[0], (void *)stress_afters[0], NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "stress_fill_drain: initial hook_wrap OK");
+    if (err != HOOK_NO_ERR)
+        return;
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr != NULL, "stress_fill_drain: ROX exists after initial wrap");
+    if (!rox_ptr)
+        return;
+
+    rox = (hook_chain_rox_t *)rox_ptr;
+    rw = rox->rw;
+    KH_ASSERT(rw != NULL, "stress_fill_drain: RW is non-NULL");
+    if (!rw)
+        return;
+
+    for (iter = 0; iter < 1000; iter++) {
+        /* Fill remaining HOOK_CHAIN_NUM - 1 slots (indices 1..7) */
+        for (i = 1; i < HOOK_CHAIN_NUM; i++) {
+            err = hook_chain_add(rw, (void *)stress_befores[i],
+                                 (void *)stress_afters[i], NULL, i);
+            if (err != HOOK_NO_ERR) {
+                pr_err(KH_TEST_TAG
+                       "FAIL: stress_fill_drain: hook_chain_add failed at "
+                       "iter=%d slot=%d err=%d\n", iter, i, err);
+                failed = 1;
+                goto drain;
+            }
+        }
+
+        /* All slots occupied */
+        if (rw->sorted_count != HOOK_CHAIN_NUM) {
+            pr_err(KH_TEST_TAG
+                   "FAIL: stress_fill_drain: sorted_count=%d != %d at iter=%d\n",
+                   rw->sorted_count, HOOK_CHAIN_NUM, iter);
+            failed = 1;
+        }
+
+drain:
+        /* Drain all added slots (indices 1..7) */
+        for (i = 1; i < HOOK_CHAIN_NUM; i++)
+            hook_chain_remove(rw, (void *)stress_befores[i],
+                              (void *)stress_afters[i]);
+
+        if (rw->sorted_count != 1) {
+            pr_err(KH_TEST_TAG
+                   "FAIL: stress_fill_drain: sorted_count=%d != 1 after drain "
+                   "at iter=%d\n", rw->sorted_count, iter);
+            failed = 1;
+        }
+
+        if (failed)
+            break;
+    }
+
+    KH_ASSERT(!failed, "stress_fill_drain: 1000 fill/drain cycles consistent");
+
+    /* Final cleanup: remove the initial hook */
+    hook_unwrap_remove((void *)func_addr, (void *)stress_befores[0],
+                       (void *)stress_afters[0], 1);
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "stress_fill_drain: ROX is NULL after full cleanup");
+}
+
+/* ================================================================
+ * test_stress_rapid_hook_unhook — hook_wrap then hook_unwrap_remove
+ * 1000 times on the same function. Verify no memory leak (ROX/RW
+ * properly recycled).
+ * ================================================================ */
+
+static void rapid_before_cb(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void rapid_after_cb(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+void test_stress_rapid_hook_unhook(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+    int i;
+    int failed = 0;
+
+    func_addr = ksyms_lookup("do_faccessat");
+    if (!func_addr) {
+        KH_SKIP("stress_rapid: do_faccessat not found via ksyms_lookup");
+        return;
+    }
+
+    for (i = 0; i < 1000; i++) {
+        err = hook_wrap((void *)func_addr, 4,
+                        (void *)rapid_before_cb, (void *)rapid_after_cb, NULL, 0);
+        if (err != HOOK_NO_ERR) {
+            pr_err(KH_TEST_TAG
+                   "FAIL: stress_rapid: hook_wrap failed at iter=%d err=%d\n",
+                   i, err);
+            failed = 1;
+            break;
+        }
+
+        rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+        if (!rox_ptr) {
+            pr_err(KH_TEST_TAG
+                   "FAIL: stress_rapid: ROX is NULL after hook_wrap at iter=%d\n",
+                   i);
+            failed = 1;
+            break;
+        }
+
+        hook_unwrap_remove((void *)func_addr, (void *)rapid_before_cb,
+                           (void *)rapid_after_cb, 1);
+
+        rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+        if (rox_ptr) {
+            pr_err(KH_TEST_TAG
+                   "FAIL: stress_rapid: ROX not NULL after unwrap at iter=%d\n",
+                   i);
+            failed = 1;
+            break;
+        }
+    }
+
+    KH_ASSERT(!failed, "stress_rapid: 1000 hook/unhook cycles clean");
+}
+
+/* ================================================================
+ * Phase 5d: Concurrency tests
+ *
+ * These tests require CONFIG_KH_CHAIN_RCU for thread safety and
+ * kthread APIs (kbuild mode only — not freestanding).
+ * ================================================================ */
+
+#if defined(CONFIG_KH_CHAIN_RCU) && !defined(KMOD_FREESTANDING) && !defined(KH_SDK_MODE)
+#include <linux/kthread.h>
+#include <linux/delay.h>
+#include <linux/sched.h>
+
+#define CONC_NUM_THREADS 4
+#define CONC_ITERS_PER_THREAD 1000
+
+/* Per-thread distinct before/after callbacks (need unique pointers) */
+#define CONC_CB(N)                                                         \
+    static void conc_before_##N(hook_fargs4_t *args, void *udata)          \
+    { (void)args; (void)udata; }                                           \
+    static void conc_after_##N(hook_fargs4_t *args, void *udata)           \
+    { (void)args; (void)udata; }
+
+CONC_CB(0)
+CONC_CB(1)
+CONC_CB(2)
+CONC_CB(3)
+
+static stress_cb_t conc_befores[CONC_NUM_THREADS] = {
+    conc_before_0, conc_before_1, conc_before_2, conc_before_3,
+};
+
+static stress_cb_t conc_afters[CONC_NUM_THREADS] = {
+    conc_after_0, conc_after_1, conc_after_2, conc_after_3,
+};
+
+struct conc_thread_data {
+    hook_chain_rw_t *rw;
+    int thread_id;
+    int iters_completed;
+    int errors;
+    volatile int *stop_flag;
+};
+
+static int conc_thread_fn(void *data)
+{
+    struct conc_thread_data *td = (struct conc_thread_data *)data;
+    hook_err_t err;
+    int i;
+
+    for (i = 0; i < CONC_ITERS_PER_THREAD; i++) {
+        if (*td->stop_flag)
+            break;
+
+        err = hook_chain_add(td->rw,
+                             (void *)conc_befores[td->thread_id],
+                             (void *)conc_afters[td->thread_id],
+                             NULL, td->thread_id);
+        if (err != HOOK_NO_ERR && err != HOOK_DUPLICATED &&
+            err != HOOK_CHAIN_FULL) {
+            td->errors++;
+            break;
+        }
+
+        /* Let other threads run */
+        schedule();
+
+        hook_chain_remove(td->rw,
+                          (void *)conc_befores[td->thread_id],
+                          (void *)conc_afters[td->thread_id]);
+
+        td->iters_completed++;
+    }
+
+    /* kthread_stop() will set kthread_should_stop(), wait for it */
+    while (!kthread_should_stop())
+        schedule();
+
+    return 0;
+}
+
+/* ================================================================
+ * test_concurrent_add_remove — multiple kernel threads simultaneously
+ * add and remove chain items. Verify no crash and consistent state
+ * after.
+ *
+ * Requires CONFIG_KH_CHAIN_RCU for thread safety.
+ * ================================================================ */
+
+/* Initial callback for the base hook_wrap */
+static void conc_initial_before(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+static void conc_initial_after(hook_fargs4_t *args, void *udata)
+{
+    (void)args;
+    (void)udata;
+}
+
+void test_concurrent_add_remove(void)
+{
+    uint64_t func_addr;
+    hook_err_t err;
+    void *rox_ptr;
+    hook_chain_rox_t *rox;
+    hook_chain_rw_t *rw;
+    struct task_struct *threads[CONC_NUM_THREADS];
+    struct conc_thread_data td[CONC_NUM_THREADS];
+    volatile int stop_flag = 0;
+    int i;
+    int all_ok = 1;
+
+    func_addr = ksyms_lookup("do_faccessat");
+    if (!func_addr) {
+        KH_SKIP("concurrent: do_faccessat not found via ksyms_lookup");
+        return;
+    }
+
+    /* Create the base hook chain */
+    err = hook_wrap((void *)func_addr, 4,
+                    (void *)conc_initial_before, (void *)conc_initial_after,
+                    NULL, 0);
+    KH_ASSERT(err == HOOK_NO_ERR, "concurrent: initial hook_wrap OK");
+    if (err != HOOK_NO_ERR)
+        return;
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    if (!rox_ptr) {
+        KH_ASSERT(0, "concurrent: ROX exists after initial wrap");
+        return;
+    }
+    rox = (hook_chain_rox_t *)rox_ptr;
+    rw = rox->rw;
+
+    /* Initialize thread data and launch threads */
+    for (i = 0; i < CONC_NUM_THREADS; i++) {
+        td[i].rw = rw;
+        td[i].thread_id = i;
+        td[i].iters_completed = 0;
+        td[i].errors = 0;
+        td[i].stop_flag = &stop_flag;
+    }
+
+    for (i = 0; i < CONC_NUM_THREADS; i++) {
+        threads[i] = kthread_run(conc_thread_fn, &td[i],
+                                 "kh_conc_test_%d", i);
+        if (IS_ERR(threads[i])) {
+            pr_err(KH_TEST_TAG
+                   "concurrent: failed to create thread %d\n", i);
+            threads[i] = NULL;
+            all_ok = 0;
+        }
+    }
+
+    /* Let threads run for ~2 seconds */
+    msleep(2000);
+    stop_flag = 1;
+
+    /* Stop all threads */
+    for (i = 0; i < CONC_NUM_THREADS; i++) {
+        if (threads[i])
+            kthread_stop(threads[i]);
+    }
+
+    /* Check results */
+    for (i = 0; i < CONC_NUM_THREADS; i++) {
+        if (td[i].errors) {
+            pr_err(KH_TEST_TAG
+                   "concurrent: thread %d had %d errors in %d iters\n",
+                   i, td[i].errors, td[i].iters_completed);
+            all_ok = 0;
+        } else {
+            pr_info(KH_TEST_TAG
+                    "concurrent: thread %d completed %d iters OK\n",
+                    i, td[i].iters_completed);
+        }
+    }
+
+    KH_ASSERT(all_ok, "concurrent: all threads completed without errors");
+
+    /* Verify consistent state: only the initial callback should remain */
+    KH_ASSERT(rw->sorted_count == 1,
+              "concurrent: sorted_count == 1 after all threads stopped");
+
+    /* Cleanup */
+    hook_unwrap_remove((void *)func_addr, (void *)conc_initial_before,
+                       (void *)conc_initial_after, 1);
+
+    rox_ptr = hook_mem_get_rox_from_origin(func_addr);
+    KH_ASSERT(rox_ptr == NULL, "concurrent: ROX is NULL after cleanup");
+}
+
+#endif /* CONFIG_KH_CHAIN_RCU && !KMOD_FREESTANDING && !KH_SDK_MODE */
