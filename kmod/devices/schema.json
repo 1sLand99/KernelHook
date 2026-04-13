@@ -6,9 +6,10 @@
   "properties": {
     "identity": {
       "type": "object",
-      "required": ["name", "arch"],
+      "required": ["name", "class", "arch"],
       "properties": {
         "name":        {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "class":       {"type": "string", "enum": ["gki", "aosp", "vendor"], "description": "gki = GKI 5.4+, aosp = pre-GKI AOSP common, vendor = OEM-specific build"},
         "description": {"type": "string"},
         "arch":        {"type": "string", "enum": ["aarch64"]}
       }

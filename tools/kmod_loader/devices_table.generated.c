@@ -7,7 +7,7 @@
 __attribute__((used))
 const struct device_entry g_devices[] = {
     {
-        .name                = "gki_4_14_android29",
+        .name                = "aosp_4_14_android29",
         .description         = "Android 10 pre-GKI 4.14 (AVD android-29, init verified via disasm)",
         .arch                = "aarch64",
         .match_kernelrelease = "4.14.",
@@ -22,7 +22,7 @@ const struct device_entry g_devices[] = {
         .verified            = 1,
     },
     {
-        .name                = "gki_4_19_unverified",
+        .name                = "aosp_4_19_unverified",
         .description         = "Pre-GKI 4.19 (unverified, computed from AOSP source)",
         .arch                = "aarch64",
         .match_kernelrelease = "4.19.",
@@ -37,7 +37,7 @@ const struct device_entry g_devices[] = {
         .verified            = 0,
     },
     {
-        .name                = "gki_4_4_android28",
+        .name                = "aosp_4_4_android28",
         .description         = "Android 9 pre-GKI 4.4 (AVD android-28)",
         .arch                = "aarch64",
         .match_kernelrelease = "4.4.",
@@ -52,7 +52,7 @@ const struct device_entry g_devices[] = {
         .verified            = 1,
     },
     {
-        .name                = "gki_4_9_unverified",
+        .name                = "aosp_4_9_unverified",
         .description         = "Pre-GKI 4.9 (unverified, computed from AOSP source)",
         .arch                = "aarch64",
         .match_kernelrelease = "4.9.",
