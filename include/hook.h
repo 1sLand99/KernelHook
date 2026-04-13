@@ -92,23 +92,14 @@ enum hook_type
 /* ---- PAC stripping ----
  * On PAC-enabled binaries, function pointers carry signature bits in the
  * upper bytes.  Strip them at API entry so origin map lookups and address
- * comparisons use the raw code address. */
-#if defined(__ARM_FEATURE_PAC_DEFAULT) && defined(KMOD_FREESTANDING)
-/*
- * Freestanding (Mode A) builds use the clang builtin ptrauth intrinsic,
- * which is available under the NDK sysroot even with -nostdinc because
- * the freestanding build relies on clang's resource-dir headers.
- */
-#include <ptrauth.h>
-#define STRIP_PAC(ptr) ((void *)ptrauth_strip((void *)(ptr), ptrauth_key_asia))
+ * comparisons use the raw code address.
+ *
+ * Freestanding always uses VA mask regardless of compiler PAC support —
+ * the target kernel may have PAC even if our compiler does not.
+ * Masking is safe on non-PAC kernels (upper bits are already zero). */
+#if defined(KMOD_FREESTANDING)
+#define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
 #elif defined(__ARM_FEATURE_PAC_DEFAULT) && defined(__KERNEL__)
-/*
- * Mode C (kbuild) — kernel builds with -nostdinc and does not expose
- * clang's <ptrauth.h> builtin header. Fall back to a bitmask strip
- * matching arm64 VA_BITS=48 (upstream default; LPA2 systems with
- * VA_BITS=52 will strip one extra bit of address, which is still safe
- * for lookup keys but not strictly canonical).
- */
 #define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
 #else
 #define STRIP_PAC(ptr) ((void *)(ptr))
