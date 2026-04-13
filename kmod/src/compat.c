@@ -10,8 +10,8 @@
 #include <linux/kprobes.h>
 #endif
 
-#include <ktypes.h>
-#include <ksyms.h>
+#include <types.h>
+#include <symbol.h>
 #include <log.h>
 
 int kmod_kernel_major = 0;

@@ -16,9 +16,9 @@
 #else
 #include <asm/set_memory.h>
 #endif
-#include <hmem.h>
+#include <memory.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
 
 /* ========================================================================

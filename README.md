@@ -48,7 +48,7 @@ adb shell dmesg | grep hello_hook
 | `src/arch/arm64/transit.c` | Transit stub + callback dispatch |
 | `src/arch/arm64/pgtable.c` | Page table walking + PTE modification |
 | `src/hook.c` | Hook chain API (hook/unhook/hook_wrap) |
-| `src/hmem.c` | Bitmap allocator for ROX/RW memory pools |
+| `src/memory.c` | Bitmap allocator for ROX/RW memory pools |
 | `kmod/` | SDK, linker scripts, shim headers |
 | `tools/kmod_loader/` | Adaptive module loader |
 | `examples/` | hello_hook, fp_hook, hook_chain, hook_wrap_args, ksyms_lookup |

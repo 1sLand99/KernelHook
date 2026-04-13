@@ -13,7 +13,7 @@ SECTIONS {
          * which is acceptable since they are never executed in-place
          * (copied to ROX pages at runtime). */
         *libkernelhook.a:hook.c.o(.text .text.*)
-        *libkernelhook.a:hmem.c.o(.text .text.*)
+        *libkernelhook.a:memory.c.o(.text .text.*)
         *libkernelhook.a:inline.c.o(.text .text.*)
         *libkernelhook.a:insn.c.o(.text .text.*)
         *libkernelhook.a:linux.c.o(.text .text.*)

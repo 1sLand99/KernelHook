@@ -16,7 +16,7 @@
 #ifndef _KP_ARM64_PGTABLE_H_
 #define _KP_ARM64_PGTABLE_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 #ifdef KMOD_FREESTANDING
 

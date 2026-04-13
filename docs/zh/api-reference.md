@@ -1,6 +1,6 @@
 # API 参考
 
-头文件：`<hook.h>`、`<ksyms.h>`
+头文件：`<hook.h>`、`<symbol.h>`
 
 ## 内联 Hook
 
@@ -127,7 +127,7 @@ void *fp_get_origin_func(void *hook_args);
 
 ## 符号解析
 
-头文件：`<ksyms.h>`
+头文件：`<symbol.h>`
 
 ### `ksyms_init`
 

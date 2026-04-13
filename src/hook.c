@@ -5,9 +5,9 @@
  * userspace memory management and hook installation.
  */
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <hmem.h>
+#include <memory.h>
 #include <platform.h>
 #include <log.h>
 

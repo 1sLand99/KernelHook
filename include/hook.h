@@ -6,7 +6,7 @@
 #ifndef _KP_HOOK_H_
 #define _KP_HOOK_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 typedef enum
 {

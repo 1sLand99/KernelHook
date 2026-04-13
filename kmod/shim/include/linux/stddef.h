@@ -6,6 +6,6 @@
 #ifndef _FAKE_LINUX_STDDEF_H
 #define _FAKE_LINUX_STDDEF_H
 
-#include <ktypes.h>  /* provides NULL, offsetof */
+#include <types.h>  /* provides NULL, offsetof */
 
 #endif /* _FAKE_LINUX_STDDEF_H */

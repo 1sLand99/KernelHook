@@ -47,22 +47,22 @@
 
 `tests/kmod/Makefile` 按内核版本自动配置：
 
-| 特性 | 条件 | 效果 |
-|------|------|------|
-| `-mcmodel=large` | 内核 <= 4.x | 避免 4.x 模块加载器不支持的 ADRP 重定位 |
-| `-fsanitize=kcfi` | 内核 >= 6.1 | 为 6.1+ 内核启用 kCFI 元数据 |
-| `THIS_MODULE_SIZE=0x800` | 所有版本 | 填充到 0x800，`kmod_loader` 运行时 shrink 到实际设备大小 |
-| `MODULE_INIT_OFFSET` | 按版本 | GKI 预设值；`kmod_loader` 通过 vendor 内省覆盖 |
+| 特性                       | 条件        | 效果                                                       |
+| -------------------------- | ----------- | ---------------------------------------------------------- |
+| `-mcmodel=large`         | 内核 <= 4.x | 避免 4.x 模块加载器不支持的 ADRP 重定位                    |
+| `-fsanitize=kcfi`        | 内核 >= 6.1 | 为 6.1+ 内核启用 kCFI 元数据                               |
+| `THIS_MODULE_SIZE=0x800` | 所有版本    | 填充到 0x800，`kmod_loader` 运行时 shrink 到实际设备大小 |
+| `MODULE_INIT_OFFSET`     | 按版本      | GKI 预设值；`kmod_loader` 通过 vendor 内省覆盖           |
 
 ## CRC 提取
 
 `scripts/extract_avd_crcs.py` 从宿主机的 `kernel-ranchu` 镜像中提取符号 CRC。自动检测三种 ksymtab 条目格式：
 
-| 格式 | 大小 | 适用内核 | CRC 大小 |
-|------|------|---------|----------|
-| prel32 | 12B | 5.10+ | 4B |
-| 绝对指针 | 16B | 4.x | 4B 或 8B |
-| 绝对指针+CFI | 24B | 5.4 | 4B |
+| 格式         | 大小 | 适用内核 | CRC 大小 |
+| ------------ | ---- | -------- | -------- |
+| prel32       | 12B  | 5.10+    | 4B       |
+| 绝对指针     | 16B  | 4.x      | 4B 或 8B |
+| 绝对指针+CFI | 24B  | 5.4      | 4B       |
 
 对于未重定位的内核镜像（4.14 及更早版本），工具会回退到通过 `/proc/kallsyms` 中的 `__ksymtab_<sym>` 地址查找。
 
@@ -74,11 +74,11 @@ python3 scripts/extract_avd_crcs.py -s emulator-5554 module_layout printk memcpy
 
 ## 已知限制
 
-| 内核版本 | 问题 | 根因 |
-|---------|------|------|
-| 3.18 (API 25-27) | 跳过 | 大模块加载挂起（MOVW 重定位开销过大） |
-| 5.4 (API 30) | 已修复 | 原因：`_error_injection_whitelist` 段溢出 + `exit_off` 预设错误（0x350→0x340） |
-| Pixel_36 | 启动超时 | AVD 系统镜像无法启动；API 36 由 Pixel_36.1 覆盖 |
+| 内核版本         | 问题     | 根因                                                                                |
+| ---------------- | -------- | ----------------------------------------------------------------------------------- |
+| 3.18 (API 25-27) | 跳过     | 大模块加载挂起（MOVW 重定位开销过大）                                               |
+| 5.4 (API 30)     | 已修复   | 原因：`_error_injection_whitelist` 段溢出 + `exit_off` 预设错误（0x350→0x340） |
+| Pixel_36         | 启动超时 | AVD 系统镜像无法启动；API 36 由 Pixel_36.1 覆盖                                     |
 
 ## 创建测试用 AVD
 

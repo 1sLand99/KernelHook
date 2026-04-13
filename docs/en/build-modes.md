@@ -39,11 +39,11 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 
 ```c
 #include "../../kmod/shim/shim.h"
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
-#include <hmem.h>
+#include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
 #include "../../kmod/src/mem_ops.h"

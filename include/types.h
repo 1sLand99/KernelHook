@@ -3,8 +3,8 @@
  * Copyright (C) 2026 bmax121.
  */
 
-#ifndef _KP_KTYPES_H_
-#define _KP_KTYPES_H_
+#ifndef _KP_TYPES_H_
+#define _KP_TYPES_H_
 
 #ifdef __USERSPACE__
 
@@ -52,7 +52,7 @@ typedef __SIZE_TYPE__ size_t;
  * Defined in ALL modes (freestanding, kbuild, userspace). Each is
  * #ifndef-guarded so if kernel headers (linux/compiler_attributes.h)
  * or libc already provided them, we defer to those. In kbuild mode
- * our ktypes.h only forwards to <linux/types.h>/<linux/stddef.h>
+ * our types.h only forwards to <linux/types.h>/<linux/stddef.h>
  * which do NOT always pull in compiler_attributes.h transitively,
  * so code like `static __noinline` would otherwise expand to bare
  * `__noinline__` tokens and break parsing.
@@ -99,4 +99,4 @@ typedef __SIZE_TYPE__ size_t;
 #define offsetof(TYPE, MEMBER) __builtin_offsetof(TYPE, MEMBER)
 #endif
 
-#endif /* _KP_KTYPES_H_ */
+#endif /* _KP_TYPES_H_ */

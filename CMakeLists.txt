@@ -26,7 +26,7 @@ endif()
 
 # --- Library sources ---
 set(LIB_SOURCES
-    src/hmem.c
+    src/memory.c
     src/arch/arm64/inline.c
     src/arch/arm64/insn.c
     src/arch/arm64/transit.c

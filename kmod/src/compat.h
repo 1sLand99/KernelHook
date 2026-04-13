@@ -2,7 +2,7 @@
 #ifndef _KMOD_COMPAT_H_
 #define _KMOD_COMPAT_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 extern int kmod_kernel_major;
 extern int kmod_kernel_minor;

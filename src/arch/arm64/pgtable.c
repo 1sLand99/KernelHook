@@ -4,7 +4,7 @@
  * ARM64 page table walking and permission modification.
  */
 
-#include <ktypes.h>
+#include <types.h>
 #include <log.h>
 #include <pgtable.h>
 
@@ -15,7 +15,7 @@
  * kh_pgtable_init/entry/modify_entry_kernel are stubs. See the #else
  * branch at the end of this file. */
 
-#include <ksyms.h>
+#include <symbol.h>
 
 /* Runtime page configuration */
 uint64_t page_shift = 12; /* Default 4K pages */

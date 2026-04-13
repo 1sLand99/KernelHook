@@ -86,8 +86,8 @@ endif
 FS_TEST_SRCS := test_main.c test_hook_kernel.c mem_ops.c log.c transit_setup.c
 FS_ASM_SRCS  := plt_stub.S
 FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
-                $(KH_ROOT)/src/hmem.c \
-                $(KH_ROOT)/src/ksyms.c \
+                $(KH_ROOT)/src/memory.c \
+                $(KH_ROOT)/src/symbol.c \
                 $(KH_ROOT)/src/arch/arm64/inline.c \
                 $(KH_ROOT)/src/arch/arm64/transit.c \
                 $(KH_ROOT)/src/arch/arm64/insn.c \

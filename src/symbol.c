@@ -3,8 +3,8 @@
  * Copyright (C) 2026 bmax121.
  */
 
-#include <ktypes.h>
-#include <ksyms.h>
+#include <types.h>
+#include <symbol.h>
 #include <hook.h>
 #include <log.h>
 

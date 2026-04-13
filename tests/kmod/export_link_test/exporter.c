@@ -15,8 +15,8 @@
  */
 
 #include "shim.h"
-#include <ktypes.h>
-#include <ksyms.h>
+#include <types.h>
+#include <symbol.h>
 #include "../../../kmod/src/compat.h"
 
 MODULE_LICENSE("GPL");

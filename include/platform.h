@@ -6,7 +6,7 @@
 #ifndef _KP_PLATFORM_H_
 #define _KP_PLATFORM_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 /* ---- Platform detection ---- */
 

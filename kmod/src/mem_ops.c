@@ -16,9 +16,9 @@
 #else
 #include <asm/set_memory.h>
 #endif
-#include <hmem.h>
+#include <memory.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
 
 /* ========================================================================
@@ -232,7 +232,7 @@ void kmod_hook_mem_cleanup(void)
      * vfree() internally calls clear_page() which writes to the pages.
      * We must restore write permission before freeing, otherwise the
      * write to RO pages causes a fatal exception (clear_page panic). */
-    /* hook_mem_rox_pool_base/size declared in hmem.h */
+    /* hook_mem_rox_pool_base/size declared in memory.h */
     uint64_t rox_base = hook_mem_rox_pool_base();
     uint64_t rox_size = hook_mem_rox_pool_size();
     if (rox_base && rox_size) {

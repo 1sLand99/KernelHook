@@ -12,7 +12,7 @@
 #else
 #include <stdarg.h>
 #endif
-#include <ksyms.h>
+#include <symbol.h>
 
 #include <hook.h>
 #include <log.h>

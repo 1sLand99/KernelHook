@@ -70,10 +70,10 @@
 #endif
 
 #if !defined(KH_SDK_MODE)
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <hmem.h>
-#include <ksyms.h>
+#include <memory.h>
+#include <symbol.h>
 #include <arch/arm64/pgtable.h>
 #endif
 #include "mem_ops.h"

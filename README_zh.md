@@ -41,7 +41,7 @@ adb shell dmesg | grep hello_hook
 | `src/arch/arm64/transit.c` | 中转桩 + 回调分发 |
 | `src/arch/arm64/pgtable.c` | 页表遍历 + PTE 修改 |
 | `src/hook.c` | Hook 链 API（hook/unhook/hook_wrap） |
-| `src/hmem.c` | ROX/RW 内存池的位图分配器 |
+| `src/memory.c` | ROX/RW 内存池的位图分配器 |
 | `kmod/` | SDK、链接脚本、shim 头文件 |
 | `tools/kmod_loader/` | 自适应模块加载器 |
 | `examples/` | hello_hook、fp_hook、hook_chain、hook_wrap_args、ksyms_lookup |

@@ -9,7 +9,7 @@
 #ifndef _KP_REMOTE_HOOK_H_
 #define _KP_REMOTE_HOOK_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 #ifdef __USERSPACE__
 

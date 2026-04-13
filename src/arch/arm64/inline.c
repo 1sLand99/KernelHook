@@ -8,7 +8,7 @@
 #include <insn.h>
 #include <pgtable.h>
 #include <log.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <linux/set_memory.h>
 
 typedef uint32_t inst_type_t;

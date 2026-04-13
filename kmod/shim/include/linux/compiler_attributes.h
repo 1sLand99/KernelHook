@@ -6,6 +6,6 @@
 #ifndef _FAKE_LINUX_COMPILER_ATTRIBUTES_H
 #define _FAKE_LINUX_COMPILER_ATTRIBUTES_H
 
-#include <ktypes.h>  /* provides __packed, __aligned, __section, etc. */
+#include <types.h>  /* provides __packed, __aligned, __section, etc. */
 
 #endif /* _FAKE_LINUX_COMPILER_ATTRIBUTES_H */

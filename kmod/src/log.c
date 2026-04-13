@@ -12,7 +12,7 @@
 #else
 #include <stdarg.h>
 #endif
-#include <ksyms.h>
+#include <symbol.h>
 
 /* hook.h provides KCFI_EXEMPT — pure macros, kbuild-safe after the
  * ptrauth.h gating added earlier on this branch. */

@@ -10,10 +10,10 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <hmem.h>
-#include <ksyms.h>
+#include <memory.h>
+#include <symbol.h>
 #include <log.h>
 
 #include <arch/arm64/pgtable.h>

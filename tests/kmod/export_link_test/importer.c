@@ -9,7 +9,7 @@
  */
 
 #include "shim.h"
-#include <ktypes.h>
+#include <types.h>
 #include <kernelhook/kh_symvers.h>
 
 MODULE_LICENSE("GPL");
@@ -17,7 +17,7 @@ MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook Ring 2 importer test");
 
 /* Re-declare the two symbols we reference. Signatures match include/hook.h /
- * include/ksyms.h, but we avoid including them so this TU stays minimal. */
+ * include/symbol.h, but we avoid including them so this TU stays minimal. */
 extern uint64_t ksyms_lookup(const char *name);
 extern int hook_wrap(void *func, int argno, void *before, void *after,
                      void *udata, int priority);

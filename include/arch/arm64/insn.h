@@ -6,7 +6,7 @@
 #ifndef _KP_ARM64_INSN_H_
 #define _KP_ARM64_INSN_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 #define HOOK_INTO_BRANCH_FUNC
 

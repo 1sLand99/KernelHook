@@ -15,8 +15,8 @@
 #ifndef _KERNELHOOK_HOOK_H_
 #define _KERNELHOOK_HOOK_H_
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 
 #endif

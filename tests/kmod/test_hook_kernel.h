@@ -2,7 +2,7 @@
 #ifndef _TEST_HOOK_KERNEL_H_
 #define _TEST_HOOK_KERNEL_H_
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
 
 __attribute__((__noinline__)) uint64_t target_zero_args(void);

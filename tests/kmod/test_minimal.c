@@ -1,5 +1,5 @@
 /* Minimal freestanding .ko test — only printk */
-#include <ktypes.h>
+#include <types.h>
 
 extern int _printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 

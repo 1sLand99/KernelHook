@@ -21,7 +21,7 @@
 
 #ifdef __linux__
 #include <hook.h>
-#include <hmem.h>
+#include <memory.h>
 #include <hmem_user.h>
 #include <sys/mman.h>
 #include <unistd.h>

@@ -3,7 +3,7 @@
 
 #include "test_framework.h"
 #include <hook.h>
-#include <hmem.h>
+#include <memory.h>
 #include <hmem_user.h>
 
 /* Target function — padded to >= 16 bytes for trampoline. */

@@ -18,7 +18,7 @@
 #error "shim.h is freestanding-only; kbuild code must include <linux/*> directly"
 #endif
 
-#include <ktypes.h>
+#include <types.h>
 
 /* ---- .modinfo section entries ---- */
 

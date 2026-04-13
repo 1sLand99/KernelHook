@@ -4,8 +4,8 @@
  * Userspace hook_mem_ops_t backends using platform.h abstraction.
  */
 
-#include <ktypes.h>
-#include <hmem.h>
+#include <types.h>
+#include <memory.h>
 #include <platform.h>
 #include <hmem_user.h>
 

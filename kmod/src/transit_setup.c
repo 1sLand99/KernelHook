@@ -10,7 +10,7 @@
 
 #include <linux/string.h>
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
 #include <log.h>
 

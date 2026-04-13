@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Unit tests for the bitmap allocator (hmem.c).
+ * Unit tests for the bitmap allocator (memory.c).
  */
 
 #include "test_framework.h"
 #include <hmem_user.h>
-#include <hmem.h>
+#include <memory.h>
 #include <hook.h>
 
-/* Block size matches hmem.c internal BLOCK_SIZE */
+/* Block size matches memory.c internal BLOCK_SIZE */
 #define BLOCK_SIZE 64
 
 /* ---- Setup/teardown helpers ---- */

@@ -3,7 +3,7 @@
  * Copyright (C) 2026 bmax121.
  * Userspace log function definition.
  * Separated from hook.c to avoid pulling the entire hook chain
- * when only the logging subsystem is needed (e.g., hmem.c).
+ * when only the logging subsystem is needed (e.g., memory.c).
  */
 
 #include <stdio.h>

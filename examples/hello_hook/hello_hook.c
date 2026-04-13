@@ -19,11 +19,11 @@
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
-#include <hmem.h>
+#include <memory.h>
 #include <arch/arm64/pgtable.h>
 #include "../../kmod/src/compat.h"
 #include "../../kmod/src/mem_ops.h"
@@ -32,11 +32,11 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
-#include <hmem.h>
+#include <memory.h>
 #include <arch/arm64/pgtable.h>
 #endif
 

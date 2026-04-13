@@ -7,7 +7,7 @@
 
 #include "test_framework.h"
 #include <hook.h>
-#include <hmem.h>
+#include <memory.h>
 #include <hmem_user.h>
 
 /* ---- Shared callback-state ---- */

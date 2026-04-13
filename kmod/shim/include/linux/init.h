@@ -7,7 +7,7 @@
 #ifndef _FAKE_LINUX_INIT_H
 #define _FAKE_LINUX_INIT_H
 
-#include <ktypes.h>  /* __section */
+#include <types.h>  /* __section */
 
 #ifndef __init
 #define __init __section(".init.text")

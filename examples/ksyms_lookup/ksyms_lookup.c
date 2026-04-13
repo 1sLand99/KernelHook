@@ -18,9 +18,9 @@
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
 #include "../../kmod/src/compat.h"
 #else
@@ -28,9 +28,9 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 #include <log.h>
 #endif
 

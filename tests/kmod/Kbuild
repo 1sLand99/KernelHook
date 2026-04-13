@@ -17,8 +17,8 @@ obj-m := kh_test.o
 kh_test-y := test_main.o test_hook_kernel.o \
     mem_ops.o log.o transit_setup.o plt_stub.o \
     ../../src/hook.o \
-    ../../src/hmem.o \
-    ../../src/ksyms.o \
+    ../../src/memory.o \
+    ../../src/symbol.o \
     ../../src/arch/arm64/inline.o \
     ../../src/arch/arm64/transit.o \
     ../../src/arch/arm64/insn.o \

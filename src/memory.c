@@ -4,8 +4,8 @@
  * Memory management: bitmap allocator with separate ROX and RW pools.
  */
 
-#include <ktypes.h>
-#include <hmem.h>
+#include <types.h>
+#include <memory.h>
 #include <hook.h>
 #include <log.h>
 

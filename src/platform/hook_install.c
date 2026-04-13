@@ -7,7 +7,7 @@
  * platform_set_rw / platform_set_rx + icache flush.
  */
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
 #include <log.h>
 #include <platform.h>

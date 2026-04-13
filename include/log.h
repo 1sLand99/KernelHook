@@ -6,7 +6,7 @@
 #ifndef _KP_LOG_H_
 #define _KP_LOG_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 /* Log function pointer, resolved via ksyms at init time (printk or similar) */
 typedef int (*log_func_t)(const char *fmt, ...);

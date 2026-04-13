@@ -1,6 +1,6 @@
 # API Reference
 
-Header: `<hook.h>`, `<ksyms.h>`
+Header: `<hook.h>`, `<symbol.h>`
 
 ## Inline Hook
 
@@ -127,7 +127,7 @@ Type-safe convenience wrappers, analogous to `hook_wrapN`.
 
 ## Symbol Resolution
 
-Header: `<ksyms.h>`
+Header: `<symbol.h>`
 
 ### `ksyms_init`
 

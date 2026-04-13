@@ -14,7 +14,7 @@
  *   memcpy(&rox->transit[2], _transit, (uintptr_t)_transit_end - (uintptr_t)_transit);
  */
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
 
 /* Platform-appropriate section attribute for transit stubs.

@@ -3,10 +3,10 @@
  * Copyright (C) 2026 bmax121.
  */
 
-#ifndef _KP_HMEM_H_
-#define _KP_HMEM_H_
+#ifndef _KP_MEMORY_H_
+#define _KP_MEMORY_H_
 
-#include <ktypes.h>
+#include <types.h>
 
 /* External allocator/permission callbacks.
  * alloc must return page-aligned memory. */
@@ -43,4 +43,4 @@ uint32_t hook_mem_rw_used_blocks(void);
 uint64_t hook_mem_rox_pool_base(void);
 uint64_t hook_mem_rox_pool_size(void);
 
-#endif /* _KP_HMEM_H_ */
+#endif /* _KP_MEMORY_H_ */

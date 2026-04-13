@@ -34,8 +34,8 @@ kernelhook-y := \
     src/export.o \
     plt/plt_stub.o \
     ../src/hook.o \
-    ../src/hmem.o \
-    ../src/ksyms.o \
+    ../src/memory.o \
+    ../src/symbol.o \
     ../src/arch/arm64/inline.o \
     ../src/arch/arm64/transit.o \
     ../src/arch/arm64/insn.o \

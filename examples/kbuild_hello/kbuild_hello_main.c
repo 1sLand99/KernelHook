@@ -24,9 +24,9 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 
-#include <ktypes.h>
+#include <types.h>
 #include <hook.h>
-#include <ksyms.h>
+#include <symbol.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");

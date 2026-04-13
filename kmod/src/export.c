@@ -15,8 +15,8 @@
  */
 
 #include <hook.h>
-#include <hmem.h>
-#include <ksyms.h>
+#include <memory.h>
+#include <symbol.h>
 #include <linux/export.h>
 
 #define KH_EXPORT(sym) EXPORT_SYMBOL(sym)
