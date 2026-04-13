@@ -114,7 +114,7 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
     CALL_BEFORES(rw, &fargs);
 
     if (!fargs.skip_origin) {
-        uint64_t fn = rox->hook.relo_addr;
+        uintptr_t fn = rox->hook.relo_addr;
         /* FPAC safety: each BLR below is the point where SP must be stable.
          * The relocated code at fn may begin with PACIASP, which signs LR
          * using the current SP.  Do not insert SP-modifying code between
@@ -247,7 +247,7 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
          * documented in transit_body — function pointer hooks call the
          * original function (origin_fp) which enters at its own natural
          * entry point with its own PAC context, not relocated code. */
-        uint64_t fn = rox->hook.origin_fp;
+        uintptr_t fn = rox->hook.origin_fp;
         switch (argno) {
         case 0:
             fargs.ret = ((origin0_t)fn)();

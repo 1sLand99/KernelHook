@@ -21,7 +21,7 @@
 #define RW_BITMAP_SIZE      ((RW_TOTAL_BLOCKS + 7) / 8)
 
 /* Cached page size, set once during init */
-static uint64_t hmem_page_size = 4096;
+static uintptr_t hmem_page_size = 4096;
 
 /* Page alignment helpers */
 #define PAGE_ALIGN_DOWN(addr) ((addr) & ~(hmem_page_size - 1))
@@ -31,8 +31,8 @@ static uint64_t hmem_page_size = 4096;
 /* ---- bitmap_pool_t ---- */
 
 typedef struct {
-    uint64_t pool_base;
-    uint64_t pool_size;
+    uintptr_t pool_base;
+    uintptr_t pool_size;
     uint8_t *bitmap;
     uint32_t total_blocks;
     uint32_t used_blocks;
@@ -52,7 +52,7 @@ static uint8_t rw_bitmap[RW_BITMAP_SIZE];
 #define ORIGIN_MAP_MAX 128
 
 struct origin_map_entry {
-    uint64_t origin_addr;
+    uintptr_t origin_addr;
     void *rox_ptr;
 };
 
@@ -121,7 +121,7 @@ static void *bitmap_alloc(bitmap_pool_t *pool, size_t size)
 
     pool->used_blocks += blocks_needed;
 
-    void *ptr = (void *)(pool->pool_base + (uint64_t)start * pool->block_size);
+    void *ptr = (void *)(pool->pool_base + (uintptr_t)start * pool->block_size);
     return ptr;
 }
 
@@ -130,7 +130,7 @@ static void bitmap_free(bitmap_pool_t *pool, void *ptr, size_t size)
     if (!pool->pool_base || !ptr || size == 0)
         return;
 
-    uint64_t addr = (uint64_t)ptr;
+    uintptr_t addr = (uintptr_t)ptr;
     if (addr < pool->pool_base || addr >= pool->pool_base + pool->pool_size)
         return;
 
@@ -149,7 +149,7 @@ static void bitmap_free(bitmap_pool_t *pool, void *ptr, size_t size)
 /* ---- Pool init/cleanup helpers ---- */
 
 static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
-                     uint64_t pool_size, const hook_mem_ops_t *ops, const char *label)
+                     uintptr_t pool_size, const hook_mem_ops_t *ops, const char *label)
 {
     if (!ops || !ops->alloc) {
         pr_err("hmem: %s pool has no allocator", label);
@@ -172,11 +172,11 @@ static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
     /* Ensure ROX pool has correct permissions (RX). */
     if (ops->set_memory_ro && ops->set_memory_x) {
         uint32_t numpages = (uint32_t)(pool_size / hmem_page_size);
-        ops->set_memory_ro((uint64_t)base, numpages);
-        ops->set_memory_x((uint64_t)base, numpages);
+        ops->set_memory_ro((uintptr_t)base, numpages);
+        ops->set_memory_x((uintptr_t)base, numpages);
     }
 
-    pool->pool_base = (uint64_t)base;
+    pool->pool_base = (uintptr_t)base;
     pool->pool_size = pool_size;
     pool->bitmap = bitmap;
     pool->total_blocks = (uint32_t)(pool_size / BLOCK_SIZE);
@@ -199,7 +199,7 @@ static void pool_cleanup(bitmap_pool_t *pool)
 
 /* ---- Public API ---- */
 
-int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, uint64_t page_sz)
+int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, uintptr_t page_sz)
 {
     if (page_sz)
         hmem_page_size = page_sz;
@@ -228,12 +228,12 @@ void hook_mem_cleanup(void)
     pr_info("hmem: memory manager cleaned up");
 }
 
-uint64_t hook_mem_rox_pool_base(void)
+uintptr_t hook_mem_rox_pool_base(void)
 {
     return g_rox_pool.pool_base;
 }
 
-uint64_t hook_mem_rox_pool_size(void)
+uintptr_t hook_mem_rox_pool_size(void)
 {
     return g_rox_pool.pool_size;
 }
@@ -263,9 +263,9 @@ int hook_mem_rox_write_enable(void *ptr, size_t size)
     if (!ptr || size == 0)
         return -1;
 
-    uint64_t addr = (uint64_t)ptr;
-    uint64_t ps = PAGE_ALIGN_DOWN(addr);
-    uint64_t pe = PAGE_ALIGN_UP(addr + size);
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t ps = PAGE_ALIGN_DOWN(addr);
+    uintptr_t pe = PAGE_ALIGN_UP(addr + size);
     int numpages = PAGES_IN_RANGE(ps, pe);
 
     if (g_rox_pool.ops.set_memory_rw)
@@ -280,9 +280,9 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     if (!ptr || size == 0)
         return -1;
 
-    uint64_t addr = (uint64_t)ptr;
-    uint64_t ps = PAGE_ALIGN_DOWN(addr);
-    uint64_t pe = PAGE_ALIGN_UP(addr + size);
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t ps = PAGE_ALIGN_DOWN(addr);
+    uintptr_t pe = PAGE_ALIGN_UP(addr + size);
     int numpages = PAGES_IN_RANGE(ps, pe);
 
     int rc = 0;
@@ -307,7 +307,7 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     return 0;
 }
 
-int hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
+int hook_mem_register_origin(uintptr_t origin_addr, void *rox_ptr)
 {
     if (!origin_addr || !rox_ptr)
         return -1;
@@ -330,7 +330,7 @@ int hook_mem_register_origin(uint64_t origin_addr, void *rox_ptr)
     return 0;
 }
 
-void hook_mem_unregister_origin(uint64_t origin_addr)
+void hook_mem_unregister_origin(uintptr_t origin_addr)
 {
     for (int32_t i = 0; i < origin_map_count; i++) {
         if (origin_map[i].origin_addr == origin_addr) {
@@ -342,7 +342,7 @@ void hook_mem_unregister_origin(uint64_t origin_addr)
     }
 }
 
-void *hook_mem_get_rox_from_origin(uint64_t origin_addr)
+void *hook_mem_get_rox_from_origin(uintptr_t origin_addr)
 {
     if (!origin_addr)
         return NULL;
@@ -354,7 +354,7 @@ void *hook_mem_get_rox_from_origin(uint64_t origin_addr)
     return NULL;
 }
 
-void *hook_mem_get_rw_from_origin(uint64_t origin_addr)
+void *hook_mem_get_rw_from_origin(uintptr_t origin_addr)
 {
     hook_chain_rox_t *rox = (hook_chain_rox_t *)hook_mem_get_rox_from_origin(origin_addr);
     if (rox && rox->rw)

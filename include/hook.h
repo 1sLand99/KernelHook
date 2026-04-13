@@ -121,10 +121,10 @@ enum hook_type
 typedef struct
 {
     /* in */
-    uint64_t func_addr;
-    uint64_t origin_addr;
-    uint64_t replace_addr;
-    uint64_t relo_addr;
+    uintptr_t func_addr;
+    uintptr_t origin_addr;
+    uintptr_t replace_addr;
+    uintptr_t relo_addr;
     /* out */
     int32_t tramp_insts_num;
     int32_t relo_insts_num;
@@ -160,7 +160,7 @@ typedef struct
 
 #define HOOK_FARGS_COMMON                                                                    \
     void *chain;                                                                             \
-    int skip_origin;                                                                         \
+    int32_t skip_origin;                                                                         \
     hook_local_t *local;                                                                     \
     uint64_t ret;
 
@@ -275,8 +275,8 @@ typedef struct hook_chain_rw
 typedef struct
 {
     uintptr_t fp_addr;
-    uint64_t replace_addr;
-    uint64_t origin_fp;
+    uintptr_t replace_addr;
+    uintptr_t origin_fp;
 } fp_hook_t __aligned(8);
 
 /* ---- ROX/RW split: function pointer hook chain ---- */
@@ -311,7 +311,7 @@ static inline int is_bad_address(void *addr)
 #else
 static inline int is_bad_address(void *addr)
 {
-    return ((uint64_t)addr & 0x8000000000000000) != 0x8000000000000000;
+    return ((uintptr_t)addr & 0x8000000000000000) != 0x8000000000000000;
 }
 #endif
 

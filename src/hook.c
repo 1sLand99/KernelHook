@@ -27,9 +27,9 @@ static void flush_code_cache(void *addr, size_t size)
 #ifdef __USERSPACE__
     __builtin___clear_cache((char *)addr, (char *)addr + size);
 #else
-    uint64_t start = (uint64_t)addr;
-    uint64_t end = start + size;
-    uint64_t line;
+    uintptr_t start = (uintptr_t)addr;
+    uintptr_t end = start + size;
+    uintptr_t line;
     for (line = start; line < end; line += 4)
         asm volatile("dc cvau, %0" :: "r"(line) : "memory");
     asm volatile("dsb ish" ::: "memory");
@@ -141,7 +141,7 @@ hook_err_t hook(void *func, void *replace, void **backup)
         return HOOK_BAD_ADDRESS;
 
     func = STRIP_PAC(func);
-    uint64_t func_addr = (uint64_t)func;
+    uintptr_t func_addr = (uintptr_t)func;
 
     if (hook_mem_get_rox_from_origin(func_addr))
         return HOOK_DUPLICATED;
@@ -158,8 +158,8 @@ hook_err_t hook(void *func, void *replace, void **backup)
     hook_t *h = &rox->hook;
     h->func_addr = func_addr;
     h->origin_addr = func_addr;
-    h->replace_addr = (uint64_t)replace;
-    h->relo_addr = (uint64_t)h->relo_insts;
+    h->replace_addr = (uintptr_t)replace;
+    h->relo_addr = (uintptr_t)h->relo_insts;
     h->tramp_insts_num = 0;
     h->relo_insts_num = 0;
 
@@ -191,7 +191,7 @@ void unhook(void *func)
         return;
 
     func = STRIP_PAC(func);
-    uint64_t func_addr = (uint64_t)func;
+    uintptr_t func_addr = (uintptr_t)func;
     hook_chain_rox_t *rox =
         (hook_chain_rox_t *)hook_mem_get_rox_from_origin(func_addr);
     if (!rox)
@@ -211,7 +211,7 @@ hook_err_t hook_wrap(void *func, int32_t argno, void *before,
         return HOOK_BAD_ADDRESS;
 
     func = STRIP_PAC(func);
-    uint64_t func_addr = (uint64_t)func;
+    uintptr_t func_addr = (uintptr_t)func;
     hook_chain_rox_t *rox;
     hook_chain_rw_t *rw;
 
@@ -241,8 +241,8 @@ hook_err_t hook_wrap(void *func, int32_t argno, void *before,
         hook_t *h = &rox->hook;
         h->func_addr = func_addr;
         h->origin_addr = func_addr;
-        h->replace_addr = (uint64_t)&rox->transit[2]; /* transit stub entry */
-        h->relo_addr = (uint64_t)h->relo_insts;
+        h->replace_addr = (uintptr_t)&rox->transit[2]; /* transit stub entry */
+        h->relo_addr = (uintptr_t)h->relo_insts;
         h->tramp_insts_num = 0;
         h->relo_insts_num = 0;
 
@@ -283,7 +283,7 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
         return;
 
     func = STRIP_PAC(func);
-    uint64_t func_addr = (uint64_t)func;
+    uintptr_t func_addr = (uintptr_t)func;
     hook_chain_rox_t *rox =
         (hook_chain_rox_t *)hook_mem_get_rox_from_origin(func_addr);
     if (!rox || !rox->rw)
@@ -305,9 +305,9 @@ void hook_unwrap_remove(void *func, void *before, void *after, int remove)
  * Function pointer hook API
  * ================================================================== */
 
-static void write_fp_value(uintptr_t fp_addr, uint64_t value)
+static void write_fp_value(uintptr_t fp_addr, uintptr_t value)
 {
-    *(volatile uint64_t *)fp_addr = value;
+    *(volatile uintptr_t *)fp_addr = value;
 }
 
 /* ---- Simple function pointer hook (no chain) ---- */
@@ -319,7 +319,7 @@ void fp_hook(uintptr_t fp_addr, void *replace, void **backup)
 
     fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
     *backup = *(void **)fp_addr;
-    write_fp_value(fp_addr, (uint64_t)replace);
+    write_fp_value(fp_addr, (uintptr_t)replace);
 }
 
 void fp_unhook(uintptr_t fp_addr, void *backup)
@@ -328,7 +328,7 @@ void fp_unhook(uintptr_t fp_addr, void *backup)
         return;
 
     fp_addr = (uintptr_t)STRIP_PAC(fp_addr);
-    write_fp_value(fp_addr, (uint64_t)backup);
+    write_fp_value(fp_addr, (uintptr_t)backup);
 }
 
 /* ---- Chain-based function pointer hook ---- */
@@ -368,8 +368,8 @@ hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before,
 
         fp_hook_t *h = &rox->hook;
         h->fp_addr = fp_addr;
-        h->origin_fp = *(uint64_t *)fp_addr;
-        h->replace_addr = (uint64_t)&rox->transit[2];
+        h->origin_fp = *(uintptr_t *)fp_addr;
+        h->replace_addr = (uintptr_t)&rox->transit[2];
 
         fp_hook_chain_setup_transit(rox);
 
