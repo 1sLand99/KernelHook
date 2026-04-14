@@ -483,6 +483,7 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
 }
 
 /* Called from kmod init after ksyms resolution */
+__attribute__((no_sanitize("kcfi")))
 void kh_write_insts_init(void)
 {
 #ifdef KMOD_FREESTANDING
