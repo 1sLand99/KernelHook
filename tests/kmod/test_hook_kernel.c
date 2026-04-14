@@ -1442,3 +1442,24 @@ void test_concurrent_add_remove(void)
 }
 
 #endif /* CONFIG_KH_CHAIN_RCU && !KMOD_FREESTANDING && !KH_SDK_MODE */
+
+/* ================================================================
+ * Diagnostic: test_pgt_dryrun
+ *
+ * Walk the kernel page table for __arm64_sys_getpid without writing
+ * anything. Emits pr_info for each level (via pgtable_entry_kernel's
+ * embedded tracing) and logs the returned entry pointer + value.
+ * Used to confirm whether the walker returns a BLOCK descriptor
+ * address (not a leaf PTE) for kernel text VAs on real hardware.
+ * ================================================================ */
+void test_pgt_dryrun(void)
+{
+    uint64_t addr = ksyms_lookup("__arm64_sys_getpid");
+    if (!addr) { KH_SKIP("pgt_dryrun: __arm64_sys_getpid not found"); return; }
+    extern uint64_t *pgtable_entry_kernel(uint64_t va);
+    uint64_t *entry = pgtable_entry_kernel(addr);
+    pr_info(KH_TEST_TAG "pgt_dryrun: addr=%llx entry=%p val=%llx\n",
+            (unsigned long long)addr, entry,
+            entry ? (unsigned long long)*entry : 0ULL);
+    KH_ASSERT(entry != NULL, "pgt_dryrun: walker returned non-NULL");
+}

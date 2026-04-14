@@ -414,6 +414,9 @@ static int __init kh_test_init(void)
         pkvm_protected = has_pkvm_cmdline && !is_emulator;
     }
 
+    pr_info(KH_TEST_TAG "--- Phase 5b-pre: Diagnostic pgtable dry-run probe ---\n");
+    test_pgt_dryrun();
+
     pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
     if (pkvm_protected) {
         KH_SKIP("Phase 5b (real kernel function hooks): skipped on pKVM-protected kernel (kvm-arm.mode=protected)");

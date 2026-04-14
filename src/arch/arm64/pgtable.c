@@ -201,6 +201,11 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         if (!pxd_entry_va)
             return 0;
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
+        pr_info("pgt_walk: lv=%lld idx=%llu entry_va=%llx desc=%llx type=%s",
+                (long long)lv, (unsigned long long)pxd_index,
+                (unsigned long long)pxd_entry_va, (unsigned long long)pxd_desc,
+                ((pxd_desc & 0x3) == 0x3) ? "TABLE" :
+                ((pxd_desc & 0x3) == 0x1) ? "BLOCK" : "INVALID");
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
             pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
@@ -219,6 +224,10 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
             break;
     }
 
+    pr_info("pgt_walk: va=%llx returning entry_va=%llx block_lv=%llu",
+            (unsigned long long)va,
+            (unsigned long long)pxd_entry_va,
+            (unsigned long long)block_lv);
     return (uint64_t *)pxd_entry_va;
 }
 
