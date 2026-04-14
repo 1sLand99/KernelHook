@@ -105,6 +105,22 @@ static inline int pte_valid_cont(uint64_t pte)
 int kh_pgtable_init(void);
 uint64_t *pgtable_entry(uint64_t pgd, uint64_t va);
 uint64_t *pgtable_entry_kernel(uint64_t va);
+uint64_t pgtable_phys_kernel(uint64_t va);
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value);
+
+/* Flush TLB for a single kernel VA. Matches KernelPatch
+ * kernel/include/pgtable.h flush_tlb_kernel_page:
+ *   pre-TLBI dsb(ishst) to order the preceding PTE store,
+ *   tlbi vaale1is (VA All ASIDs, EL1, Inner Shareable — ASID-agnostic,
+ *   correct for kernel global pages),
+ *   post-TLBI dsb(ish) + isb() to complete the TLB maintenance. */
+static inline void kh_flush_tlb_kernel_page(uint64_t va)
+{
+    uint64_t addr = (va >> 12) & ((1ULL << 44) - 1);
+    asm volatile("dsb ishst" ::: "memory");
+    asm volatile("tlbi vaale1is, %0" :: "r"(addr) : "memory");
+    asm volatile("dsb ish" ::: "memory");
+    asm volatile("isb" ::: "memory");
+}
 
 #endif /* _KP_ARM64_PGTABLE_H_ */

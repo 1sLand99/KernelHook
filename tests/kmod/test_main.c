@@ -363,81 +363,20 @@ static int __init kh_test_init(void)
      * These tests resolve real kernel functions via ksyms_lookup() and
      * verify hook chain installation, priority ordering, dynamic
      * add/remove, and cleanup — without invoking the hooked functions.
-     *
-     * Runtime gate: pKVM-protected kernels (Pixel 6+, `kvm-arm.mode=
-     * protected` on the cmdline) forbid any modification of kernel
-     * image PTEs from EL1. Our write_insts_at PTE-direct fallback
-     * triggers an unhandled EL1 data abort (RO page), panicking the
-     * machine. AVDs don't run pKVM, so they're fine. Detect and skip.
      * ---------------------------------------------------------------- */
-    /* Identify whether this is an Android Emulator (ranchu/goldfish)
-     * or a physical device. AVDs run under QEMU's emulated hypervisor
-     * and let EL1 patch kernel .text freely even when their cmdline
-     * says kvm-arm.mode=protected; physical Pixel / pKVM kernels
-     * actually enforce stage-2 RO and any EL1 write (or even a
-     * copy_to_kernel_nofault probe) panics. Distinguish purely from
-     * cmdline: the emulator adds `mac80211_hwsim.radios=` (virtual
-     * Wi-Fi driver) and `earlyprintk=ttyAMA0` (QEMU UART) — neither
-     * appears on real devices. */
-    int pkvm_protected = 0;
-    {
-#if defined(KMOD_FREESTANDING)
-        extern uint64_t ksyms_lookup(const char *name);
-        char **pcmdline = (char **)(uintptr_t)ksyms_lookup("saved_command_line");
-        const char *cmdline = pcmdline ? *pcmdline : NULL;
-#else
-        extern char *saved_command_line;
-        const char *cmdline = saved_command_line;
-#endif
-        int has_pkvm_cmdline = 0;
-        int is_emulator = 0;
-        if (cmdline) {
-            /* Simple substring scans, no libc. */
-            const char *needles_pkvm = "kvm-arm.mode=protected";
-            const char *needles_avd[] = { "mac80211_hwsim.radios=", "ranchu", NULL };
-            size_t plen = 22;
-            for (const char *p = cmdline; *p; p++) {
-                size_t i = 0;
-                while (i < plen && p[i] == needles_pkvm[i]) i++;
-                if (i == plen) { has_pkvm_cmdline = 1; break; }
-            }
-            for (int k = 0; needles_avd[k] && !is_emulator; k++) {
-                size_t nl = 0;
-                while (needles_avd[k][nl]) nl++;
-                for (const char *p = cmdline; *p; p++) {
-                    size_t i = 0;
-                    while (i < nl && p[i] == needles_avd[k][i]) i++;
-                    if (i == nl) { is_emulator = 1; break; }
-                }
-            }
-        }
-        pkvm_protected = has_pkvm_cmdline && !is_emulator;
-    }
-
-    pr_info(KH_TEST_TAG "--- Phase 5b-pre: Diagnostic pgtable dry-run probe ---\n");
-    test_pgt_dryrun();
-
     pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
-    if (pkvm_protected) {
-        KH_SKIP("Phase 5b (real kernel function hooks): skipped on pKVM-protected kernel (kvm-arm.mode=protected)");
-    } else {
-        test_getpid_single_hook();
-        test_faccessat_chain_priority();
-        test_filp_open_skip_origin();
-        test_vfs_read_write_hook();
-        test_dynamic_add_remove();
-    }
+    test_getpid_single_hook();
+    test_faccessat_chain_priority();
+    test_filp_open_skip_origin();
+    test_vfs_read_write_hook();
+    test_dynamic_add_remove();
 
     /* ------------------------------------------------------------------
      * Phase 5c: Stress tests
      * ---------------------------------------------------------------- */
     pr_info(KH_TEST_TAG "--- Phase 5c: Stress tests ---\n");
-    if (pkvm_protected) {
-        KH_SKIP("Phase 5c (stress hooks on do_faccessat): skipped on pKVM-protected kernel");
-    } else {
-        test_stress_chain_fill_drain();
-        test_stress_rapid_hook_unhook();
-    }
+    test_stress_chain_fill_drain();
+    test_stress_rapid_hook_unhook();
 
     /* ------------------------------------------------------------------
      * Phase 5d: Concurrency tests

@@ -201,11 +201,6 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         if (!pxd_entry_va)
             return 0;
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
-        pr_info("pgt_walk: lv=%lld idx=%llu entry_va=%llx desc=%llx type=%s",
-                (long long)lv, (unsigned long long)pxd_index,
-                (unsigned long long)pxd_entry_va, (unsigned long long)pxd_desc,
-                ((pxd_desc & 0x3) == 0x3) ? "TABLE" :
-                ((pxd_desc & 0x3) == 0x1) ? "BLOCK" : "INVALID");
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
             pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
@@ -224,10 +219,6 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
             break;
     }
 
-    pr_info("pgt_walk: va=%llx returning entry_va=%llx block_lv=%llu",
-            (unsigned long long)va,
-            (unsigned long long)pxd_entry_va,
-            (unsigned long long)block_lv);
     return (uint64_t *)pxd_entry_va;
 }
 
@@ -236,18 +227,45 @@ uint64_t *pgtable_entry_kernel(uint64_t va)
     return pgtable_entry(kernel_pgd, va);
 }
 
-/* Inline TLB flush using TLBI instruction instead of kernel function pointers
- * to avoid kCFI type mismatch. TLBI VALE1IS flushes the TLB entry for the
- * given VA at EL1 (inner-shareable). */
-static inline void kh_flush_tlb_kernel_page(uint64_t va)
+/* Compute physical address backing a kernel VA by walking page tables.
+ * Mirrors KernelPatch kernel/base/start.c:176-202. Handles mid-level
+ * BLOCK descriptors (computes pa = block_pa + (va & (block_size - 1))).
+ * Returns 0 on invalid walk. */
+__attribute__((no_sanitize("kcfi")))
+uint64_t pgtable_phys_kernel(uint64_t va)
 {
-    /* TLBI VALE1IS operand: bits[43:0] = VA[55:12], bits[63:48] = ASID.
-     * Kernel pages use ASID 0. Must mask upper bits to avoid
-     * sign-extension of kernel VAs leaking into the ASID field. */
-    uint64_t addr = (va >> 12) & ((1ULL << 44) - 1);
-    asm volatile("tlbi vale1is, %0" :: "r"(addr) : "memory");
+    uint64_t pxd_bits = page_shift - 3;
+    uint64_t pxd_ptrs = 1UL << pxd_bits;
+    uint64_t pxd_pa = 0;
+    uint64_t pxd_va = kernel_pgd;
+
+    uint64_t kva_min = page_offset ? page_offset : 0xffffff8000000000ULL;
+    if (pxd_va < kva_min || va < kva_min)
+        return 0;
+
+    for (uint64_t line = pxd_va; line < pxd_va + page_size; line += 64)
+        asm volatile("dc civac, %0" :: "r"(line) : "memory");
     asm volatile("dsb ish" ::: "memory");
-    asm volatile("isb" ::: "memory");
+
+    for (int64_t lv = 4 - (int64_t)page_level; lv < 4; lv++) {
+        uint64_t pxd_shift = pxd_bits * (uint64_t)(4 - lv) + 3;
+        uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
+        uint64_t pxd_desc = ((uint64_t *)pxd_va)[pxd_index];
+        uint8_t kind = pxd_desc & 0x3;
+        if (kind == 0x3) {
+            pxd_pa = pxd_desc & (((1UL << (48 - page_shift)) - 1) << page_shift);
+        } else if (kind == 0x1) {
+            uint64_t bits = (uint64_t)(3 - lv) * pxd_bits;
+            uint64_t block_bits = bits + page_shift;
+            pxd_pa = (pxd_desc & (((1UL << (48 - block_bits)) - 1) << block_bits)) +
+                     (va & (((1UL << bits) - 1) << page_shift));
+            break;
+        } else {
+            return 0;
+        }
+        pxd_va = kh_phys_to_virt(pxd_pa);
+    }
+    return pxd_pa ? pxd_pa + (va & (page_size - 1)) : 0;
 }
 
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
@@ -299,6 +317,12 @@ uint64_t *pgtable_entry_kernel(uint64_t va)
 {
     (void)va;
     return (uint64_t *)0;
+}
+
+uint64_t pgtable_phys_kernel(uint64_t va)
+{
+    (void)va;
+    return 0;
 }
 
 void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)

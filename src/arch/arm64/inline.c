@@ -367,6 +367,121 @@ static set_memory_fn_t kh_set_memory_x;
 /* 0 = PTE modification (fallback), 1 = set_memory (default when available) */
 static int kh_write_mode = 0;
 
+/* Alias-page mechanism for kernel-text patching (primary path).
+ * Mirrors KernelPatch kernel/base/hotpatch.c. vmalloc'd at init;
+ * at patch time the alias PTE is rewritten to point at the target
+ * text's physical page, we call aarch64_insn_patch_text_nosync
+ * through the alias VA (which lives in vmalloc RW area), then
+ * restore the original alias PTE. alias_pte == 0 means the alias
+ * path is unavailable and we must fall through to PTE-direct. */
+static void *kh_alias_page = NULL;
+static uint64_t *kh_alias_entry = NULL;
+static uint64_t kh_alias_pte = 0;
+static uint64_t kh_table_pa_mask = 0;
+
+typedef int (*aarch64_insn_patch_text_nosync_fn_t)(void *addr, uint32_t insn);
+static aarch64_insn_patch_text_nosync_fn_t kh_aarch64_insn_patch_text_nosync = NULL;
+
+typedef void *(*vmalloc_fn_t)(unsigned long size);
+typedef void (*vfree_fn_t)(const void *addr);
+static vmalloc_fn_t kh_vmalloc = NULL;
+/* Reserved for future cleanup paths; resolved but not invoked today. */
+static vfree_fn_t kh_vfree __attribute__((unused)) = NULL;
+
+#ifndef KMOD_FREESTANDING
+/* Forward decl for kbuild mode — prototype matches arch/arm64/kernel/patching.c.
+ * Symbol is EXPORT_SYMBOL_GPL so we can take its address. */
+extern int aarch64_insn_patch_text_nosync(void *addr, u32 insn);
+#endif
+
+__attribute__((no_sanitize("kcfi")))
+static void kh_alias_init(void)
+{
+#ifdef KMOD_FREESTANDING
+    kh_vmalloc = (vmalloc_fn_t)(uintptr_t)ksyms_lookup("vmalloc");
+    kh_vfree = (vfree_fn_t)(uintptr_t)ksyms_lookup("vfree");
+    kh_aarch64_insn_patch_text_nosync = (aarch64_insn_patch_text_nosync_fn_t)(uintptr_t)
+        ksyms_lookup("aarch64_insn_patch_text_nosync");
+#else
+    kh_vmalloc = (vmalloc_fn_t)vmalloc;
+    kh_vfree = (vfree_fn_t)vfree;
+    kh_aarch64_insn_patch_text_nosync = (aarch64_insn_patch_text_nosync_fn_t)
+        aarch64_insn_patch_text_nosync;
+#endif
+
+    kh_table_pa_mask = (((1UL << (48 - page_shift)) - 1) << page_shift);
+
+    if (!kh_vmalloc || !kh_aarch64_insn_patch_text_nosync) {
+        pr_warn("alias: symbols missing (vmalloc=%llx patch_text=%llx); "
+                "alias path disabled, will use fallback",
+                (unsigned long long)(uintptr_t)kh_vmalloc,
+                (unsigned long long)(uintptr_t)kh_aarch64_insn_patch_text_nosync);
+        return;
+    }
+
+    kh_alias_page = kh_vmalloc(page_size);
+    if (!kh_alias_page) {
+        pr_err("alias: vmalloc failed");
+        return;
+    }
+
+    kh_alias_entry = pgtable_entry_kernel((uintptr_t)kh_alias_page);
+    if (kh_alias_entry) {
+        uint64_t pte = *kh_alias_entry;
+        /* Require a leaf PTE (type bits == 0x3). If the alias VA lands
+         * on a block descriptor our single-page PTE rewrite trick would
+         * be wrong (we'd remap a whole block). On GKI Pixel 6 vmalloc
+         * pages are always PTE-leaf; guard anyway. */
+        if ((pte & 0x3) == 0x3) {
+            kh_alias_pte = pte;
+        } else {
+            pr_warn("alias: entry %llx is not a leaf PTE (desc=%llx); "
+                    "alias path disabled",
+                    (unsigned long long)(uintptr_t)kh_alias_entry,
+                    (unsigned long long)pte);
+        }
+    }
+
+    pr_info("alias: page=%llx entry=%llx pte=%llx table_pa_mask=%llx",
+            (unsigned long long)(uintptr_t)kh_alias_page,
+            (unsigned long long)(uintptr_t)kh_alias_entry,
+            (unsigned long long)kh_alias_pte,
+            (unsigned long long)kh_table_pa_mask);
+}
+
+__attribute__((no_sanitize("kcfi")))
+static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+{
+    if (!kh_alias_page || !kh_alias_pte || !kh_aarch64_insn_patch_text_nosync)
+        return -1;  /* alias path unavailable; signal fallback */
+
+    for (int32_t i = 0; i < count; i++) {
+        uintptr_t target = va + (uintptr_t)i * 4;
+        uint64_t phys = pgtable_phys_kernel(target);
+        if (!phys) return -1;
+
+        /* Rewrite alias_page's PTE to target's physical page while
+         * retaining the alias's vmalloc RW attributes. */
+        *kh_alias_entry = (kh_alias_pte & ~kh_table_pa_mask) |
+                          (phys & ~(uint64_t)(page_size - 1));
+        asm volatile("dsb ish" ::: "memory");
+        kh_flush_tlb_kernel_page((uintptr_t)kh_alias_page);
+
+        void *alias_va = (void *)((uintptr_t)kh_alias_page +
+                                  (target & (page_size - 1)));
+
+        int rc = kh_aarch64_insn_patch_text_nosync(alias_va, insts[i]);
+
+        /* Always restore, even on error. */
+        *kh_alias_entry = kh_alias_pte;
+        asm volatile("dsb ish" ::: "memory");
+        kh_flush_tlb_kernel_page((uintptr_t)kh_alias_page);
+
+        if (rc) return rc;
+    }
+    return 0;
+}
+
 /* Called from kmod init after ksyms resolution */
 void kh_write_insts_init(void)
 {
@@ -396,6 +511,10 @@ void kh_write_insts_init(void)
           (unsigned long long)(uintptr_t)kh_set_memory_rw,
           (unsigned long long)(uintptr_t)kh_set_memory_ro,
           (unsigned long long)(uintptr_t)kh_set_memory_x);
+
+    /* Must run after pgtable_init (for page_shift, kh_phys_to_virt,
+     * kernel_pgd) and after symbol resolution. */
+    kh_alias_init();
 }
 
 __attribute__((no_sanitize("kcfi")))
@@ -413,68 +532,47 @@ static void write_insts_via_pte(uintptr_t va, uint32_t *insts, int32_t count)
         return;
     uint64_t ori_pte = *entry;
 
-    /* Clear PTE_RDONLY + set PTE_DBM, then flush TLB for this VA.
-     * TLBI operand: bits[43:0] = VA[55:12], bits[63:48] = ASID (0 for kernel). */
+    /* Clear PTE_RDONLY + set PTE_DBM, then flush TLB for this VA. */
     *entry = (ori_pte | PTE_DBM) & ~PTE_RDONLY;
-    {
-        uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
-        asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
-        asm volatile("dsb ish" ::: "memory");
-        asm volatile("isb" ::: "memory");
-    }
+    kh_flush_tlb_kernel_page(va);
 
     for (int32_t i = 0; i < count; i++)
         *((uint32_t *)va + i) = insts[i];
 
     /* Restore original PTE and flush TLB */
     *entry = ori_pte;
-    {
-        uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
-        asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
-        asm volatile("dsb ish" ::: "memory");
-        asm volatile("isb" ::: "memory");
-    }
+    kh_flush_tlb_kernel_page(va);
 }
 
 __attribute__((no_sanitize("kcfi")))
 static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
 {
-    if (kh_write_mode == 0) {
-        write_insts_via_pte(va, insts, count);
-    } else {
-        /* set_memory mode: use kernel's set_memory_rw/ro/x API to
-         * temporarily make the page writable. Works for vmalloc-backed
-         * pages (module .text, BPF, kprobes). Refuses kernel image
-         * mappings — `set_memory_rw` calls `find_vm_area()` which
-         * returns NULL for kernel text and the call returns -EINVAL.
-         * In that case, fall back to direct PTE modification. */
+    /* Primary: alias-page + aarch64_insn_patch_text_nosync (KP path).
+     * aarch64_insn_patch_text_nosync handles icache internally. */
+    if (write_insts_via_alias(va, insts, count) == 0)
+        return;
+
+    /* Fallback 1: set_memory (for vmalloc-backed pages only). */
+    if (kh_write_mode == 1 && kh_set_memory_rw && kh_set_memory_ro) {
         unsigned long page_va = va & ~(page_size - 1);
-
-        if (!kh_set_memory_rw || !kh_set_memory_ro) {
-            pr_err("write_insts_at: set_memory functions not resolved");
-            return;
-        }
-
-        if (kh_set_memory_rw(page_va, 1) != 0) {
-            /* Kernel image mapping or non-vmalloc VA: PTE-direct path. */
-            write_insts_via_pte(va, insts, count);
-        } else {
+        if (kh_set_memory_rw(page_va, 1) == 0) {
             for (int32_t i = 0; i < count; i++)
                 *((uint32_t *)va + i) = insts[i];
-
             kh_set_memory_ro(page_va, 1);
             if (kh_set_memory_x)
                 kh_set_memory_x(page_va, 1);
+            goto flush_icache;
         }
     }
 
-    /* Flush icache — use original VA (the one CPUs execute from) */
-    {
-        uintptr_t addr;
-        for (addr = va; addr < va + (uintptr_t)count * 4; addr += 4)
-            asm volatile("ic ivau, %0" :: "r"(addr) : "memory");
-        asm volatile("dsb ish\n\tisb" ::: "memory");
-    }
+    /* Fallback 2: direct PTE modification. */
+    write_insts_via_pte(va, insts, count);
+
+flush_icache:
+    /* Fallback paths do not flush icache themselves; do it here. */
+    for (uintptr_t addr = va; addr < va + (uintptr_t)count * 4; addr += 4)
+        asm volatile("ic ivau, %0" :: "r"(addr) : "memory");
+    asm volatile("dsb ish\n\tisb" ::: "memory");
 }
 
 void hook_install(hook_t *hook)

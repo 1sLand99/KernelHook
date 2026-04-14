@@ -38,9 +38,6 @@ void test_filp_open_skip_origin(void);
 void test_vfs_read_write_hook(void);
 void test_dynamic_add_remove(void);
 
-/* Diagnostic dry-run probe */
-void test_pgt_dryrun(void);
-
 /* Stress tests */
 void test_stress_chain_fill_drain(void);
 void test_stress_rapid_hook_unhook(void);

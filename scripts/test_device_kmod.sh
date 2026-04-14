@@ -78,20 +78,6 @@ if [ "$SELINUX" = "Enforcing" ]; then
     dsu "setenforce 0 2>&1 || true" >/dev/null || true
 fi
 
-# Inform-only notice: on pKVM-enabled kernels (`kvm-arm.mode=protected`
-# in /proc/cmdline, e.g. Pixel 6+ production builds), Phase 5b/5c tests
-# in kh_test.ko will skip themselves at runtime — EL2 forbids any EL1
-# write to kernel image PTEs. Phase 4 module-local hook tests work
-# normally, as does Phase 5a (security-mechanism gating by config).
-# This is not a hard block; let the run proceed so Phase 4 can be
-# verified on-device.
-PKVM_MODE=$(dsu "cat /proc/cmdline 2>/dev/null | tr ' ' '\n' | grep -E '^kvm-arm\.mode=protected$'" 2>&1 | tr -d '[:space:]')
-if [ -n "$PKVM_MODE" ]; then
-    printf "  ${YELLOW}NOTE${RESET} pKVM-protected kernel detected (%s).\n" "$PKVM_MODE"
-    printf "       Phase 5b/5c (hooks on real kernel functions) will skip at runtime.\n"
-    printf "       Phase 4 (module-local hook tests) runs normally.\n"
-fi
-
 # Build kmod_loader if missing.
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 if [ ! -f "$LOADER" ]; then
