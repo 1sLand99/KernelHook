@@ -177,11 +177,31 @@ test_avd() {
     # Load and test — run in single shell session to stay root
     adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
     adb -s emulator-5554 shell "dmesg -c" >/dev/null 2>&1 || true
+
+    # Live kernel-log capture: survives emulator death so kernel panic
+    # (BUG:/Oops/Call trace) is retrievable even when init_module aborts
+    # the VM. /dev/kmsg is unbuffered and strictly ordered, unlike
+    # `dmesg -w` which pipes through userspace buffering.
+    local live_dmesg="/tmp/kh_dmesg_${avd}.log"
+    rm -f "$live_dmesg"
+    adb -s emulator-5554 shell "cat /dev/kmsg" > "$live_dmesg" 2>&1 &
+    local dmesg_pid=$!
+    sleep 1
+
     local load_output=""
     local load_rc=1
     # Use host-side timeout (60s) since Android 'timeout' may not exist on old AVDs
     load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
     load_rc=$?
+
+    # Let adb drain any in-flight kernel-log lines before closing the pipe.
+    sleep 1
+    kill "$dmesg_pid" 2>/dev/null || true
+    wait "$dmesg_pid" 2>/dev/null || true
+    if [ -s "$live_dmesg" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$live_dmesg"; then
+        printf "  ${YELLOW}Kernel panic captured in live kmsg:${RESET}\n"
+        awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$live_dmesg" | sed 's/^/       /'
+    fi
 
     if ! echo "$load_output" | grep -qi "loaded"; then
         printf "  ${RED}FAIL${RESET} $avd: module load failed\n"
