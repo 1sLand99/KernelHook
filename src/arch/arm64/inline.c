@@ -399,44 +399,55 @@ void kh_write_insts_init(void)
 }
 
 __attribute__((no_sanitize("kcfi")))
+static void write_insts_via_pte(uintptr_t va, uint32_t *insts, int32_t count)
+{
+    /* PTE mode: directly modify the page table entry to clear
+     * PTE_RDONLY, write instructions, then restore the original PTE.
+     * This is the KernelPatch approach — works on all kernels
+     * regardless of rodata_full or set_memory availability, and on
+     * kernel-image VAs where set_memory_rw refuses (kernel text is
+     * not in vmalloc area, so set_memory's find_vm_area returns NULL
+     * and the call returns -EINVAL). */
+    uint64_t *entry = pgtable_entry_kernel(va);
+    if (!entry)
+        return;
+    uint64_t ori_pte = *entry;
+
+    /* Clear PTE_RDONLY + set PTE_DBM, then flush TLB for this VA.
+     * TLBI operand: bits[43:0] = VA[55:12], bits[63:48] = ASID (0 for kernel). */
+    *entry = (ori_pte | PTE_DBM) & ~PTE_RDONLY;
+    {
+        uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
+        asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
+        asm volatile("dsb ish" ::: "memory");
+        asm volatile("isb" ::: "memory");
+    }
+
+    for (int32_t i = 0; i < count; i++)
+        *((uint32_t *)va + i) = insts[i];
+
+    /* Restore original PTE and flush TLB */
+    *entry = ori_pte;
+    {
+        uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
+        asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
+        asm volatile("dsb ish" ::: "memory");
+        asm volatile("isb" ::: "memory");
+    }
+}
+
+__attribute__((no_sanitize("kcfi")))
 static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
 {
     if (kh_write_mode == 0) {
-        /* PTE mode: directly modify the page table entry to clear
-         * PTE_RDONLY, write instructions, then restore the original PTE.
-         * This is the KernelPatch approach — works on all kernels
-         * regardless of rodata_full or set_memory availability. */
-        /* Walk page table to find PTE, inline all modifications to avoid
-         * function calls that might trigger kCFI checks on ksyms pointers. */
-        uint64_t *entry = pgtable_entry_kernel(va);
-        if (!entry)
-            return;
-        uint64_t ori_pte = *entry;
-
-        /* Clear PTE_RDONLY + set PTE_DBM, then flush TLB for this VA.
-         * TLBI operand: bits[43:0] = VA[55:12], bits[63:48] = ASID (0 for kernel). */
-        *entry = (ori_pte | PTE_DBM) & ~PTE_RDONLY;
-        {
-            uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
-            asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
-            asm volatile("dsb ish" ::: "memory");
-            asm volatile("isb" ::: "memory");
-        }
-
-        for (int32_t i = 0; i < count; i++)
-            *((uint32_t *)va + i) = insts[i];
-
-        /* Restore original PTE and flush TLB */
-        *entry = ori_pte;
-        {
-            uint64_t tlbi_addr = (va >> 12) & ((1ULL << 44) - 1);
-            asm volatile("tlbi vale1is, %0" :: "r"(tlbi_addr) : "memory");
-            asm volatile("dsb ish" ::: "memory");
-            asm volatile("isb" ::: "memory");
-        }
+        write_insts_via_pte(va, insts, count);
     } else {
         /* set_memory mode: use kernel's set_memory_rw/ro/x API to
-         * temporarily make the page writable. */
+         * temporarily make the page writable. Works for vmalloc-backed
+         * pages (module .text, BPF, kprobes). Refuses kernel image
+         * mappings — `set_memory_rw` calls `find_vm_area()` which
+         * returns NULL for kernel text and the call returns -EINVAL.
+         * In that case, fall back to direct PTE modification. */
         unsigned long page_va = va & ~(page_size - 1);
 
         if (!kh_set_memory_rw || !kh_set_memory_ro) {
@@ -444,14 +455,17 @@ static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
             return;
         }
 
-        kh_set_memory_rw(page_va, 1);
+        if (kh_set_memory_rw(page_va, 1) != 0) {
+            /* Kernel image mapping or non-vmalloc VA: PTE-direct path. */
+            write_insts_via_pte(va, insts, count);
+        } else {
+            for (int32_t i = 0; i < count; i++)
+                *((uint32_t *)va + i) = insts[i];
 
-        for (int32_t i = 0; i < count; i++)
-            *((uint32_t *)va + i) = insts[i];
-
-        kh_set_memory_ro(page_va, 1);
-        if (kh_set_memory_x)
-            kh_set_memory_x(page_va, 1);
+            kh_set_memory_ro(page_va, 1);
+            if (kh_set_memory_x)
+                kh_set_memory_x(page_va, 1);
+        }
     }
 
     /* Flush icache — use original VA (the one CPUs execute from) */

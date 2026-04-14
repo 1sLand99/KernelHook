@@ -90,22 +90,28 @@ enum hook_type
 #endif
 
 /* ---- PAC stripping ----
- * On PAC-enabled binaries, function pointers carry signature bits in the
- * upper bytes.  Strip them at API entry so origin map lookups and address
- * comparisons use the raw code address.
+ * On PAC-enabled binaries, function pointers may carry signature bits in
+ * the upper byte(s). Strip them at API entry so origin-map lookups and
+ * address comparisons use the raw code address.
  *
- * Freestanding mode: use ptrauth_strip() when compiler supports PAC
- * (available via clang resource-dir headers). This also ensures the
- * compiler emits correct PAC-aware code generation for the entire TU.
- * Fall back to 48-bit VA mask when PAC is not available.
- * The mask is safe on non-PAC kernels (upper bits are already zero). */
+ * Strip must preserve the sign-extension of bit 55: kernel VAs have bits
+ * 63..56 == bit 55 == 1, user VAs have bits 63..56 == bit 55 == 0. A
+ * naive `& ((1<<48)-1)` mask breaks kernel pointers by zeroing the
+ * sign-extension, turning a valid kernel VA like 0xffffffc0_7a8ef034
+ * into a garbage 0x0000ffc0_7a8ef034.
+ *
+ * When the compiler supports PAC intrinsics we prefer ptrauth_strip().
+ * Otherwise we use an arithmetic shift (sign-extending bit 55) which
+ * matches XPACI semantics for VA_BITS<=48 kernels. For non-PAC
+ * freestanding builds there is no signing, so strip is identity. */
 #if defined(__ARM_FEATURE_PAC_DEFAULT) && defined(KMOD_FREESTANDING)
 #include <ptrauth.h>
 #define STRIP_PAC(ptr) ((void *)ptrauth_strip((void *)(ptr), ptrauth_key_asia))
 #elif defined(KMOD_FREESTANDING)
-#define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
+/* Non-PAC freestanding: no signing, identity preserves kernel VAs. */
+#define STRIP_PAC(ptr) ((void *)(ptr))
 #elif defined(__ARM_FEATURE_PAC_DEFAULT) && defined(__KERNEL__)
-#define STRIP_PAC(ptr) ((void *)((uintptr_t)(ptr) & ((1UL << 48) - 1UL)))
+#define STRIP_PAC(ptr) ((void *)(((intptr_t)(ptr) << 8) >> 8))
 #else
 #define STRIP_PAC(ptr) ((void *)(ptr))
 #endif
