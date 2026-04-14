@@ -173,14 +173,20 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
  *   x9-x12:    scratch for loading caller's stack args (caller-saved)
  */
 
+/* The `-mbranch-protection=bti` build flag makes clang emit a
+ * `BTI C` instruction as the first word of every function, which
+ * serves as the landing pad for indirect BLR (and BR when the
+ * branch register is x16/x17, which Linux tail calls use). That
+ * compiler-emitted BTI C is copied into transit[2] by memcpy,
+ * followed by our asm starting with `adr x16, .` at transit[3].
+ * No hand-written `bti jc` is needed — adding one would push the
+ * adr/sub arithmetic off by 4 bytes and corrupt the rox lookup. */
 TRANSIT_SECTION
 uint64_t _transit(void)
 {
     asm volatile(
-        /* BTI landing pad for BR-based trampoline */
-        "bti  jc\n\t"
         /* O(1) rox/rw lookup from self-pointer at transit[0..1] */
-        "adr  x16, .\n\t"                  /* x16 = &transit[3] (after bti)  */
+        "adr  x16, .\n\t"                  /* x16 = &transit[3] (after bti c) */
         "sub  x16, x16, #12\n\t"           /* x16 = &transit[0]              */
         "ldr  x16, [x16]\n\t"              /* x16 = rox                      */
         "mov  x17, %[rwoff]\n\t"           /* x17 = offsetof(rox, rw)        */
@@ -288,7 +294,8 @@ TRANSIT_SECTION
 uint64_t _fp_transit(void)
 {
     asm volatile(
-        "bti  jc\n\t"
+        /* Compiler-emitted `bti c` at offset 0 serves as the landing pad
+         * for the BLR from the fp target; no hand-written `bti jc` needed. */
         "adr  x16, .\n\t"
         "sub  x16, x16, #12\n\t"
         "ldr  x16, [x16]\n\t"

@@ -130,6 +130,8 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -DMODULE_NAME='"$(MODULE_NAME)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
+             -fno-optimize-sibling-calls \
+             -mbranch-protection=bti \
              -I$(KERNELHOOK_DIR)/shim/include \
              -I$(KH_ROOT)/include \
              -I$(KH_ROOT)/include/arch/arm64 \
@@ -140,6 +142,20 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
              $(KH_CFI_CFLAGS)
+# -fno-optimize-sibling-calls + -mbranch-protection=bti: Pixel production
+# kernels mark both kernel .text and module vmalloc .text with PROT_BTI.
+# That means:
+#   (a) indirect calls from our module into kernel (ksyms-resolved fn
+#       pointers) must be BLR — never tail-called via BR.
+#       `-fno-optimize-sibling-calls` forbids clang to rewrite
+#       `return fn(...)` as BR.
+#   (b) the kernel's BLR into our init_module / cleanup_module / any
+#       callback must land on a BTI_C (or BTI_JC) landing pad.
+#       `-mbranch-protection=bti` makes clang prefix every function
+#       entry with BTI_C. Without it, kernel-issued BLR into our
+#       init_module lands on a plain `STP X29,X30,...` instruction
+#       and raises a BTI exception — instant kernel panic on
+#       CONFIG_CFI_PERMISSIVE=n kernels like stock Pixel 6.
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)

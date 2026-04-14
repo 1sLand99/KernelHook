@@ -317,8 +317,14 @@ done:
     return rc;
 }
 
-/* Cached sizeof(struct module) from vendor .ko, populated by crc_from_vendor_ko */
+/* Cached vendor .ko struct_module geometry, populated by crc_from_vendor_ko.
+ * init/exit offsets are read from .rela.gnu.linkonce.this_module so physical
+ * devices whose running kernel doesn't exactly match a devices_table entry
+ * (e.g. Pixel 6 on 6.1.99 while the "6.1." preset hard-codes 0x140 but the
+ * actual kernel wants 0x170) can still resolve the right layout. */
 static uint32_t g_ko_this_module_size = 0;
+static uint32_t g_ko_init_off = 0;
+static uint32_t g_ko_exit_off = 0;
 static int ko_loaded = 0;
 
 /* Method 3: Scan vendor .ko files for __versions CRC */
@@ -385,9 +391,45 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
                                                       ".gnu.linkonce.this_module");
                     if (this_mod && this_mod->sh_size > 0)
                         g_ko_this_module_size = (uint32_t)this_mod->sh_size;
+
+                    /* Extract init_module / cleanup_module reloc offsets
+                     * from .rela.gnu.linkonce.this_module. This is the
+                     * ground-truth layout the running kernel expects;
+                     * Google has changed these offsets inside a single
+                     * x.y stable (e.g. 6.1.23 = 0x140, 6.1.99 = 0x170). */
+                    Shdr *rela = elf_find_section(ko_buf, keh,
+                                                  ".rela.gnu.linkonce.this_module");
+                    if (rela && rela->sh_entsize > 0 &&
+                        rela->sh_link < keh->e_shnum) {
+                        Shdr *symtab = (Shdr *)(ko_buf + keh->e_shoff +
+                                                rela->sh_link * keh->e_shentsize);
+                        Shdr *strtab = NULL;
+                        if (symtab->sh_link < keh->e_shnum) {
+                            strtab = (Shdr *)(ko_buf + keh->e_shoff +
+                                              symtab->sh_link * keh->e_shentsize);
+                        }
+                        if (symtab && strtab) {
+                            size_t nrela = rela->sh_size / rela->sh_entsize;
+                            for (size_t i = 0; i < nrela; i++) {
+                                Elf64_Rela *r = (Elf64_Rela *)(ko_buf +
+                                    rela->sh_offset + i * rela->sh_entsize);
+                                uint32_t sidx = ELF64_R_SYM(r->r_info);
+                                if (sidx == 0) continue;
+                                Elf64_Sym *s = (Elf64_Sym *)(ko_buf +
+                                    symtab->sh_offset + sidx * symtab->sh_entsize);
+                                const char *nm = (const char *)(ko_buf +
+                                    strtab->sh_offset + s->st_name);
+                                if (strcmp(nm, "init_module") == 0)
+                                    g_ko_init_off = (uint32_t)r->r_offset;
+                                else if (strcmp(nm, "cleanup_module") == 0)
+                                    g_ko_exit_off = (uint32_t)r->r_offset;
+                            }
+                        }
+                    }
                     fprintf(stderr, "kmod_loader: CRC source: %s (%d entries, "
-                            "this_module_size=0x%x)\n",
-                            path, ko_crc_count, g_ko_this_module_size);
+                            "this_module_size=0x%x, init_off=0x%x, exit_off=0x%x)\n",
+                            path, ko_crc_count, g_ko_this_module_size,
+                            g_ko_init_off, g_ko_exit_off);
                     pclose(fp);
                     goto ko_done;
                 }
@@ -419,6 +461,28 @@ int sizeof_struct_module_from_vendor_ko(uint32_t *out)
     }
     if (g_ko_this_module_size == 0) return -1;
     *out = g_ko_this_module_size;
+    return 0;
+}
+
+int init_offset_from_vendor_ko(uint32_t *out)
+{
+    if (!ko_loaded) {
+        uint32_t dummy;
+        crc_from_vendor_ko("module_layout", &dummy);
+    }
+    if (g_ko_init_off == 0) return -1;
+    *out = g_ko_init_off;
+    return 0;
+}
+
+int exit_offset_from_vendor_ko(uint32_t *out)
+{
+    if (!ko_loaded) {
+        uint32_t dummy;
+        crc_from_vendor_ko("module_layout", &dummy);
+    }
+    if (g_ko_exit_off == 0) return -1;
+    *out = g_ko_exit_off;
     return 0;
 }
 

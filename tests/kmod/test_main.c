@@ -363,20 +363,62 @@ static int __init kh_test_init(void)
      * These tests resolve real kernel functions via ksyms_lookup() and
      * verify hook chain installation, priority ordering, dynamic
      * add/remove, and cleanup — without invoking the hooked functions.
+     *
+     * Runtime gate: pKVM-protected kernels (Pixel 6+, `kvm-arm.mode=
+     * protected` on the cmdline) forbid any modification of kernel
+     * image PTEs from EL1. Our write_insts_at PTE-direct fallback
+     * triggers an unhandled EL1 data abort (RO page), panicking the
+     * machine. AVDs don't run pKVM, so they're fine. Detect and skip.
      * ---------------------------------------------------------------- */
+    /* Detect pKVM-protected kernel (e.g. Pixel 6 production). Any hook
+     * that patches kernel-image text (Phase 5b/5c tests use kernel
+     * functions like do_faccessat) would raise an unhandled RO write
+     * and panic the machine. AVDs and userdebug GKIs run without pKVM,
+     * so the tests execute normally there. */
+    int pkvm_protected = 0;
+    {
+#if defined(KMOD_FREESTANDING)
+        extern uint64_t ksyms_lookup(const char *name);
+        char **pcmdline = (char **)(uintptr_t)ksyms_lookup("saved_command_line");
+        const char *cmdline = pcmdline ? *pcmdline : NULL;
+#else
+        extern char *saved_command_line;
+        const char *cmdline = saved_command_line;
+#endif
+        if (cmdline) {
+            const char *p = cmdline;
+            const char *needle = "kvm-arm.mode=protected";
+            size_t nlen = 22;
+            while (*p) {
+                size_t i = 0;
+                while (i < nlen && p[i] == needle[i]) i++;
+                if (i == nlen) { pkvm_protected = 1; break; }
+                p++;
+            }
+        }
+    }
+
     pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
-    test_getpid_single_hook();
-    test_faccessat_chain_priority();
-    test_filp_open_skip_origin();
-    test_vfs_read_write_hook();
-    test_dynamic_add_remove();
+    if (pkvm_protected) {
+        KH_SKIP("Phase 5b (real kernel function hooks): skipped on pKVM-protected kernel (kvm-arm.mode=protected)");
+    } else {
+        test_getpid_single_hook();
+        test_faccessat_chain_priority();
+        test_filp_open_skip_origin();
+        test_vfs_read_write_hook();
+        test_dynamic_add_remove();
+    }
 
     /* ------------------------------------------------------------------
      * Phase 5c: Stress tests
      * ---------------------------------------------------------------- */
     pr_info(KH_TEST_TAG "--- Phase 5c: Stress tests ---\n");
-    test_stress_chain_fill_drain();
-    test_stress_rapid_hook_unhook();
+    if (pkvm_protected) {
+        KH_SKIP("Phase 5c (stress hooks on do_faccessat): skipped on pKVM-protected kernel");
+    } else {
+        test_stress_chain_fill_drain();
+        test_stress_rapid_hook_unhook();
+    }
 
     /* ------------------------------------------------------------------
      * Phase 5d: Concurrency tests

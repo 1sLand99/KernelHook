@@ -30,12 +30,18 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -DVERMAGIC_STRING='"$(VERMAGIC)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
+             -fno-optimize-sibling-calls \
+             -mbranch-protection=bti \
              -I$(KH_ROOT)/kmod/shim/include \
              -I$(KH_ROOT)/include -I$(KH_ROOT)/include/arch/arm64 \
              -I$(KH_ROOT)/kmod/shim \
              -I$(PWD) \
              -march=armv8.5-a -O2 -Wall -Wextra -Werror \
              -Wno-unused-parameter -Wno-unused-function
+# -fno-optimize-sibling-calls + -mbranch-protection=bti: see kmod/mk/kmod.mk
+# — Pixel BTI requires ksym-resolved indirect calls use BLR (not BR) and
+# every function entry to carry BTI_C so kernel-issued BLR (e.g. into
+# our init_module) lands on a legal target.
 
 # kCFI: only for 6.1+ kernels (CONFIG_CFI_CLANG uses kCFI).
 # 5.10/5.15 use shadow-based CFI — kCFI metadata causes panic.

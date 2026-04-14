@@ -8,6 +8,8 @@ extern int crc_from_vendor_ko(const char *sym, uint32_t *out);
 extern int crc_from_kallsyms(const char *sym, uint32_t *out);
 extern int crc_from_boot_image(const char *sym, uint32_t *out);
 extern int sizeof_struct_module_from_vendor_ko(uint32_t *out);
+extern int init_offset_from_vendor_ko(uint32_t *out);
+extern int exit_offset_from_vendor_ko(uint32_t *out);
 
 static const char *sym_for_value(value_id_t id)
 {
@@ -56,6 +58,31 @@ resolved_t strategy_probe_ondisk_module(value_id_t id, resolve_ctx_t *ctx)
         }
     }
 
-    /* Other struct_module offsets: punt to probe_disasm / probe_binary_search. */
+    /* VAL_MODULE_INIT_OFFSET / VAL_MODULE_EXIT_OFFSET: probe from vendor .ko's
+     * .rela.gnu.linkonce.this_module. This is the only source that survives
+     * Google's in-stable-release struct module layout changes (e.g. 6.1.23
+     * keeps init at 0x140 but 6.1.99 moves it to 0x170). devices_table
+     * entries only index by x.y prefix so they can't distinguish. */
+    if (id == VAL_MODULE_INIT_OFFSET) {
+        uint32_t v;
+        if (init_offset_from_vendor_ko(&v) == 0) {
+            out.available = 1;
+            out.u64_val = v;
+            strncpy(out.source_label, "probe_ondisk:vendor_ko_init_reloc",
+                    sizeof(out.source_label) - 1);
+            return out;
+        }
+    }
+    if (id == VAL_MODULE_EXIT_OFFSET) {
+        uint32_t v;
+        if (exit_offset_from_vendor_ko(&v) == 0) {
+            out.available = 1;
+            out.u64_val = v;
+            strncpy(out.source_label, "probe_ondisk:vendor_ko_exit_reloc",
+                    sizeof(out.source_label) - 1);
+            return out;
+        }
+    }
+
     return out;
 }

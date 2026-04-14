@@ -78,21 +78,18 @@ if [ "$SELINUX" = "Enforcing" ]; then
     dsu "setenforce 0 2>&1 || true" >/dev/null || true
 fi
 
-# Production Pixel / Samsung GKI kernels ship with
-# CONFIG_MODULE_SIG_PROTECT=y — a vendor-specific extension that blocks
-# init_module for unsigned modules even when CONFIG_MODULE_SIG_FORCE is
-# unset. Magisk root cannot bypass this (the check lives inside the
-# kernel's module loader, not userspace), and attempting to insmod
-# triggers a silent init skip or — worse — a kernel panic that reboots
-# the device. Detect the config up front and refuse rather than brick
-# the phone's uptime.
-SIG_PROTECT=$(dsu "zcat /proc/config.gz 2>/dev/null | grep -E '^CONFIG_MODULE_SIG_PROTECT='" 2>&1 | tr -d '[:space:]')
-if [ "$SIG_PROTECT" = "CONFIG_MODULE_SIG_PROTECT=y" ]; then
-    printf "  ${RED}REFUSE${RESET} kernel has CONFIG_MODULE_SIG_PROTECT=y.\n"
-    printf "         Vendor signature enforcement blocks unsigned module init;\n"
-    printf "         insmod typically reboots the device. Run this suite on a\n"
-    printf "         userdebug/eng kernel or an AVD instead (scripts/test_avd_kmod.sh).\n"
-    exit 3
+# Inform-only notice: on pKVM-enabled kernels (`kvm-arm.mode=protected`
+# in /proc/cmdline, e.g. Pixel 6+ production builds), Phase 5b/5c tests
+# in kh_test.ko will skip themselves at runtime — EL2 forbids any EL1
+# write to kernel image PTEs. Phase 4 module-local hook tests work
+# normally, as does Phase 5a (security-mechanism gating by config).
+# This is not a hard block; let the run proceed so Phase 4 can be
+# verified on-device.
+PKVM_MODE=$(dsu "cat /proc/cmdline 2>/dev/null | tr ' ' '\n' | grep -E '^kvm-arm\.mode=protected$'" 2>&1 | tr -d '[:space:]')
+if [ -n "$PKVM_MODE" ]; then
+    printf "  ${YELLOW}NOTE${RESET} pKVM-protected kernel detected (%s).\n" "$PKVM_MODE"
+    printf "       Phase 5b/5c (hooks on real kernel functions) will skip at runtime.\n"
+    printf "       Phase 4 (module-local hook tests) runs normally.\n"
 fi
 
 # Build kmod_loader if missing.
