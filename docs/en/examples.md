@@ -16,6 +16,17 @@
 |------|-------------|------|
 | **kh_root** | Privilege escalation via 3 syscall hooks — any caller of `/system/bin/kh_root` gets uid=0 | [kh-root-demo.md](kh-root-demo.md) |
 
+## Builds
+
+| Example         | Build (default)               | Mode  |
+|-----------------|-------------------------------|-------|
+| hello_hook      | `make module`                 | SDK   |
+| hook_chain      | `make module`                 | SDK   |
+| fp_hook         | `make module`                 | SDK   |
+| hook_wrap_args  | `make module`                 | SDK   |
+| ksyms_lookup    | `make module`                 | SDK   |
+| kbuild_hello    | `make -C /path/to/kernel M=…` | kbuild |
+
 ## hello_hook
 
 Hooks `do_sys_openat2` (or `do_sys_open` on older kernels) and logs the filename pointer for every `open()` syscall.
@@ -130,18 +141,19 @@ ksyms_lookup: nonexistent symbol = 0 (expected 0)
 
 ## Building Examples
 
-All examples support three build modes:
+The five multi-mode examples default to SDK (Mode B). `kbuild_hello` is
+kbuild-only (Mode C).
 
 ```bash
-# Mode A (Freestanding)
+# SDK (default) — depends on kernelhook.ko loaded on target
 cd examples/<name>
 make module
 
-# Mode B (SDK)
+# Freestanding fallback — self-contained .ko (no kernelhook.ko required)
 cd examples/<name>
-make -f Makefile.sdk module
+make -f Makefile.freestanding module
 
-# Mode C (Kbuild)
+# Kbuild standalone — full kernel-source out-of-tree build
 cd examples/<name>
-make -C /path/to/kernel M=$(pwd) modules
+make -C /path/to/kernel M=$(pwd)
 ```

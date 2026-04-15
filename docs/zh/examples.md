@@ -16,6 +16,17 @@
 |------|------|------|
 | **kh_root** | 通过 3 个 syscall hook 实现提权 —— 任何调 `/system/bin/kh_root` 的进程都获得 uid=0 | [kh-root-demo.md](kh-root-demo.md) |
 
+## 构建方式
+
+| 示例            | 构建命令（默认）              | 模式   |
+|-----------------|-------------------------------|--------|
+| hello_hook      | `make module`                 | SDK    |
+| hook_chain      | `make module`                 | SDK    |
+| fp_hook         | `make module`                 | SDK    |
+| hook_wrap_args  | `make module`                 | SDK    |
+| ksyms_lookup    | `make module`                 | SDK    |
+| kbuild_hello    | `make -C /path/to/kernel M=…` | kbuild |
+
 ## hello_hook
 
 Hook `do_sys_openat2`（旧内核上为 `do_sys_open`），记录每次 `open()` 系统调用的文件名指针。
@@ -130,18 +141,19 @@ ksyms_lookup: nonexistent symbol = 0 (expected 0)
 
 ## 构建示例
 
-所有示例都支持三种构建模式：
+五个多模式示例默认为 SDK 构建（模式 B）。`kbuild_hello` 仅支持 kbuild
+构建（模式 C）。
 
 ```bash
-# 模式 A（Freestanding）
+# SDK（默认）—— 依赖目标机器上已加载的 kernelhook.ko
 cd examples/<name>
 make module
 
-# 模式 B（SDK）
+# Freestanding 回退 —— 自包含 .ko（无需 kernelhook.ko）
 cd examples/<name>
-make -f Makefile.sdk module
+make -f Makefile.freestanding module
 
-# 模式 C（Kbuild）
+# Kbuild 独立构建 —— 基于完整内核源码的 out-of-tree 构建
 cd examples/<name>
-make -C /path/to/kernel M=$(pwd) modules
+make -C /path/to/kernel M=$(pwd)
 ```
