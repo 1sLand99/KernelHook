@@ -185,7 +185,64 @@ case "$KH_SUBCMD" in
             exit "$rc"
         fi
         ;;
-    sdk-consumer)  cmd_stub ;;
+    sdk-consumer)
+        kh_section_start "sdk-consumer: SDK ABI link verification"
+
+        # Pick first AVD or first non-emulator device (for Ring 3 step).
+        SERIAL="${KH_SUBCMD_ARGS[0]:-}"
+        if [ -z "$SERIAL" ]; then
+            SERIAL=$(adb devices 2>/dev/null \
+                | awk 'NR>1 && $2=="device" {print $1; exit}')
+        fi
+
+        pass=0; fail=0; skip=0
+
+        # Step 1: Ring 3 — minimal exporter + importer (needs adb).
+        if [ -z "$SERIAL" ]; then
+            printf "  ${KH_YELLOW}SKIP${KH_RESET} ring3 exporter+importer (no adb device)\n"
+            skip=$((skip+1))
+        elif (cd "$ROOT/tests/kmod/export_link_test" && make >/tmp/ring3_build.log 2>&1) \
+             && "$ROOT/tests/kmod/export_link_test/test_on_avd.sh" "$SERIAL"; then
+            pass=$((pass+1))
+            printf "  ${KH_GREEN}PASS${KH_RESET} ring3 exporter+importer\n"
+        else
+            fail=$((fail+1))
+            printf "  ${KH_RED}FAIL${KH_RESET} ring3 exporter+importer (see /tmp/ring3_build.log)\n"
+        fi
+
+        # Step 2: hello_hook.ko SDK link check (hermetic — no device required).
+        # (方案 C: kh_test.ko is freestanding-only; hello_hook.ko is the SDK
+        # consumer reference. We verify the SDK build produces a .ko whose
+        # undefined-symbol set is fully satisfied by kmod/exports.manifest.)
+        . "$ROOT/scripts/lib/detect_toolchain.sh"
+        NM="${KH_CROSS_COMPILE}nm"
+        [ -x "$NM" ] || NM="${KH_NDK_BIN}/llvm-nm"
+        if (cd "$ROOT/kmod" && make module >/tmp/sdkc_core.log 2>&1) \
+           && (cd "$ROOT/examples/hello_hook" && make -f Makefile.sdk module >/tmp/sdkc_hello.log 2>&1) \
+           && "$NM" -u "$ROOT/examples/hello_hook/hello_hook.ko" 2>/dev/null \
+                | awk '{print $NF}' | sort -u > /tmp/sdkc_undef.txt \
+           && awk '/^[a-zA-Z_]/ {print $1}' "$ROOT/kmod/exports.manifest" | sort -u > /tmp/sdkc_man.txt \
+           && [ -z "$(comm -23 /tmp/sdkc_undef.txt /tmp/sdkc_man.txt \
+                       | grep -E '^(hook|fp_hook|hook_chain|hook_mem|platform_|sync_|hmem_|kh_)')" ]; then
+            pass=$((pass+1))
+            printf "  ${KH_GREEN}PASS${KH_RESET} hello_hook.ko SDK consumer link\n"
+        else
+            fail=$((fail+1))
+            printf "  ${KH_RED}FAIL${KH_RESET} hello_hook.ko SDK consumer link\n"
+            printf "      see /tmp/sdkc_core.log /tmp/sdkc_hello.log\n"
+            printf "      missing: $(comm -23 /tmp/sdkc_undef.txt /tmp/sdkc_man.txt \
+                       | grep -E '^(hook|fp_hook|hook_chain|hook_mem|platform_|sync_|hmem_|kh_)' \
+                       | tr '\n' ' ')\n"
+        fi
+
+        if [ "$fail" -eq 0 ]; then
+            kh_section_end "sdk-consumer" PASS
+        else
+            kh_section_end "sdk-consumer" FAIL
+        fi
+        kh_summary_line "$pass" "$fail" "$skip"
+        [ "$fail" -eq 0 ]
+        ;;
     kbuild-verify)
         if [ "${#KH_SUBCMD_ARGS[@]}" -lt 2 ]; then
             printf "usage: scripts/test.sh kbuild-verify <ko-path> <expected-kver>\n" >&2
