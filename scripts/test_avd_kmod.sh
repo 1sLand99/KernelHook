@@ -3,12 +3,41 @@
 # Automated kmod test runner for all AVD emulators.
 #
 # Usage:
-#   ./scripts/test_avd_kmod.sh                  # test all AVDs
-#   ./scripts/test_avd_kmod.sh Pixel_31 Pixel_37 # test specific AVDs
+#   ./scripts/test_avd_kmod.sh                                  # sdk mode, all AVDs
+#   ./scripts/test_avd_kmod.sh Pixel_31 Pixel_37                # sdk mode, specific AVDs
+#   ./scripts/test_avd_kmod.sh --mode=freestanding              # legacy kh_test.ko Phase 6 + Ring 3 sweep
+#   ./scripts/test_avd_kmod.sh --mode=sdk Pixel_35              # explicit sdk mode + specific AVD
+#
+# Modes:
+#   sdk (default): build kernelhook.ko + examples/hello_hook/hello_hook.ko once,
+#                  two-step kmod_loader insmod per AVD, verify hello_hook dmesg marker,
+#                  reverse-order rmmod.
+#   freestanding:  per-AVD rebuild of tests/kmod/kh_test.ko against the AVD's
+#                  kernel release, single-load, run the Phase 6 / Ring 3 sweep.
 
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Flag parser: --mode={sdk,freestanding} (default sdk). Remaining positional
+# arguments are AVD names. Bash-3.2 / macOS-safe: the `"${NEW_ARGS[@]+...}"`
+# form avoids the "unbound variable" error that `set -u` would raise on an
+# empty array re-expansion.
+KH_MODE="sdk"
+NEW_ARGS=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mode=*) KH_MODE="${1#--mode=}"; shift ;;
+        --)       shift; while [ "$#" -gt 0 ]; do NEW_ARGS+=("$1"); shift; done ;;
+        -*)       echo "unknown flag $1" >&2; exit 2 ;;
+        *)        NEW_ARGS+=("$1"); shift ;;
+    esac
+done
+set -- "${NEW_ARGS[@]+"${NEW_ARGS[@]}"}"
+case "$KH_MODE" in
+    sdk|freestanding) ;;
+    *) echo "invalid --mode=$KH_MODE (expected sdk|freestanding)" >&2; exit 2 ;;
+esac
 
 # Resolve SDK + toolchain via shared detector.
 # Exports KH_ANDROID_SDK, KH_CC, KH_LD, KH_NDK_BIN, KH_ANDROID_API_LEVEL, ...
@@ -24,7 +53,9 @@ if [ -z "${KH_ANDROID_SDK:-}" ]; then
 fi
 EMULATOR="$KH_ANDROID_SDK/emulator/emulator"
 
-RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'; BOLD='\033[1m'; RESET='\033[0m'
+# Shared color + summary helpers (KH_RED/GREEN/YELLOW/BOLD/RESET, kh_summary_line).
+# shellcheck source=lib/test_common.sh
+. "$ROOT/scripts/lib/test_common.sh"
 
 case "${KH_TOOLCHAIN_KIND:-}" in
     sys-gcc|sys-clang)
@@ -37,8 +68,40 @@ esac
 # Build kmod_loader if missing
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 if [ ! -f "$LOADER" ]; then
-    printf "${BOLD}Building kmod_loader...${RESET}\n"
+    printf "${KH_BOLD}Building kmod_loader...${KH_RESET}\n"
     make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC"
+fi
+
+# SDK-mode build is common across AVDs: build kernelhook.ko + hello_hook.ko
+# ONCE here, push to each AVD in the loop. Common-kernel vermagic assumption
+# is reasonable for the Pixel_30..37 matrix (all are android GKI). If an AVD
+# has a divergent KERNELRELEASE, the per-AVD load step will surface the
+# vermagic mismatch as a load failure, which is the correct classification.
+if [ "$KH_MODE" = "sdk" ]; then
+    printf "${KH_BOLD}Building SDK artifacts (kernelhook.ko + hello_hook.ko)...${KH_RESET}\n"
+    : > /tmp/kh_avd_sdk_build.log
+    if ! ( cd "$ROOT/kmod" && \
+           { make clean >/dev/null 2>&1 || true; } && \
+           make module \
+               CC="$KH_CC" \
+               LD="$KH_LD" \
+               CROSS_COMPILE="$KH_CROSS_COMPILE" \
+               >>/tmp/kh_avd_sdk_build.log 2>&1 ); then
+        printf "${KH_RED}FAIL${KH_RESET} kernelhook.ko build failed — see /tmp/kh_avd_sdk_build.log\n"
+        tail -30 /tmp/kh_avd_sdk_build.log | sed 's/^/       /'
+        exit 1
+    fi
+    if ! ( cd "$ROOT/examples/hello_hook" && \
+           { make -f Makefile.sdk clean >/dev/null 2>&1 || true; } && \
+           CC="$KH_CC" \
+           LD="$KH_LD" \
+           CROSS_COMPILE="$KH_CROSS_COMPILE" \
+           make -f Makefile.sdk module \
+               >>/tmp/kh_avd_sdk_build.log 2>&1 ); then
+        printf "${KH_RED}FAIL${KH_RESET} hello_hook.ko (SDK) build failed — see /tmp/kh_avd_sdk_build.log\n"
+        tail -30 /tmp/kh_avd_sdk_build.log | sed 's/^/       /'
+        exit 1
+    fi
 fi
 
 # Determine AVD list
@@ -71,7 +134,7 @@ kill_emulator() {
 
 test_avd() {
     local avd="$1"
-    printf "\n${BOLD}======== Testing $avd ========${RESET}\n"
+    printf "\n${KH_BOLD}======== Testing $avd ========${KH_RESET}\n"
 
     # Kill any running emulator
     kill_emulator
@@ -89,7 +152,7 @@ test_avd() {
     done
 
     if [ "$booted" -ne 1 ]; then
-        printf "  ${RED}SKIP${RESET} $avd: boot timeout\n"
+        printf "  ${KH_RED}SKIP${KH_RESET} $avd: boot timeout\n"
         RESULTS+=("SKIP|$avd|boot_timeout||")
         SKIP_COUNT=$((SKIP_COUNT + 1))
         kill_emulator
@@ -111,7 +174,7 @@ test_avd() {
     local kmajor=$(echo "$uname" | cut -d. -f1)
     local kminor=$(echo "$uname" | cut -d. -f2)
     if [ "$kmajor" -lt 4 ] || ([ "$kmajor" -eq 4 ] && [ "$kminor" -lt 4 ]); then
-        printf "  ${YELLOW}SKIP${RESET} $avd: kernel %s (3.18 module loader incompatible)\n" "$uname"
+        printf "  ${KH_YELLOW}SKIP${KH_RESET} $avd: kernel %s (3.18 module loader incompatible)\n" "$uname"
         RESULTS+=("SKIP|$avd|kernel_3.18|$sdk|$uname")
         SKIP_COUNT=$((SKIP_COUNT + 1))
         kill_emulator
@@ -121,28 +184,31 @@ test_avd() {
     # Check if modules are supported
     local mod_support=$(adb -s emulator-5554 shell "zcat /proc/config.gz 2>/dev/null | grep '^CONFIG_MODULES=y'" 2>/dev/null | tr -d '[:space:]')
     if [ "$mod_support" != "CONFIG_MODULES=y" ]; then
-        printf "  ${YELLOW}SKIP${RESET} $avd: CONFIG_MODULES not enabled\n"
+        printf "  ${KH_YELLOW}SKIP${KH_RESET} $avd: CONFIG_MODULES not enabled\n"
         RESULTS+=("SKIP|$avd|no_modules|$sdk|$uname")
         SKIP_COUNT=$((SKIP_COUNT + 1))
         kill_emulator
         return
     fi
 
-    # Build kh_test.ko for this kernel
-    printf "  Building kh_test.ko...\n"
-    cd "$ROOT/tests/kmod"
-    make clean >/dev/null 2>&1 || true
-    if ! make freestanding \
-        KERNELRELEASE="$uname" \
-        CC="$KH_CC" \
-        LD="$KH_LD" \
-        CROSS_COMPILE="$KH_CROSS_COMPILE" \
-        >/dev/null 2>&1; then
-        printf "  ${RED}FAIL${RESET} $avd: build failed\n"
-        RESULTS+=("FAIL|$avd|build_failed|$sdk|$uname")
-        FAIL_COUNT=$((FAIL_COUNT + 1))
-        kill_emulator
-        return
+    # SDK mode: artifacts were built once before the loop; freestanding mode
+    # rebuilds kh_test.ko per-AVD because it's ifdef'd against kernel internals.
+    if [ "$KH_MODE" = "freestanding" ]; then
+        printf "  Building kh_test.ko...\n"
+        cd "$ROOT/tests/kmod"
+        make clean >/dev/null 2>&1 || true
+        if ! make freestanding \
+            KERNELRELEASE="$uname" \
+            CC="$KH_CC" \
+            LD="$KH_LD" \
+            CROSS_COMPILE="$KH_CROSS_COMPILE" \
+            >/dev/null 2>&1; then
+            printf "  ${KH_RED}FAIL${KH_RESET} $avd: build failed\n"
+            RESULTS+=("FAIL|$avd|build_failed|$sdk|$uname")
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+            kill_emulator
+            return
+        fi
     fi
 
     # Setup device — run all privileged ops in a single shell to avoid root loss
@@ -170,12 +236,23 @@ test_avd() {
     fi
 
     # Push files
-    adb -s emulator-5554 push "$ROOT/tests/kmod/kh_test.ko" /data/local/tmp/kh_test.ko >/dev/null 2>&1 || true
+    if [ "$KH_MODE" = "sdk" ]; then
+        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null 2>&1 || true
+        adb -s emulator-5554 push "$ROOT/examples/hello_hook/hello_hook.ko" /data/local/tmp/hello_hook.ko >/dev/null 2>&1 || true
+    else
+        adb -s emulator-5554 push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null 2>&1 || true
+    fi
     adb -s emulator-5554 push "$LOADER" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
     adb -s emulator-5554 shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null 2>&1 || true
 
-    # Load and test — run in single shell session to stay root
-    adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
+    # Unload any stale modules from a previous run. In SDK mode the consumer
+    # (hello_hook) must come off first because it holds a refcount on
+    # kernelhook via the ksymtab imports.
+    if [ "$KH_MODE" = "sdk" ]; then
+        adb -s emulator-5554 shell "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
+    else
+        adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
+    fi
     adb -s emulator-5554 shell "dmesg -c" >/dev/null 2>&1 || true
 
     # Live kernel-log capture: survives emulator death so kernel panic
@@ -190,24 +267,70 @@ test_avd() {
 
     local load_output=""
     local load_rc=1
-    # Use host-side timeout (60s) since Android 'timeout' may not exist on old AVDs
-    load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
-    load_rc=$?
+    if [ "$KH_MODE" = "sdk" ]; then
+        # Step 1: insmod kernelhook.ko (the SDK base). Host-side 60s timeout
+        # since Android 'timeout' may not exist on old AVDs.
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+        load_rc=$?
+        if ! echo "$load_output" | grep -qi "loaded"; then
+            sleep 1
+            kill "$dmesg_pid" 2>/dev/null || true
+            wait "$dmesg_pid" 2>/dev/null || true
+            printf "  ${KH_RED}FAIL${KH_RESET} $avd: kernelhook.ko load failed\n"
+            echo "$load_output" | sed 's/^/       /'
+            RESULTS+=("FAIL|$avd|sdk_base_load|$sdk|$uname")
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+            kill_emulator
+            return
+        fi
+        # Step 2: insmod hello_hook.ko (the SDK consumer).
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+        load_rc=$?
+    else
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+        load_rc=$?
+    fi
 
     # Let adb drain any in-flight kernel-log lines before closing the pipe.
     sleep 1
     kill "$dmesg_pid" 2>/dev/null || true
     wait "$dmesg_pid" 2>/dev/null || true
     if [ -s "$live_dmesg" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$live_dmesg"; then
-        printf "  ${YELLOW}Kernel panic captured in live kmsg:${RESET}\n"
+        printf "  ${KH_YELLOW}Kernel panic captured in live kmsg:${KH_RESET}\n"
         awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$live_dmesg" | sed 's/^/       /'
     fi
 
     if ! echo "$load_output" | grep -qi "loaded"; then
-        printf "  ${RED}FAIL${RESET} $avd: module load failed\n"
+        printf "  ${KH_RED}FAIL${KH_RESET} $avd: module load failed\n"
         echo "$load_output" | sed 's/^/       /'
         RESULTS+=("FAIL|$avd|load_failed|$sdk|$uname")
         FAIL_COUNT=$((FAIL_COUNT + 1))
+        # SDK mode: best-effort peel kernelhook back off so it's not left loaded.
+        if [ "$KH_MODE" = "sdk" ]; then
+            adb -s emulator-5554 shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
+        fi
+        kill_emulator
+        return
+    fi
+
+    # ---- SDK mode: runtime-verify the hello_hook consumer marker, unload reverse.
+    if [ "$KH_MODE" = "sdk" ]; then
+        sleep 2
+        local sdk_dmesg=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null)
+        if echo "$sdk_dmesg" | grep -q "hello_hook: hooked do_sys_open"; then
+            local hook_line=$(echo "$sdk_dmesg" | grep "hello_hook: hooked do_sys_open" | tail -1)
+            printf "  ${KH_GREEN}PASS${KH_RESET} $avd: hello_hook active (API %s, kernel %s)\n" "$sdk" "$uname"
+            printf "       %s\n" "$hook_line"
+            RESULTS+=("PASS|$avd|hello_hook|$sdk|$uname")
+            PASS_COUNT=$((PASS_COUNT + 1))
+        else
+            printf "  ${KH_RED}FAIL${KH_RESET} $avd: hello_hook marker not found in dmesg\n"
+            echo "$sdk_dmesg" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
+            RESULTS+=("FAIL|$avd|hello_hook_marker|$sdk|$uname")
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        fi
+        # Reverse-order rmmod: consumer first (refcount holder), then SDK base.
+        adb -s emulator-5554 shell "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
         kill_emulator
         return
     fi
@@ -225,7 +348,7 @@ test_avd() {
     failed="${failed:-0}"
 
     if echo "$dmesg" | grep -q "ALL TESTS PASSED"; then
-        printf "  ${GREEN}PASS${RESET} $avd: %s passed, %s failed (API %s, kernel %s)\n" "$passed" "$failed" "$sdk" "$uname"
+        printf "  ${KH_GREEN}PASS${KH_RESET} $avd: %s passed, %s failed (API %s, kernel %s)\n" "$passed" "$failed" "$sdk" "$uname"
         RESULTS+=("PASS|$avd|${passed}/${passed}|$sdk|$uname")
         PASS_COUNT=$((PASS_COUNT + 1))
 
@@ -260,27 +383,27 @@ test_avd() {
         )
         if [ ! -f "$ROOT/tests/kmod/export_link_test/exporter.ko" ] || \
            [ ! -f "$ROOT/tests/kmod/export_link_test/importer.ko" ]; then
-            printf "  ${RED}FAIL${RESET} $avd: export_link_test build failed\n"
+            printf "  ${KH_RED}FAIL${KH_RESET} $avd: export_link_test build failed\n"
             RESULTS+=("FAIL|$avd|export_link_build|$sdk|$uname")
             FAIL_COUNT=$((FAIL_COUNT + 1))
         else
             if KADDR="0x${kaddr}" CRC_ARGS="${crc_args}" \
                "$ROOT/tests/kmod/export_link_test/test_on_avd.sh" emulator-5554; then
-                printf "  ${GREEN}PASS${RESET} $avd: export_link_test (Ring 3)\n"
+                printf "  ${KH_GREEN}PASS${KH_RESET} $avd: export_link_test (Ring 3)\n"
                 RESULTS+=("PASS|$avd|export_link_test|$sdk|$uname")
             else
-                printf "  ${RED}FAIL${RESET} $avd: export_link_test (Ring 3)\n"
+                printf "  ${KH_RED}FAIL${KH_RESET} $avd: export_link_test (Ring 3)\n"
                 RESULTS+=("FAIL|$avd|export_link_test|$sdk|$uname")
                 FAIL_COUNT=$((FAIL_COUNT + 1))
             fi
         fi
     elif [ "$passed" -gt 0 ] || [ "$failed" -gt 0 ]; then
-        printf "  ${RED}FAIL${RESET} $avd: %s passed, %s failed\n" "$passed" "$failed"
+        printf "  ${KH_RED}FAIL${KH_RESET} $avd: %s passed, %s failed\n" "$passed" "$failed"
         echo "$dmesg" | grep -i "FAIL" | sed 's/^/       /'
         RESULTS+=("FAIL|$avd|${passed}/$((passed+failed))|$sdk|$uname")
         FAIL_COUNT=$((FAIL_COUNT + 1))
     else
-        printf "  ${YELLOW}WARN${RESET} $avd: no test output (init may not have run)\n"
+        printf "  ${KH_YELLOW}WARN${KH_RESET} $avd: no test output (init may not have run)\n"
         echo "$dmesg" | head -5 | sed 's/^/       /'
         RESULTS+=("FAIL|$avd|no_output|$sdk|$uname")
         FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -289,7 +412,8 @@ test_avd() {
     kill_emulator
 }
 
-printf "${BOLD}KernelHook kmod AVD Test Suite${RESET}\n"
+printf "${KH_BOLD}KernelHook kmod AVD Test Suite${KH_RESET}\n"
+printf "Mode: %s\n" "$KH_MODE"
 printf "AVDs to test: %s\n" "${AVDS[*]}"
 printf "Toolchain: %s\n\n" "$KH_TOOLCHAIN_DESC"
 
@@ -298,20 +422,23 @@ for avd in "${AVDS[@]}"; do
 done
 
 # Summary
-printf "\n${BOLD}================ Summary ================${RESET}\n"
+printf "\n${KH_BOLD}================ Summary ================${KH_RESET}\n"
 printf "%-14s %-6s %-10s %-35s %s\n" "AVD" "API" "Result" "Kernel" "Detail"
 printf "%-14s %-6s %-10s %-35s %s\n" "---" "---" "------" "------" "------"
 for r in "${RESULTS[@]}"; do
     IFS='|' read -r status avd detail api kernel <<< "$r"
     case "$status" in
-        PASS)  color="$GREEN" ;;
-        FAIL)  color="$RED" ;;
-        SKIP)  color="$YELLOW" ;;
-        *)     color="$RESET" ;;
+        PASS)  color="$KH_GREEN" ;;
+        FAIL)  color="$KH_RED" ;;
+        SKIP)  color="$KH_YELLOW" ;;
+        *)     color="$KH_RESET" ;;
     esac
-    printf "%-14s %-6s ${color}%-10s${RESET} %-35s %s\n" "$avd" "$api" "$status" "$kernel" "$detail"
+    printf "%-14s %-6s ${color}%-10s${KH_RESET} %-35s %s\n" "$avd" "$api" "$status" "$kernel" "$detail"
 done
-printf "\n${GREEN}Passed: %d${RESET}  ${RED}Failed: %d${RESET}  ${YELLOW}Skipped: %d${RESET}  Total: %d\n" \
+printf "\n${KH_GREEN}Passed: %d${KH_RESET}  ${KH_RED}Failed: %d${KH_RESET}  ${KH_YELLOW}Skipped: %d${KH_RESET}  Total: %d\n" \
     "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT" "$((PASS_COUNT + FAIL_COUNT + SKIP_COUNT))"
+
+# Shared skip-aware summary line (kh_summary_line from scripts/lib/test_common.sh).
+kh_summary_line "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT"
 
 exit $((FAIL_COUNT > 0 ? 1 : 0))

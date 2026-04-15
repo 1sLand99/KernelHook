@@ -23,6 +23,9 @@ check "section_start uses '==>'"   "==>"                 "$(kh_section_start foo
 check "section_end PASS prints"    "PASS"                "$(kh_section_end foo PASS)"
 check "section_end FAIL prints"    "FAIL"                "$(kh_section_end foo FAIL)"
 check "summary_line format"        "=== Summary: 3 PASS" "$(kh_summary_line 3 1)"
+check "summary_line 2-arg omits SKIP" "=== Summary: 3 PASS, 1 FAIL ===" "$(kh_summary_line 3 1)"
+check "summary_line 3-arg zero-skip"  "=== Summary: 3 PASS, 1 FAIL ===" "$(kh_summary_line 3 1 0)"
+check "summary_line skip suffix"    "=== Summary: 3 PASS, 1 FAIL, 2 SKIP" "$(kh_summary_line 3 1 2)"
 check "double-source is idempotent" "1"                  "$_KH_TEST_COMMON_LOADED"
 . "$ROOT/scripts/lib/test_common.sh"   # source again — must not error
 

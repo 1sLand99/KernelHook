@@ -8,7 +8,10 @@
 #   kh_banner <text>          — print a bold banner line
 #   kh_section_start <name>   — print "==> <name>"
 #   kh_section_end <name> <result>  — print "<-- <name>: <result>"
-#   kh_summary_line <pass> <fail>   — print "=== Summary: N PASS, M FAIL ==="
+#   kh_summary_line <pass> <fail> [skip]
+#                              — print "=== Summary: N PASS, M FAIL ==="
+#                              — with 3rd arg > 0, print "=== Summary: N PASS, M FAIL, K SKIP ==="
+#                              — 2-arg form is backward compatible
 #
 # The SDK-mode 2-ko load order (kernelhook.ko first, kh_test.ko second;
 # rmmod in reverse) is open-coded inside the worker scripts — they need
@@ -45,6 +48,10 @@ kh_section_end() {
 }
 
 kh_summary_line() {
-    local pass="$1" fail="$2"
-    printf "=== Summary: %d PASS, %d FAIL ===\n" "$pass" "$fail"
+    local pass="$1" fail="$2" skip="${3:-0}"
+    if [ "$skip" -gt 0 ]; then
+        printf "=== Summary: %d PASS, %d FAIL, %d SKIP ===\n" "$pass" "$fail" "$skip"
+    else
+        printf "=== Summary: %d PASS, %d FAIL ===\n" "$pass" "$fail"
+    fi
 }
