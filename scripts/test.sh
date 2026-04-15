@@ -259,7 +259,45 @@ case "$KH_SUBCMD" in
             exit 1
         fi
         ;;
-    all)           cmd_stub ;;
+    all)
+        kh_banner "test.sh all — every available subcommand"
+        total_pass=0; total_fail=0
+
+        # host: always available
+        if "$0" host; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+
+        # android: only if a device or emulator is attached
+        if adb devices 2>/dev/null | awk 'NR>1 && $2=="device"' | grep -q .; then
+            if "$0" android; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+        else
+            kh_section_end "android" SKIP
+        fi
+
+        # avd: only if AVDs exist
+        if ls ~/.android/avd/*.ini >/dev/null 2>&1; then
+            if "$0" --mode="$KH_MODE" avd; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+        else
+            kh_section_end "avd" SKIP
+        fi
+
+        # device: only if a non-emulator device is attached
+        if adb devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/' | grep -q .; then
+            if "$0" --mode="$KH_MODE" device; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+        else
+            kh_section_end "device" SKIP
+        fi
+
+        # sdk-consumer: only if any device or emulator is attached
+        if adb devices 2>/dev/null | awk 'NR>1 && $2=="device"' | grep -q .; then
+            if "$0" sdk-consumer; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+        else
+            kh_section_end "sdk-consumer" SKIP
+        fi
+
+        kh_banner "==== Aggregate ===="
+        kh_summary_line "$total_pass" "$total_fail"
+        [ "$total_fail" -eq 0 ]
+        ;;
     *)
         printf "unknown subcommand: %s\n" "$KH_SUBCMD" >&2
         usage >&2
