@@ -4,7 +4,7 @@
  * and instruction generation changes (US-012).
  *
  * Verifies:
- *   - Struct sizes (hook_chain_item_t == 64, hook_local_t == 32)
+ *   - Struct sizes (kh_hook_chain_item_t == 64, kh_hook_local_t == 32)
  *   - Bitmap chain_add slot finding via __builtin_ctz
  *   - Bitmap chain_remove bit clearing
  *   - Bitmap chain_all_empty (mask == 0)
@@ -17,7 +17,7 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <insn.h>
 #include <stdint.h>
 #include <string.h>
@@ -26,12 +26,12 @@
 
 TEST(sizeof_hook_chain_item_t)
 {
-    ASSERT_EQ((int)sizeof(hook_chain_item_t), 64);
+    ASSERT_EQ((int)sizeof(kh_hook_chain_item_t), 64);
 }
 
 TEST(sizeof_hook_local_t)
 {
-    ASSERT_EQ((int)sizeof(hook_local_t), 32);
+    ASSERT_EQ((int)sizeof(kh_hook_local_t), 32);
 }
 
 /* ==== Section 2: Bitmap chain operations ==== */
@@ -43,7 +43,7 @@ static void after_X(void) {}
 static void after_Y(void) {}
 static void after_Z(void) {}
 
-static hook_chain_rw_t rw;
+static kh_hook_chain_rw_t rw;
 
 static void bitmap_setup(void)
 {
@@ -57,19 +57,19 @@ TEST(bitmap_chain_add_finds_slot_via_ctz)
     bitmap_setup();
 
     /* First add should go to slot 0 (ctz(~0x0000) = 0) */
-    hook_err_t rc = hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 10);
+    kh_hook_err_t rc = kh_hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 10);
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(rw.occupied_mask & 1, 1);
     ASSERT_EQ(rw.items[0].before, (void *)before_X);
 
     /* Second add should go to slot 1 (ctz(~0x0001) = 1) */
-    rc = hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 5);
+    rc = kh_hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(rw.occupied_mask & 2, 2);
     ASSERT_EQ(rw.items[1].before, (void *)before_Y);
 
     /* Third add should go to slot 2 (ctz(~0x0003) = 2) */
-    rc = hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 1);
+    rc = kh_hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 1);
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(rw.occupied_mask & 4, 4);
     ASSERT_EQ(rw.items[2].before, (void *)before_Z);
@@ -82,21 +82,21 @@ TEST(bitmap_chain_remove_clears_bit)
 {
     bitmap_setup();
 
-    hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 10);
-    hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 5);
-    hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 1);
+    kh_hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 10);
+    kh_hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 5);
+    kh_hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 1);
 
     ASSERT_EQ(rw.occupied_mask, (uint16_t)0x0007);
 
     /* Remove middle item (slot 1) */
-    hook_chain_remove(&rw, (void *)before_Y, (void *)after_Y);
+    kh_hook_chain_remove(&rw, (void *)before_Y, (void *)after_Y);
 
     /* Bit 1 should be cleared: 0b101 = 0x0005 */
     ASSERT_EQ(rw.occupied_mask, (uint16_t)0x0005);
     ASSERT_EQ(rw.sorted_count, 2);
 
     /* Next add should reuse slot 1 (ctz(~0x0005) = 1) */
-    hook_err_t rc = hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 20);
+    kh_hook_err_t rc = kh_hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 20);
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(rw.occupied_mask, (uint16_t)0x0007);
     ASSERT_EQ(rw.items[1].priority, 20);
@@ -110,11 +110,11 @@ TEST(bitmap_chain_all_empty)
     ASSERT_EQ(rw.occupied_mask, (uint16_t)0);
 
     /* Add one item */
-    hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 0);
+    kh_hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 0);
     ASSERT_NE(rw.occupied_mask, (uint16_t)0);
 
     /* Remove it */
-    hook_chain_remove(&rw, (void *)before_X, (void *)after_X);
+    kh_hook_chain_remove(&rw, (void *)before_X, (void *)after_X);
     ASSERT_EQ(rw.occupied_mask, (uint16_t)0);
 }
 
@@ -123,9 +123,9 @@ TEST(bitmap_rebuild_sorted_priority_ordering)
     bitmap_setup();
 
     /* Add items with priorities: 1, 100, 50 in slots 0, 1, 2 */
-    hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 1);
-    hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 100);
-    hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 50);
+    kh_hook_chain_add(&rw, (void *)before_X, (void *)after_X, NULL, 1);
+    kh_hook_chain_add(&rw, (void *)before_Y, (void *)after_Y, NULL, 100);
+    kh_hook_chain_add(&rw, (void *)before_Z, (void *)after_Z, NULL, 50);
 
     ASSERT_EQ(rw.sorted_count, 3);
 
@@ -135,7 +135,7 @@ TEST(bitmap_rebuild_sorted_priority_ordering)
     ASSERT_EQ(rw.items[rw.sorted_indices[2]].priority, 1);
 
     /* Remove the highest priority item, verify re-sort */
-    hook_chain_remove(&rw, (void *)before_Y, (void *)after_Y);
+    kh_hook_chain_remove(&rw, (void *)before_Y, (void *)after_Y);
     ASSERT_EQ(rw.sorted_count, 2);
     ASSERT_EQ(rw.items[rw.sorted_indices[0]].priority, 50);
     ASSERT_EQ(rw.items[rw.sorted_indices[1]].priority, 1);
@@ -145,7 +145,7 @@ TEST(bitmap_rebuild_sorted_priority_ordering)
 
 static uint32_t origin_code[TRAMPOLINE_NUM] __attribute__((aligned(16)));
 
-static void setup_hook(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3)
+static void setup_hook(kh_hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3)
 {
     memset(h, 0, sizeof(*h));
     origin_code[0] = i0;
@@ -160,12 +160,12 @@ static void setup_hook(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint32_
 
 TEST(br_trampoline_not_ret)
 {
-    hook_t h;
+    kh_hook_t h;
     /* Regular non-BTI/PAC prologue: 4-instruction trampoline */
     uint32_t mov_inst = 0xd2800000; /* MOV X0, #0 */
     setup_hook(&h, mov_inst, ARM64_NOP, ARM64_NOP, ARM64_NOP);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
     ASSERT_EQ(h.tramp_insts_num, 4);
 
@@ -181,12 +181,12 @@ TEST(br_trampoline_not_ret)
 
 TEST(bti_only_prologue_detected)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BTI C at offset 0, no PAC at offset 1 */
     setup_hook(&h, ARM64_BTI_C, ARM64_NOP, ARM64_NOP, ARM64_NOP);
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* 5-instruction trampoline with BTI_JC prefix */
@@ -201,12 +201,12 @@ TEST(bti_only_prologue_detected)
 
 TEST(bti_pac_combo_prologue_detected)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BTI JC at offset 0, PACIASP at offset 1 */
     setup_hook(&h, ARM64_BTI_JC, ARM64_PACIASP, ARM64_NOP, ARM64_NOP);
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* 5-instruction trampoline with BTI_JC prefix */
@@ -220,11 +220,11 @@ TEST(bti_pac_combo_prologue_detected)
 
 TEST(scs_push_detected_in_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* SCS push at offset 0 — not BTI/PAC, so standard 4-inst trampoline */
     setup_hook(&h, ARM64_SCS_PUSH, ARM64_NOP, ARM64_NOP, ARM64_NOP);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.tramp_insts_num, 4);

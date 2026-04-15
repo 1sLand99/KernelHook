@@ -5,16 +5,16 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <insn.h>
 #include <stdint.h>
 #include <string.h>
 
-/* ---- Helper: set up a hook_t with one test instruction at position 0, NOPs elsewhere ---- */
+/* ---- Helper: set up a kh_hook_t with one test instruction at position 0, NOPs elsewhere ---- */
 
 static uint32_t origin_code[TRAMPOLINE_NUM] __attribute__((aligned(16)));
 
-static void setup_hook(hook_t *h, uint32_t test_inst)
+static void setup_hook(kh_hook_t *h, uint32_t test_inst)
 {
     memset(h, 0, sizeof(*h));
 
@@ -31,7 +31,7 @@ static void setup_hook(hook_t *h, uint32_t test_inst)
 }
 
 /* Helper: set up with 4 specific instructions */
-static void setup_hook_4(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3)
+static void setup_hook_4(kh_hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint32_t i3)
 {
     memset(h, 0, sizeof(*h));
 
@@ -47,7 +47,7 @@ static void setup_hook_4(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint3
 }
 
 /*
- * After hook_prepare with branch_absolute trampoline (4 insts), relo_insts layout:
+ * After kh_hook_prepare with branch_absolute trampoline (4 insts), relo_insts layout:
  *   [0]: BTI_JC (0xd50324df)
  *   [1]: NOP
  *   [2 .. 2+relo_len-1]: relocated instruction 0
@@ -60,12 +60,12 @@ static void setup_hook_4(hook_t *h, uint32_t i0, uint32_t i1, uint32_t i2, uint3
 
 TEST(relo_b_unconditional)
 {
-    hook_t h;
+    kh_hook_t h;
     /* B +0x100: INST_B | (0x100/4) = 0x14000000 | 0x40 */
     uint32_t inst = 0x14000040;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* Verify original instruction was backed up */
@@ -96,12 +96,12 @@ TEST(relo_b_unconditional)
 
 TEST(relo_bl)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BL +0x200: INST_BL | (0x200/4) = 0x94000000 | 0x80 */
     uint32_t inst = 0x94000080;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.origin_insts[0], inst);
@@ -131,7 +131,7 @@ TEST(relo_bl)
 
 TEST(relo_adr)
 {
-    hook_t h;
+    kh_hook_t h;
     /* ADR X0, +0x100:
      * imm = 0x100. immhi = imm >> 2 = 0x40. immlo = imm & 3 = 0.
      * inst = INST_ADR | (immhi << 5) | (immlo << 29) | Rd
@@ -141,7 +141,7 @@ TEST(relo_adr)
     uint32_t inst = 0x10000800;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* ADR relocation produces 4 instructions at index 2:
@@ -161,7 +161,7 @@ TEST(relo_adr)
 
 TEST(relo_adrp)
 {
-    hook_t h;
+    kh_hook_t h;
     /* ADRP X1, +0x2000 (2 pages forward):
      * imm = 0x2000 >> 12 = 2. immhi = 2 >> 2 = 0. immlo = 2 & 3 = 2.
      * inst = INST_ADRP | (immlo << 29) | (immhi << 5) | Rd
@@ -171,7 +171,7 @@ TEST(relo_adrp)
     uint32_t inst = 0xD0000001;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* ADRP relocation produces 4 instructions at index 2:
@@ -193,7 +193,7 @@ TEST(relo_adrp)
 
 TEST(relo_ldr_literal_64)
 {
-    hook_t h;
+    kh_hook_t h;
     /* LDR X2, +0x80:
      * imm19 = 0x80 / 4 = 0x20
      * inst = INST_LDR_64 | (imm19 << 5) | Rt
@@ -203,7 +203,7 @@ TEST(relo_ldr_literal_64)
     uint32_t inst = 0x58000402;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* LDR 64-bit relocation produces 6 instructions at index 2:
@@ -227,7 +227,7 @@ TEST(relo_ldr_literal_64)
 
 TEST(relo_ldr_literal_simd128)
 {
-    hook_t h;
+    kh_hook_t h;
     /* LDR Q5, +0x40:
      * imm19 = 0x40 / 4 = 0x10
      * inst = INST_LDR_SIMD_128 | (imm19 << 5) | Rt
@@ -237,7 +237,7 @@ TEST(relo_ldr_literal_simd128)
     uint32_t inst = 0x9C000205;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* SIMD LDR relocation produces 8 instructions at index 2:
@@ -265,7 +265,7 @@ TEST(relo_ldr_literal_simd128)
 
 TEST(relo_cbz)
 {
-    hook_t h;
+    kh_hook_t h;
     /* CBZ X3, +0x40:
      * imm19 = 0x40 / 4 = 0x10
      * inst = INST_CBZ | (imm19 << 5) | Rt
@@ -277,7 +277,7 @@ TEST(relo_cbz)
     uint32_t inst = 0x34000203;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* CBZ relocation produces 6 instructions at index 2:
@@ -302,7 +302,7 @@ TEST(relo_cbz)
 
 TEST(relo_cbnz)
 {
-    hook_t h;
+    kh_hook_t h;
     /* CBNZ W5, +0x80:
      * imm19 = 0x80 / 4 = 0x20
      * inst = INST_CBNZ | (imm19 << 5) | Rt
@@ -312,7 +312,7 @@ TEST(relo_cbnz)
     uint32_t inst = 0x35000405;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     uint64_t target = (uint64_t)origin_code + 0x80;
@@ -329,7 +329,7 @@ TEST(relo_cbnz)
 
 TEST(relo_tbz)
 {
-    hook_t h;
+    kh_hook_t h;
     /* TBZ X4, #3, +0x20:
      * bit_pos = 3 (b40=3, b5=0): bits 23:19 = bit_pos[4:0], bit 31 = bit_pos[5]
      * imm14 = 0x20 / 4 = 8
@@ -341,7 +341,7 @@ TEST(relo_tbz)
     uint32_t inst = 0x36180104;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* TBZ relocation produces 6 instructions at index 2:
@@ -366,7 +366,7 @@ TEST(relo_tbz)
 
 TEST(relo_tbnz)
 {
-    hook_t h;
+    kh_hook_t h;
     /* TBNZ W6, #7, +0x10:
      * imm14 = 0x10 / 4 = 4
      * inst = INST_TBNZ | (7 << 19) | (4 << 5) | 6
@@ -376,7 +376,7 @@ TEST(relo_tbnz)
     uint32_t inst = 0x37380086;
     setup_hook(&h, inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     uint64_t target = (uint64_t)origin_code + 0x10;
@@ -393,10 +393,10 @@ TEST(relo_tbnz)
 
 TEST(relo_nop_passthrough)
 {
-    hook_t h;
+    kh_hook_t h;
     setup_hook(&h, ARM64_NOP);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* relo_ignore produces: [inst, NOP]. For NOP input, both are NOP. */
@@ -404,11 +404,11 @@ TEST(relo_nop_passthrough)
     ASSERT_EQ(h.relo_insts[3], ARM64_NOP);
 }
 
-/* ---- Test: hook_prepare with known 4-instruction sequence ---- */
+/* ---- Test: kh_hook_prepare with known 4-instruction sequence ---- */
 
 TEST(relo_hook_prepare_4insts)
 {
-    hook_t h;
+    kh_hook_t h;
 
     /* Construct a realistic 4-instruction prologue:
      *   [0]: ADR X0, +0x100   (4 relo insts)
@@ -421,7 +421,7 @@ TEST(relo_hook_prepare_4insts)
     uint32_t adr_inst = 0x10000800; /* ADR X0, +0x100 */
     setup_hook_4(&h, adr_inst, ARM64_NOP, ARM64_NOP, ARM64_NOP);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* Verify trampoline was generated (branch_absolute = 4 instructions) */
@@ -469,13 +469,13 @@ TEST(relo_hook_prepare_4insts)
 
 TEST(relo_pac_only_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* PACIASP at offset 0, NOPs for rest */
     setup_hook_4(&h, ARM64_PACIASP, ARM64_NOP, ARM64_NOP, ARM64_NOP);
     /* Set 5th instruction (TRAMPOLINE_NUM=5) */
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* 5-instruction trampoline: BTI_JC + branch_absolute */
@@ -493,12 +493,12 @@ TEST(relo_pac_only_prologue)
 
 TEST(relo_bti_only_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BTI C at offset 0, no PAC at offset 1 */
     setup_hook_4(&h, ARM64_BTI_C, ARM64_NOP, ARM64_NOP, ARM64_NOP);
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.tramp_insts_num, 5);
@@ -514,12 +514,12 @@ TEST(relo_bti_only_prologue)
 
 TEST(relo_bti_pac_combo_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BTI JC at offset 0, PACIASP at offset 1 */
     setup_hook_4(&h, ARM64_BTI_JC, ARM64_PACIASP, ARM64_NOP, ARM64_NOP);
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.tramp_insts_num, 5);
@@ -534,13 +534,13 @@ TEST(relo_bti_pac_combo_prologue)
 
 TEST(relo_scs_push_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* SCS push (str x30, [x18], #8) at offset 0, NOPs for rest.
      * SCS push is not BTI/PAC, so we get a standard 4-instruction trampoline.
      * The SCS instruction is relocated normally via relo_ignore. */
     setup_hook(&h, ARM64_SCS_PUSH);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     /* Standard 4-instruction trampoline (no BTI/PAC prefix) */
@@ -557,13 +557,13 @@ TEST(relo_scs_push_prologue)
 
 TEST(relo_bti_pac_scs_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* BTI JC at offset 0, PACIASP at offset 1, SCS push at offset 2, NOP at 3.
      * BTI at offset 0 triggers 5-instruction trampoline. */
     setup_hook_4(&h, ARM64_BTI_JC, ARM64_PACIASP, ARM64_SCS_PUSH, ARM64_NOP);
     origin_code[4] = ARM64_NOP;
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.tramp_insts_num, 5);
@@ -579,12 +579,12 @@ TEST(relo_bti_pac_scs_prologue)
 
 TEST(relo_no_bti_pac_prologue)
 {
-    hook_t h;
+    kh_hook_t h;
     /* Regular MOV instruction, not BTI/PAC */
     uint32_t mov_inst = 0xd2800000; /* MOV X0, #0 */
     setup_hook(&h, mov_inst);
 
-    hook_err_t rc = hook_prepare(&h);
+    kh_hook_err_t rc = kh_hook_prepare(&h);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
     ASSERT_EQ(h.tramp_insts_num, 4);

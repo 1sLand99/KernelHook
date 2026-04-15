@@ -5,7 +5,7 @@
 
 #include <types.h>
 #include <symbol.h>
-#include <hook.h>
+#include <kh_hook.h>
 
 typedef uint64_t (*kallsyms_lookup_name_func_t)(const char *name);
 

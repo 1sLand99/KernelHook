@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Integration tests: hook chains, unwrap, and local storage.
+ * Integration tests: kh_hook chains, unwrap, and local storage.
  * Tests multi-callback chains, priority ordering, per-item local,
  * wrap_get_origin_func, and function pointer hooks.
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <platform.h>
@@ -22,7 +22,7 @@ int target_func(int a, int b)
     return a + b;
 }
 
-/* Function pointer target for fp_hook tests */
+/* Function pointer target for kh_fp_hook tests */
 __attribute__((noinline))
 static int fp_target_impl(int a, int b)
 {
@@ -58,30 +58,30 @@ static void record(int id)
 
 static void hook_setup(void)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void hook_teardown(void)
 {
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* ---- Callbacks with different IDs ---- */
 
-static void before_id10(hook_fargs2_t *fargs, void *udata)
+static void before_id10(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     record(10);
 }
 
-static void before_id0(hook_fargs2_t *fargs, void *udata)
+static void before_id0(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     record(0);
 }
 
-static void before_id_neg5(hook_fargs2_t *fargs, void *udata)
+static void before_id_neg5(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     record(-5);
@@ -90,48 +90,48 @@ static void before_id_neg5(hook_fargs2_t *fargs, void *udata)
 /* ---- Local storage callbacks ---- */
 
 static uint64_t local_from_after;
-static hook_local_t *local_ptr_A;
-static hook_local_t *local_ptr_B;
+static kh_hook_local_t *local_ptr_A;
+static kh_hook_local_t *local_ptr_B;
 
-static void before_set_local(hook_fargs2_t *fargs, void *udata)
+static void before_set_local(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     fargs->local->data0 = 0xBEEF;
     local_ptr_A = fargs->local;
 }
 
-static void after_read_local(hook_fargs2_t *fargs, void *udata)
+static void after_read_local(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     local_from_after = fargs->local->data0;
 }
 
-static void before_set_local_B(hook_fargs2_t *fargs, void *udata)
+static void before_set_local_B(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     fargs->local->data0 = 0xCAFE;
     local_ptr_B = fargs->local;
 }
 
-static void after_read_local_B(hook_fargs2_t *fargs, void *udata)
+static void after_read_local_B(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     /* Just record we were called */
 }
 
-/* ---- FP hook callbacks ---- */
+/* ---- FP kh_hook callbacks ---- */
 
 static int fp_before_called;
 static int fp_after_called;
 static uint64_t fp_captured_ret;
 
-static void fp_before(hook_fargs2_t *fargs, void *udata)
+static void fp_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     fp_before_called = 1;
 }
 
-static void fp_after(hook_fargs2_t *fargs, void *udata)
+static void fp_after(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     fp_after_called = 1;
@@ -146,16 +146,16 @@ TEST(chain_priority_execution_order)
     reset_order();
 
     /* Hook with 3 before callbacks at priorities 10, 0, -5 */
-    hook_err_t rc;
-    rc = hook_wrap((void *)target_func, 2,
+    kh_hook_err_t rc;
+    rc = kh_hook_wrap((void *)target_func, 2,
                         (void *)before_id10, NULL, NULL, 10);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap((void *)target_func, 2,
+    rc = kh_hook_wrap((void *)target_func, 2,
                         (void *)before_id0, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap((void *)target_func, 2,
+    rc = kh_hook_wrap((void *)target_func, 2,
                         (void *)before_id_neg5, NULL, NULL, -5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -168,9 +168,9 @@ TEST(chain_priority_execution_order)
     ASSERT_EQ(exec_order[1], 0);
     ASSERT_EQ(exec_order[2], -5);
 
-    hook_unwrap((void *)target_func, (void *)before_id10, NULL);
-    hook_unwrap((void *)target_func, (void *)before_id0, NULL);
-    hook_unwrap((void *)target_func, (void *)before_id_neg5, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_id10, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_id0, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_id_neg5, NULL);
     hook_teardown();
 }
 
@@ -179,15 +179,15 @@ TEST(chain_unwrap_removes_one)
     hook_setup();
     reset_order();
 
-    hook_wrap((void *)target_func, 2,
+    kh_hook_wrap((void *)target_func, 2,
                    (void *)before_id10, NULL, NULL, 10);
-    hook_wrap((void *)target_func, 2,
+    kh_hook_wrap((void *)target_func, 2,
                    (void *)before_id0, NULL, NULL, 0);
-    hook_wrap((void *)target_func, 2,
+    kh_hook_wrap((void *)target_func, 2,
                    (void *)before_id_neg5, NULL, NULL, -5);
 
     /* Remove middle-priority callback */
-    hook_unwrap_remove((void *)target_func, (void *)before_id0, NULL, 0);
+    kh_hook_unwrap_remove((void *)target_func, (void *)before_id0, NULL, 0);
 
     call_func(1, 1);
 
@@ -196,8 +196,8 @@ TEST(chain_unwrap_removes_one)
     ASSERT_EQ(exec_order[0], 10);
     ASSERT_EQ(exec_order[1], -5);
 
-    hook_unwrap((void *)target_func, (void *)before_id10, NULL);
-    hook_unwrap((void *)target_func, (void *)before_id_neg5, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_id10, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_id_neg5, NULL);
     hook_teardown();
 }
 
@@ -207,7 +207,7 @@ TEST(chain_local_persists_before_to_after)
     local_from_after = 0;
     local_ptr_A = NULL;
 
-    hook_err_t rc = hook_wrap((void *)target_func, 2,
+    kh_hook_err_t rc = kh_hook_wrap((void *)target_func, 2,
                                    (void *)before_set_local,
                                    (void *)after_read_local, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -217,7 +217,7 @@ TEST(chain_local_persists_before_to_after)
     /* After callback should see 0xBEEF set by before callback */
     ASSERT_EQ(local_from_after, (uint64_t)0xBEEF);
 
-    hook_unwrap((void *)target_func,
+    kh_hook_unwrap((void *)target_func,
                 (void *)before_set_local, (void *)after_read_local);
     hook_teardown();
 }
@@ -229,10 +229,10 @@ TEST(chain_local_isolated_between_items)
     local_ptr_B = NULL;
 
     /* Two chain items on same function */
-    hook_wrap((void *)target_func, 2,
+    kh_hook_wrap((void *)target_func, 2,
                    (void *)before_set_local, (void *)after_read_local,
                    NULL, 10);
-    hook_wrap((void *)target_func, 2,
+    kh_hook_wrap((void *)target_func, 2,
                    (void *)before_set_local_B, (void *)after_read_local_B,
                    NULL, 0);
 
@@ -247,9 +247,9 @@ TEST(chain_local_isolated_between_items)
     ASSERT_EQ(local_ptr_A->data0, (uint64_t)0xBEEF);
     ASSERT_EQ(local_ptr_B->data0, (uint64_t)0xCAFE);
 
-    hook_unwrap((void *)target_func,
+    kh_hook_unwrap((void *)target_func,
                 (void *)before_set_local, (void *)after_read_local);
-    hook_unwrap((void *)target_func,
+    kh_hook_unwrap((void *)target_func,
                 (void *)before_set_local_B, (void *)after_read_local_B);
     hook_teardown();
 }
@@ -257,7 +257,7 @@ TEST(chain_local_isolated_between_items)
 /* Callback that saves the chain pointer for wrap_get_origin_func test */
 static void *saved_chain;
 
-static void before_save_chain(hook_fargs2_t *fargs, void *udata)
+static void before_save_chain(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     saved_chain = fargs->chain;
@@ -268,7 +268,7 @@ TEST(chain_wrap_get_origin_func)
     hook_setup();
     saved_chain = NULL;
 
-    hook_err_t rc = hook_wrap((void *)target_func, 2,
+    kh_hook_err_t rc = kh_hook_wrap((void *)target_func, 2,
                                    (void *)before_save_chain, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -277,7 +277,7 @@ TEST(chain_wrap_get_origin_func)
     ASSERT_NOT_NULL(saved_chain);
 
     /* Get origin function pointer and call it directly */
-    hook_fargs2_t fake_fargs;
+    kh_hook_fargs2_t fake_fargs;
     fake_fargs.chain = saved_chain;
     int (*origin)(int, int) = (int (*)(int, int))wrap_get_origin_func(&fake_fargs);
     ASSERT_NOT_NULL(origin);
@@ -285,7 +285,7 @@ TEST(chain_wrap_get_origin_func)
     int result = origin(100, 200);
     ASSERT_EQ(result, 300);
 
-    hook_unwrap((void *)target_func, (void *)before_save_chain, NULL);
+    kh_hook_unwrap((void *)target_func, (void *)before_save_chain, NULL);
     hook_teardown();
 }
 
@@ -301,7 +301,7 @@ TEST(chain_fp_hook_wrap)
 
     uintptr_t fp_addr = (uintptr_t)&fp_target;
 
-    hook_err_t rc = fp_hook_wrap(fp_addr, 2,
+    kh_hook_err_t rc = kh_fp_hook_wrap(fp_addr, 2,
                                       (void *)fp_before, (void *)fp_after,
                                       NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -313,7 +313,7 @@ TEST(chain_fp_hook_wrap)
     ASSERT_TRUE(fp_after_called);
     ASSERT_EQ(fp_captured_ret, (uint64_t)42);
 
-    fp_hook_unwrap(fp_addr, (void *)fp_before, (void *)fp_after);
+    kh_fp_hook_unwrap(fp_addr, (void *)fp_before, (void *)fp_after);
     hook_teardown();
 }
 

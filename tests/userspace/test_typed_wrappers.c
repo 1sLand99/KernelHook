@@ -6,7 +6,7 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 
@@ -36,14 +36,14 @@ static uint64_t target_0(void)
 
 static uint64_t (*volatile call_0)(void) = target_0;
 
-static void before_0(hook_fargs0_t *fargs, void *udata)
+static void before_0(kh_hook_fargs0_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
 
-static void after_0(hook_fargs0_t *fargs, void *udata)
+static void after_0(kh_hook_fargs0_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called  = 1;
@@ -52,11 +52,11 @@ static void after_0(hook_fargs0_t *fargs, void *udata)
 
 TEST(wrap0)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap0((void *)target_0, before_0, after_0, NULL);
+    kh_hook_err_t err = kh_hook_wrap0((void *)target_0, before_0, after_0, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_0();
@@ -65,12 +65,12 @@ TEST(wrap0)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)42);
 
-    hook_unwrap((void *)target_0, (void *)before_0, (void *)after_0);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_0, (void *)before_0, (void *)after_0);
+    kh_hmem_user_cleanup();
 }
 
 /* ====================================================================
- * Arities 1-4  (hook_fargs4_t)
+ * Arities 1-4  (kh_hook_fargs4_t)
  * ==================================================================== */
 
 /* --- Arity 1 --- */
@@ -83,13 +83,13 @@ static uint64_t target_1(uint64_t a0)
 }
 static uint64_t (*volatile call_1)(uint64_t) = target_1;
 
-static void before_1(hook_fargs4_t *fargs, void *udata)
+static void before_1(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_1(hook_fargs4_t *fargs, void *udata)
+static void after_1(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -98,11 +98,11 @@ static void after_1(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap1)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap1((void *)target_1, before_1, after_1, NULL);
+    kh_hook_err_t err = kh_hook_wrap1((void *)target_1, before_1, after_1, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_1(10);
@@ -111,8 +111,8 @@ TEST(wrap1)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
-    hook_unwrap((void *)target_1, (void *)before_1, (void *)after_1);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_1, (void *)before_1, (void *)after_1);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 2 --- */
@@ -125,13 +125,13 @@ static uint64_t target_2(uint64_t a0, uint64_t a1)
 }
 static uint64_t (*volatile call_2)(uint64_t, uint64_t) = target_2;
 
-static void before_2(hook_fargs4_t *fargs, void *udata)
+static void before_2(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_2(hook_fargs4_t *fargs, void *udata)
+static void after_2(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -140,11 +140,11 @@ static void after_2(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap2)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap2((void *)target_2, before_2, after_2, NULL);
+    kh_hook_err_t err = kh_hook_wrap2((void *)target_2, before_2, after_2, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_2(3, 7);
@@ -153,8 +153,8 @@ TEST(wrap2)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
-    hook_unwrap((void *)target_2, (void *)before_2, (void *)after_2);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_2, (void *)before_2, (void *)after_2);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 3 --- */
@@ -167,13 +167,13 @@ static uint64_t target_3(uint64_t a0, uint64_t a1, uint64_t a2)
 }
 static uint64_t (*volatile call_3)(uint64_t, uint64_t, uint64_t) = target_3;
 
-static void before_3(hook_fargs4_t *fargs, void *udata)
+static void before_3(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_3(hook_fargs4_t *fargs, void *udata)
+static void after_3(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -182,11 +182,11 @@ static void after_3(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap3)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap3((void *)target_3, before_3, after_3, NULL);
+    kh_hook_err_t err = kh_hook_wrap3((void *)target_3, before_3, after_3, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_3(1, 2, 3);
@@ -195,8 +195,8 @@ TEST(wrap3)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)6);
 
-    hook_unwrap((void *)target_3, (void *)before_3, (void *)after_3);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_3, (void *)before_3, (void *)after_3);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 4 --- */
@@ -209,13 +209,13 @@ static uint64_t target_4(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3)
 }
 static uint64_t (*volatile call_4)(uint64_t, uint64_t, uint64_t, uint64_t) = target_4;
 
-static void before_4(hook_fargs4_t *fargs, void *udata)
+static void before_4(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_4(hook_fargs4_t *fargs, void *udata)
+static void after_4(kh_hook_fargs4_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -224,11 +224,11 @@ static void after_4(hook_fargs4_t *fargs, void *udata)
 
 TEST(wrap4)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap4((void *)target_4, before_4, after_4, NULL);
+    kh_hook_err_t err = kh_hook_wrap4((void *)target_4, before_4, after_4, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_4(1, 2, 3, 4);
@@ -237,12 +237,12 @@ TEST(wrap4)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)10);
 
-    hook_unwrap((void *)target_4, (void *)before_4, (void *)after_4);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_4, (void *)before_4, (void *)after_4);
+    kh_hmem_user_cleanup();
 }
 
 /* ====================================================================
- * Arities 5-8  (hook_fargs8_t)
+ * Arities 5-8  (kh_hook_fargs8_t)
  * ==================================================================== */
 
 /* --- Arity 5 --- */
@@ -257,13 +257,13 @@ static uint64_t target_5(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
 static uint64_t (*volatile call_5)(uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t) = target_5;
 
-static void before_5(hook_fargs8_t *fargs, void *udata)
+static void before_5(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_5(hook_fargs8_t *fargs, void *udata)
+static void after_5(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -272,11 +272,11 @@ static void after_5(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap5)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap5((void *)target_5, before_5, after_5, NULL);
+    kh_hook_err_t err = kh_hook_wrap5((void *)target_5, before_5, after_5, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_5(1, 2, 3, 4, 5);
@@ -285,8 +285,8 @@ TEST(wrap5)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)15);
 
-    hook_unwrap((void *)target_5, (void *)before_5, (void *)after_5);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_5, (void *)before_5, (void *)after_5);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 6 --- */
@@ -301,13 +301,13 @@ static uint64_t target_6(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
 static uint64_t (*volatile call_6)(uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t, uint64_t) = target_6;
 
-static void before_6(hook_fargs8_t *fargs, void *udata)
+static void before_6(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_6(hook_fargs8_t *fargs, void *udata)
+static void after_6(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -316,11 +316,11 @@ static void after_6(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap6)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap6((void *)target_6, before_6, after_6, NULL);
+    kh_hook_err_t err = kh_hook_wrap6((void *)target_6, before_6, after_6, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_6(1, 2, 3, 4, 5, 6);
@@ -329,8 +329,8 @@ TEST(wrap6)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)21);
 
-    hook_unwrap((void *)target_6, (void *)before_6, (void *)after_6);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_6, (void *)before_6, (void *)after_6);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 7 --- */
@@ -345,13 +345,13 @@ static uint64_t target_7(uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
 static uint64_t (*volatile call_7)(uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t, uint64_t, uint64_t) = target_7;
 
-static void before_7(hook_fargs8_t *fargs, void *udata)
+static void before_7(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_7(hook_fargs8_t *fargs, void *udata)
+static void after_7(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -360,11 +360,11 @@ static void after_7(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap7)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap7((void *)target_7, before_7, after_7, NULL);
+    kh_hook_err_t err = kh_hook_wrap7((void *)target_7, before_7, after_7, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_7(1, 2, 3, 4, 5, 6, 7);
@@ -373,8 +373,8 @@ TEST(wrap7)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)28);
 
-    hook_unwrap((void *)target_7, (void *)before_7, (void *)after_7);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_7, (void *)before_7, (void *)after_7);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 8 --- */
@@ -390,13 +390,13 @@ static uint64_t (*volatile call_8)(uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t, uint64_t, uint64_t,
                                     uint64_t) = target_8;
 
-static void before_8(hook_fargs8_t *fargs, void *udata)
+static void before_8(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_8(hook_fargs8_t *fargs, void *udata)
+static void after_8(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -405,11 +405,11 @@ static void after_8(hook_fargs8_t *fargs, void *udata)
 
 TEST(wrap8)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap8((void *)target_8, before_8, after_8, NULL);
+    kh_hook_err_t err = kh_hook_wrap8((void *)target_8, before_8, after_8, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_8(1, 2, 3, 4, 5, 6, 7, 8);
@@ -418,12 +418,12 @@ TEST(wrap8)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)36);
 
-    hook_unwrap((void *)target_8, (void *)before_8, (void *)after_8);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_8, (void *)before_8, (void *)after_8);
+    kh_hmem_user_cleanup();
 }
 
 /* ====================================================================
- * Arities 9-12  (hook_fargs12_t)
+ * Arities 9-12  (kh_hook_fargs12_t)
  * ==================================================================== */
 
 /* --- Arity 9 --- */
@@ -440,13 +440,13 @@ static uint64_t (*volatile call_9)(uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t, uint64_t, uint64_t, uint64_t,
                                     uint64_t) = target_9;
 
-static void before_9(hook_fargs12_t *fargs, void *udata)
+static void before_9(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_9(hook_fargs12_t *fargs, void *udata)
+static void after_9(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -455,11 +455,11 @@ static void after_9(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap9)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap9((void *)target_9, before_9, after_9, NULL);
+    kh_hook_err_t err = kh_hook_wrap9((void *)target_9, before_9, after_9, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_9(1, 2, 3, 4, 5, 6, 7, 8, 9);
@@ -468,8 +468,8 @@ TEST(wrap9)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)45);
 
-    hook_unwrap((void *)target_9, (void *)before_9, (void *)after_9);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_9, (void *)before_9, (void *)after_9);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 10 --- */
@@ -486,13 +486,13 @@ static uint64_t (*volatile call_10)(uint64_t, uint64_t, uint64_t, uint64_t,
                                      uint64_t, uint64_t, uint64_t, uint64_t,
                                      uint64_t, uint64_t) = target_10;
 
-static void before_10(hook_fargs12_t *fargs, void *udata)
+static void before_10(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_10(hook_fargs12_t *fargs, void *udata)
+static void after_10(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -501,11 +501,11 @@ static void after_10(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap10)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap10((void *)target_10, before_10, after_10, NULL);
+    kh_hook_err_t err = kh_hook_wrap10((void *)target_10, before_10, after_10, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
@@ -514,8 +514,8 @@ TEST(wrap10)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)55);
 
-    hook_unwrap((void *)target_10, (void *)before_10, (void *)after_10);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_10, (void *)before_10, (void *)after_10);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 11 --- */
@@ -532,13 +532,13 @@ static uint64_t (*volatile call_11)(uint64_t, uint64_t, uint64_t, uint64_t,
                                      uint64_t, uint64_t, uint64_t, uint64_t,
                                      uint64_t, uint64_t, uint64_t) = target_11;
 
-static void before_11(hook_fargs12_t *fargs, void *udata)
+static void before_11(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_11(hook_fargs12_t *fargs, void *udata)
+static void after_11(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -547,11 +547,11 @@ static void after_11(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap11)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap11((void *)target_11, before_11, after_11, NULL);
+    kh_hook_err_t err = kh_hook_wrap11((void *)target_11, before_11, after_11, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
@@ -560,8 +560,8 @@ TEST(wrap11)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)66);
 
-    hook_unwrap((void *)target_11, (void *)before_11, (void *)after_11);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_11, (void *)before_11, (void *)after_11);
+    kh_hmem_user_cleanup();
 }
 
 /* --- Arity 12 --- */
@@ -579,13 +579,13 @@ static uint64_t (*volatile call_12)(uint64_t, uint64_t, uint64_t, uint64_t,
                                      uint64_t, uint64_t, uint64_t,
                                      uint64_t) = target_12;
 
-static void before_12(hook_fargs12_t *fargs, void *udata)
+static void before_12(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     g_before_called = 1;
 }
-static void after_12(hook_fargs12_t *fargs, void *udata)
+static void after_12(kh_hook_fargs12_t *fargs, void *udata)
 {
     (void)udata;
     g_after_called = 1;
@@ -594,11 +594,11 @@ static void after_12(hook_fargs12_t *fargs, void *udata)
 
 TEST(wrap12)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap12((void *)target_12, before_12, after_12, NULL);
+    kh_hook_err_t err = kh_hook_wrap12((void *)target_12, before_12, after_12, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     uint64_t result = call_12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
@@ -607,8 +607,8 @@ TEST(wrap12)
     ASSERT_TRUE(g_after_called);
     ASSERT_EQ(g_captured_ret, (uint64_t)78);
 
-    hook_unwrap((void *)target_12, (void *)before_12, (void *)after_12);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_12, (void *)before_12, (void *)after_12);
+    kh_hmem_user_cleanup();
 }
 
 int main(void)

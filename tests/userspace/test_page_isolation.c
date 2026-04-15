@@ -4,11 +4,11 @@
  *
  * These tests confirm that the linker script (GNU ld) or order file (macOS)
  * successfully places library .text in its own page-aligned region, so
- * platform_write_code() never removes execute permission from its own page.
+ * kh_platform_write_code() never removes execute permission from its own page.
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <platform.h>
@@ -18,7 +18,7 @@ extern void __kh_text_fence_head(void);
 extern void __kh_text_fence_tail(void);
 
 /* External symbol from the library — representative of library .text */
-extern int platform_write_code(uint64_t addr, const void *data, uint64_t size);
+extern int kh_platform_write_code(uint64_t addr, const void *data, uint64_t size);
 
 /* A local target function — representative of user .text.
  * On Android, aligned(4096) + visibility("hidden") ensures it lands on
@@ -39,27 +39,27 @@ static int (*volatile call_local)(int, int) = local_target;
 /* Helper: check if two addresses are on the same page */
 static int same_page(uint64_t a, uint64_t b)
 {
-    uint64_t ps = platform_page_size();
+    uint64_t ps = kh_platform_page_size();
     return (a & ~(ps - 1)) == (b & ~(ps - 1));
 }
 
 TEST(page_isolation_fence_head_aligned)
 {
     uint64_t addr = (uint64_t)__kh_text_fence_head;
-    uint64_t ps = platform_page_size();
+    uint64_t ps = kh_platform_page_size();
     ASSERT_EQ(addr % ps, 0);
 }
 
 TEST(page_isolation_fence_tail_aligned)
 {
     uint64_t addr = (uint64_t)__kh_text_fence_tail;
-    uint64_t ps = platform_page_size();
+    uint64_t ps = kh_platform_page_size();
     ASSERT_EQ(addr % ps, 0);
 }
 
 TEST(page_isolation_library_not_on_user_page)
 {
-    uint64_t lib_addr = (uint64_t)platform_write_code;
+    uint64_t lib_addr = (uint64_t)kh_platform_write_code;
     uint64_t user_addr = (uint64_t)local_target;
     ASSERT_FALSE(same_page(lib_addr, user_addr));
 }
@@ -71,10 +71,10 @@ TEST(page_isolation_fence_head_not_on_user_page)
     ASSERT_FALSE(same_page(fence_addr, user_addr));
 }
 
-/* ---- Callback for hook_wrap ---- */
+/* ---- Callback for kh_hook_wrap ---- */
 static int hook_before_called;
 
-static void isolation_before(hook_fargs2_t *fargs, void *udata)
+static void isolation_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
@@ -85,30 +85,30 @@ TEST(page_isolation_functional_after_hook)
 {
     /* Verify that hooking a local target works without SIGSEGV.
      * This is the actual scenario that used to crash on Android. */
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     hook_before_called = 0;
 
     /* Baseline */
     ASSERT_EQ(call_local(3, 7), 10);
 
-    /* Hook — this calls platform_write_code on local_target's page.
+    /* Hook — this calls kh_platform_write_code on local_target's page.
      * If isolation failed, this would SIGSEGV. */
-    hook_err_t ret = hook_wrap(
+    kh_hook_err_t ret = kh_hook_wrap(
         (void *)local_target, 2,
         (void *)isolation_before, NULL, NULL, 0);
     ASSERT_EQ(ret, HOOK_NO_ERR);
 
-    /* Call through hook */
+    /* Call through kh_hook */
     ASSERT_EQ(call_local(3, 7), 10);
     ASSERT_TRUE(hook_before_called);
 
     /* Unwrap */
-    hook_unwrap((void *)local_target,
+    kh_hook_unwrap((void *)local_target,
                 (void *)isolation_before, NULL);
     ASSERT_EQ(call_local(3, 7), 10);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 int main(void)

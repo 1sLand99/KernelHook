@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * RCU + spinlock synchronization for hook chain operations.
+ * RCU + spinlock synchronization for kh_hook chain operations.
  *
  * Enabled only when CONFIG_KH_CHAIN_RCU is defined.
  * When disabled, include/sync.h provides empty inline stubs — zero overhead.
@@ -10,7 +10,7 @@
 #ifdef CONFIG_KH_CHAIN_RCU
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 
 #ifdef KMOD_FREESTANDING
 
@@ -29,31 +29,31 @@ static void (*_raw_spin_unlock_fn)(void *);
 static char chain_lock_storage[64] __attribute__((aligned(64)));
 
 KCFI_EXEMPT
-void sync_read_lock(void)
+void kh_sync_read_lock(void)
 {
     _rcu_read_lock();
 }
 
 KCFI_EXEMPT
-void sync_read_unlock(void)
+void kh_sync_read_unlock(void)
 {
     _rcu_read_unlock();
 }
 
 KCFI_EXEMPT
-void sync_write_lock(void)
+void kh_sync_write_lock(void)
 {
     _raw_spin_lock_fn(chain_lock_storage);
 }
 
 KCFI_EXEMPT
-void sync_write_unlock(void)
+void kh_sync_write_unlock(void)
 {
     _raw_spin_unlock_fn(chain_lock_storage);
     _synchronize_rcu();
 }
 
-int sync_init(void)
+int kh_sync_init(void)
 {
     /* rcu_read_lock is inline on many kernels; the exported symbol may be
      * __rcu_read_lock (GKI 6.1+) or rcu_read_lock depending on kernel config.
@@ -108,28 +108,28 @@ void sync_cleanup(void)
 
 static DEFINE_SPINLOCK(chain_lock);
 
-void sync_read_lock(void)
+void kh_sync_read_lock(void)
 {
     rcu_read_lock();
 }
 
-void sync_read_unlock(void)
+void kh_sync_read_unlock(void)
 {
     rcu_read_unlock();
 }
 
-void sync_write_lock(void)
+void kh_sync_write_lock(void)
 {
     spin_lock(&chain_lock);
 }
 
-void sync_write_unlock(void)
+void kh_sync_write_unlock(void)
 {
     spin_unlock(&chain_lock);
     synchronize_rcu();
 }
 
-int sync_init(void)
+int kh_sync_init(void)
 {
     return 0;
 }

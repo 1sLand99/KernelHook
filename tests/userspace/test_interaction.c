@@ -3,7 +3,7 @@
  * Integration tests: multi-mechanism security interactions (US-011)
  *
  * Tests pairwise interactions between ARM64 security mechanisms during
- * real hook/call/unhook cycles.  Uses naked functions with .inst to
+ * real kh_hook/call/kh_unhook cycles.  Uses naked functions with .inst to
  * emit specific prologue sequences.
  *
  * Pairwise interaction matrix:
@@ -34,7 +34,7 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 
@@ -113,7 +113,7 @@ static void reset_state(void)
 
 /* ---- Callbacks ---- */
 
-static void before_cb(hook_fargs2_t *fargs, void *udata)
+static void before_cb(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     before_called = 1;
@@ -121,7 +121,7 @@ static void before_cb(hook_fargs2_t *fargs, void *udata)
     captured_arg1 = fargs->arg1;
 }
 
-static void after_cb(hook_fargs2_t *fargs, void *udata)
+static void after_cb(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     after_called = 1;
@@ -132,7 +132,7 @@ static void after_cb(hook_fargs2_t *fargs, void *udata)
 
 TEST(interaction_bti_only)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -141,7 +141,7 @@ TEST(interaction_bti_only)
     ASSERT_EQ(result, 30);
 
     /* Hook */
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_bti_only, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -156,19 +156,19 @@ TEST(interaction_bti_only)
     ASSERT_EQ(captured_ret, 10);
 
     /* Unhook and verify restoration */
-    hook_unwrap((void *)target_bti_only,
+    kh_hook_unwrap((void *)target_bti_only,
                 (void *)before_cb, (void *)after_cb);
     reset_state();
     result = call_bti_only(100, 200);
     ASSERT_EQ(result, 300);
     ASSERT_FALSE(before_called);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 TEST(interaction_pac_only)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -177,7 +177,7 @@ TEST(interaction_pac_only)
     ASSERT_EQ(result, 20);
 
     /* Hook */
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_pac_only, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -192,19 +192,19 @@ TEST(interaction_pac_only)
     ASSERT_EQ(captured_ret, 33);
 
     /* Unhook and verify restoration */
-    hook_unwrap((void *)target_pac_only,
+    kh_hook_unwrap((void *)target_pac_only,
                 (void *)before_cb, (void *)after_cb);
     reset_state();
     result = call_pac_only(50, 60);
     ASSERT_EQ(result, 110);
     ASSERT_FALSE(before_called);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 TEST(interaction_bti_pac_combo)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -213,7 +213,7 @@ TEST(interaction_bti_pac_combo)
     ASSERT_EQ(result, 20);
 
     /* Hook (simulates -mbranch-protection=standard) */
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_bti_pac, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -228,14 +228,14 @@ TEST(interaction_bti_pac_combo)
     ASSERT_EQ(captured_ret, 42);
 
     /* Unhook and verify restoration */
-    hook_unwrap((void *)target_bti_pac,
+    kh_hook_unwrap((void *)target_bti_pac,
                 (void *)before_cb, (void *)after_cb);
     reset_state();
     result = call_bti_pac(99, 1);
     ASSERT_EQ(result, 100);
     ASSERT_FALSE(before_called);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 int main(void)

@@ -5,7 +5,7 @@
  * Unlike test_interaction.c (which uses naked/.inst for precise control),
  * this file is compiled with -mbranch-protection=standard so the compiler
  * itself generates BTI and/or PAC prologue instructions.  This verifies
- * that hook_prepare correctly detects and handles real-world prologues.
+ * that kh_hook_prepare correctly detects and handles real-world prologues.
  *
  * On Apple clang with -mbranch-protection=standard:
  *   - Leaf functions get BTI C prologue
@@ -15,7 +15,7 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 
@@ -85,7 +85,7 @@ static void reset_state(void)
 
 /* ---- Callbacks ---- */
 
-static void before_cb(hook_fargs2_t *fargs, void *udata)
+static void before_cb(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     before_called = 1;
@@ -93,7 +93,7 @@ static void before_cb(hook_fargs2_t *fargs, void *udata)
     captured_arg1 = fargs->arg1;
 }
 
-static void after_cb(hook_fargs2_t *fargs, void *udata)
+static void after_cb(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     after_called = 1;
@@ -102,10 +102,10 @@ static void after_cb(hook_fargs2_t *fargs, void *udata)
 
 /* ---- Tests ---- */
 
-/* Simple hook on a BTI+PAC function: hook, call, verify return value */
+/* Simple kh_hook on a BTI+PAC function: kh_hook, call, verify return value */
 TEST(security_simple_hook_leaf)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -114,7 +114,7 @@ TEST(security_simple_hook_leaf)
     ASSERT_EQ(result, 30);
 
     /* Hook with before callback only */
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -126,18 +126,18 @@ TEST(security_simple_hook_leaf)
     ASSERT_EQ(captured_arg0, 3);
     ASSERT_EQ(captured_arg1, 7);
 
-    hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
+    kh_hmem_user_cleanup();
 }
 
-/* Chain hook on BTI+PAC function with before/after callbacks */
+/* Chain kh_hook on BTI+PAC function with before/after callbacks */
 TEST(security_chain_hook_leaf)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -150,19 +150,19 @@ TEST(security_chain_hook_leaf)
     ASSERT_EQ(captured_arg1, 22);
     ASSERT_EQ(captured_ret, 33);
 
-    hook_unwrap((void *)target_leaf_add,
+    kh_hook_unwrap((void *)target_leaf_add,
                 (void *)before_cb, (void *)after_cb);
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* Unhook restores original function correctly */
 TEST(security_unhook_restores)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -173,7 +173,7 @@ TEST(security_unhook_restores)
     ASSERT_TRUE(before_called);
 
     /* Unhook */
-    hook_unwrap((void *)target_leaf_add,
+    kh_hook_unwrap((void *)target_leaf_add,
                 (void *)before_cb, (void *)after_cb);
 
     /* Verify restored: callbacks should NOT fire */
@@ -183,16 +183,16 @@ TEST(security_unhook_restores)
     ASSERT_FALSE(before_called);
     ASSERT_FALSE(after_called);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* Verify trampoline has BTI_JC at position 0 after hooking */
 TEST(security_trampoline_has_bti_jc)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_leaf_add, 2,
         (void *)before_cb, NULL, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -203,14 +203,14 @@ TEST(security_trampoline_has_bti_jc)
     uint32_t first_inst = *(volatile uint32_t *)target_leaf_add;
     ASSERT_EQ(first_inst, ARM64_BTI_JC);
 
-    hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)target_leaf_add, (void *)before_cb, NULL);
+    kh_hmem_user_cleanup();
 }
 
 /* Hook a non-leaf function (PACIASP prologue) */
 TEST(security_nonleaf_hook)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     reset_state();
 
@@ -218,7 +218,7 @@ TEST(security_nonleaf_hook)
     int result = call_nonleaf(4, 6);
     ASSERT_EQ(result, 10);
 
-    hook_err_t err = hook_wrap(
+    kh_hook_err_t err = kh_hook_wrap(
         (void *)target_nonleaf_add, 2,
         (void *)before_cb, (void *)after_cb, NULL, 0);
     ASSERT_EQ(err, HOOK_NO_ERR);
@@ -233,9 +233,9 @@ TEST(security_nonleaf_hook)
     uint32_t first_inst = *(volatile uint32_t *)target_nonleaf_add;
     ASSERT_EQ(first_inst, ARM64_BTI_JC);
 
-    hook_unwrap((void *)target_nonleaf_add,
+    kh_hook_unwrap((void *)target_nonleaf_add,
                 (void *)before_cb, (void *)after_cb);
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 int main(void)

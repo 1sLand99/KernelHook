@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * fp_hook.c — Function pointer hooking example.
+ * kh_fp_hook.c — Function pointer hooking example.
  *
- * Demonstrates fp_hook / fp_unhook / fp_get_origin_func:
+ * Demonstrates kh_fp_hook / kh_fp_unhook / fp_get_origin_func:
  *   - Define a struct with a function pointer callback
  *   - Hook it with a replacement function
  *   - Call the original via a backup pointer
@@ -11,13 +11,13 @@
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -29,7 +29,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -37,7 +37,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
-MODULE_DESCRIPTION("KernelHook fp_hook example: function pointer hooking");
+MODULE_DESCRIPTION("KernelHook kh_fp_hook example: function pointer hooking");
 
 #ifdef KMOD_FREESTANDING
 MODULE_VERSIONS();
@@ -66,11 +66,11 @@ static int __attribute__((noinline)) original_callback(int x, int y)
 
 static int replacement_callback(int x, int y)
 {
-	pr_info("fp_hook: replacement called with x=%d y=%d", x, y);
+	pr_info("kh_fp_hook: replacement called with x=%d y=%d", x, y);
 	/* Call original via backup pointer */
 	if (backup_func) {
 		int orig_result = ((int (*)(int, int))backup_func)(x, y);
-		pr_info("fp_hook: original returned %d, we return %d", orig_result, x * y);
+		pr_info("kh_fp_hook: original returned %d, we return %d", orig_result, x * y);
 	}
 	return x * y;
 }
@@ -88,19 +88,19 @@ static int __init fp_hook_init(void)
 #if !defined(KH_SDK_MODE)
 	result = kmod_compat_init(kallsyms_addr);
 	if (result) {
-		pr_err("fp_hook: compat init failed (%d)\n", result);
+		pr_err("kh_fp_hook: compat init failed (%d)\n", result);
 		return 0;
 	}
 
 	result = kmod_hook_mem_init();
 	if (result) {
-		pr_err("fp_hook: hook_mem init failed (%d)", result);
+		pr_err("kh_fp_hook: hook_mem init failed (%d)", result);
 		return 0;
 	}
 
 	result = kh_pgtable_init();
 	if (result) {
-		pr_err("fp_hook: kh_pgtable_init failed (%d)", result);
+		pr_err("kh_fp_hook: kh_pgtable_init failed (%d)", result);
 		kmod_hook_mem_cleanup();
 		return 0;
 	}
@@ -113,16 +113,16 @@ static int __init fp_hook_init(void)
 
 	/* Call original before hooking */
 	result = ops.callback(3, 4);
-	pr_info("fp_hook: before hook: ops.callback(3,4) = %d", result);
+	pr_info("kh_fp_hook: before kh_hook: ops.callback(3,4) = %d", result);
 
 	/* Hook the function pointer */
-	fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
-	pr_info("fp_hook: function pointer hooked, backup=%llx",
+	kh_fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
+	pr_info("kh_fp_hook: function pointer hooked, backup=%llx",
 	      (unsigned long long)(uintptr_t)backup_func);
 
 	/* Call through the struct — replacement should run */
 	result = ops.callback(3, 4);
-	pr_info("fp_hook: after hook: ops.callback(3,4) = %d", result);
+	pr_info("kh_fp_hook: after kh_hook: ops.callback(3,4) = %d", result);
 
 	return 0;
 }
@@ -130,14 +130,14 @@ static int __init fp_hook_init(void)
 static void __exit fp_hook_exit(void)
 {
 	if (backup_func) {
-		fp_unhook((uintptr_t)&ops.callback, backup_func);
+		kh_fp_unhook((uintptr_t)&ops.callback, backup_func);
 		backup_func = NULL;
-		pr_info("fp_hook: unhooked");
+		pr_info("kh_fp_hook: unhooked");
 	}
 
 	/* Verify original is restored */
 	int result = ops.callback(3, 4);
-	pr_info("fp_hook: after unhook: ops.callback(3,4) = %d", result);
+	pr_info("kh_fp_hook: after kh_unhook: ops.callback(3,4) = %d", result);
 
 #if !defined(KH_SDK_MODE)
 	kmod_hook_mem_cleanup();

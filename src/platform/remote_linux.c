@@ -29,7 +29,7 @@
 /* ARM64 instruction: BRK #0 (for breakpoint) */
 #define INST_BRK0 0xD4200000u
 
-struct remote_hook_handle {
+struct kh_remote_hook_handle {
     int pid;
     struct user_pt_regs saved_regs;
 };
@@ -62,7 +62,7 @@ static int write_regs(int pid, const struct user_pt_regs *regs)
  *   4. Read x0 (syscall return value).
  *   5. Restore the original instruction and registers.
  */
-static int64_t inject_syscall(struct remote_hook_handle *h, uint64_t nr,
+static int64_t inject_syscall(struct kh_remote_hook_handle *h, uint64_t nr,
                               uint64_t a0, uint64_t a1, uint64_t a2,
                               uint64_t a3, uint64_t a4, uint64_t a5)
 {
@@ -129,7 +129,7 @@ static int64_t inject_syscall(struct remote_hook_handle *h, uint64_t nr,
     return syscall_ret;
 }
 
-remote_hook_handle_t remote_hook_attach(int pid)
+kh_remote_hook_handle_t kh_remote_hook_attach(int pid)
 {
     if (pid <= 0)
         return NULL;
@@ -148,7 +148,7 @@ remote_hook_handle_t remote_hook_attach(int pid)
         return NULL;
     }
 
-    struct remote_hook_handle *h = malloc(sizeof(*h));
+    struct kh_remote_hook_handle *h = malloc(sizeof(*h));
     if (!h) {
         ptrace(PTRACE_DETACH, pid, NULL, NULL);
         return NULL;
@@ -166,7 +166,7 @@ remote_hook_handle_t remote_hook_attach(int pid)
     return h;
 }
 
-int remote_hook_detach(remote_hook_handle_t handle)
+int kh_remote_hook_detach(kh_remote_hook_handle_t handle)
 {
     if (!handle)
         return -EINVAL;
@@ -190,7 +190,7 @@ int remote_hook_detach(remote_hook_handle_t handle)
     return 0;
 }
 
-uint64_t remote_hook_alloc(remote_hook_handle_t handle, uint64_t size, int prot)
+uint64_t kh_remote_hook_alloc(kh_remote_hook_handle_t handle, uint64_t size, int prot)
 {
     if (!handle)
         return 0;
@@ -214,7 +214,7 @@ uint64_t remote_hook_alloc(remote_hook_handle_t handle, uint64_t size, int prot)
     return (uint64_t)ret;
 }
 
-int remote_hook_install(remote_hook_handle_t handle, uint64_t func_addr,
+int kh_remote_hook_install(kh_remote_hook_handle_t handle, uint64_t func_addr,
                         const void *transit_code, uint64_t transit_size)
 {
     if (!handle || !transit_code || transit_size == 0)
@@ -248,7 +248,7 @@ int remote_hook_install(remote_hook_handle_t handle, uint64_t func_addr,
     if (ret < 0)
         return (int)ret;
 
-    /* Write the hook code */
+    /* Write the kh_hook code */
     ssize_t written = process_vm_writev(handle->pid, &local_iov, 1,
                                         &remote_iov, 1, 0);
     if (written < 0 || (uint64_t)written != transit_size) {

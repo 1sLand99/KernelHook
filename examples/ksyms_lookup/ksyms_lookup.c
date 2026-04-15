@@ -7,19 +7,19 @@
  *   - Show cached vs uncached lookup
  *   - Handle nonexistent symbols gracefully
  *
- * This example does NOT need hook_mem_init or pgtable_init —
+ * This example does NOT need kh_mem_init or pgtable_init —
  * only kmod_compat_init for ksyms resolution.
  */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include "../../kmod/src/compat.h"
 #else
@@ -28,7 +28,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #endif
 

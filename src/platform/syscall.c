@@ -2,7 +2,7 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * Syscall-level hook infrastructure — port of KernelPatch
+ * Syscall-level kh_hook infrastructure — port of KernelPatch
  * kernel/patch/common/syscall.c, 64-bit only (no compat branches,
  * no AArch32 table, no kstorage).
  *
@@ -12,11 +12,11 @@
  *     (kh_has_syscall_wrapper).
  *   - Per-syscall entry resolution via a name table + ksyms probe
  *     (kh_syscalln_name_addr / kh_syscalln_addr).
- *   - `kh_hook_syscalln` / `kh_unhook_syscalln`: always inline-hook
+ *   - `kh_hook_syscalln` / `kh_unhook_syscalln`: always inline-kh_hook
  *     __arm64_sys_<name> (via kh_syscalln_name_addr). The sys_call_table
- *     fp-hook path is deliberately NOT used — on GKI ≥ 5.10 kernels
+ *     fp-kh_hook path is deliberately NOT used — on GKI ≥ 5.10 kernels
  *     `sys_call_table` is __ro_after_init, and even after clearing RO,
- *     kCFI in invoke_syscall() rejects the fp-hook trampoline (type
+ *     kCFI in invoke_syscall() rejects the fp-kh_hook trampoline (type
  *     hash mismatch). kh_sys_call_table is resolved only for discovery/
  *     diagnostic purposes (callers may find syscall implementation
  *     addresses through it).
@@ -25,7 +25,7 @@
 
 #include <types.h>
 #include <kh_log.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <syscall.h>
 #include <syscall_names.h>
@@ -607,16 +607,16 @@ long kh_raw_syscall6(long nr, long a0, long a1, long a2, long a3,
 /* ---- Hook install / remove ---- */
 
 __attribute__((no_sanitize("kcfi")))
-hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after,
+kh_hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after,
                             void *udata)
 {
-    /* Always use inline hook on __arm64_sys_<name>. See file header
-     * comment for why sys_call_table fp-hook is deliberately avoided. */
+    /* Always use inline kh_hook on __arm64_sys_<name>. See file header
+     * comment for why sys_call_table fp-kh_hook is deliberately avoided. */
     int phys_narg = kh_has_syscall_wrapper ? 1 : narg;
     uintptr_t addr = kh_syscalln_name_addr(nr);
     if (!addr)
         return HOOK_BAD_ADDRESS;
-    return hook_wrap((void *)addr, phys_narg, before, after, udata, 0);
+    return kh_hook_wrap((void *)addr, phys_narg, before, after, udata, 0);
 }
 
 __attribute__((no_sanitize("kcfi")))
@@ -624,7 +624,7 @@ void kh_unhook_syscalln(int nr, void *before, void *after)
 {
     uintptr_t addr = kh_syscalln_name_addr(nr);
     if (addr)
-        hook_unwrap((void *)addr, before, after);
+        kh_hook_unwrap((void *)addr, before, after);
 }
 
 /* ---- Init ---- */

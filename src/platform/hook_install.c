@@ -1,14 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Userspace hook_install / hook_uninstall and transit buffer setup.
+ * Userspace kh_hook_install / kh_hook_uninstall and transit buffer setup.
  *
  * Replaces kernel pgtable-based write_insts_at() with
- * platform_set_rw / platform_set_rx + icache flush.
+ * kh_platform_set_rw / kh_platform_set_rx + icache flush.
  */
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <kh_log.h>
 #include <platform.h>
 #define memcpy __builtin_memcpy
@@ -16,19 +16,19 @@
 static void write_insts_at(uint64_t va, uint32_t *insts, int32_t count)
 {
     uint64_t size = (uint64_t)count * sizeof(uint32_t);
-    platform_write_code(va, insts, size);
+    kh_platform_write_code(va, insts, size);
 }
 
 /* ---- Public API ---- */
 
-void hook_install(hook_t *hook)
+void kh_hook_install(kh_hook_t *kh_hook)
 {
-    write_insts_at(hook->origin_addr, hook->tramp_insts, hook->tramp_insts_num);
+    write_insts_at(kh_hook->origin_addr, kh_hook->tramp_insts, kh_hook->tramp_insts_num);
 }
 
-void hook_uninstall(hook_t *hook)
+void kh_hook_uninstall(kh_hook_t *kh_hook)
 {
-    write_insts_at(hook->origin_addr, hook->origin_insts, hook->tramp_insts_num);
+    write_insts_at(kh_hook->origin_addr, kh_hook->origin_insts, kh_hook->tramp_insts_num);
 }
 
 /* ---- Transit buffer setup ---- */
@@ -68,13 +68,13 @@ static void setup_transit(void *rox, uint32_t *transit,
     memcpy(&transit[2], stub_start, sz);
 }
 
-void hook_chain_setup_transit(hook_chain_rox_t *rox)
+void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox)
 {
     setup_transit(rox, rox->transit,
                   (void *)(uintptr_t)_transit, (void *)(uintptr_t)_transit_end);
 }
 
-void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox)
+void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox)
 {
     setup_transit(rox, rox->transit,
                   (void *)(uintptr_t)_fp_transit, (void *)(uintptr_t)_fp_transit_end);

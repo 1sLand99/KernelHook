@@ -3,7 +3,7 @@
  * Copyright (C) 2026 bmax121.
  */
 
-#include <hook.h>
+#include <kh_hook.h>
 #include <insn.h>
 
 static uint32_t can_b_rel(uint64_t src_addr, uint64_t dst_addr)

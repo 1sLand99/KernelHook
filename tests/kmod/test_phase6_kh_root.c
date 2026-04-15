@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Phase 6: /system/bin/kh_root demo -- hook execve/faccessat/fstatat to
+/* Phase 6: /system/bin/kh_root demo -- kh_hook execve/faccessat/fstatat to
  * unconditionally elevate any caller of "/system/bin/kh_root" to uid=0
  * and redirect the execve to /system/bin/sh.
  *
@@ -9,13 +9,13 @@
  *   - Single hardcoded magic path
  *   - 64-bit only, no compat
  *
- * IMPLEMENTATION NOTE: we hook __arm64_sys_<name> via inline hook
- * (hook_wrap) rather than via kh_hook_syscalln(). Reasons:
+ * IMPLEMENTATION NOTE: we kh_hook __arm64_sys_<name> via inline kh_hook
+ * (kh_hook_wrap) rather than via kh_hook_syscalln(). Reasons:
  *   1. sys_call_table on Pixel 6 GKI 6.1 lives in __ro_after_init and
  *      cannot be written without temporarily clearing PTE_RDONLY.
  *   2. Even if we make the table writable, kCFI on invoke_syscall
  *      enforces a type-id check on each indirect call: the trampoline
- *      from fp_hook_wrap doesn't carry the kCFI hash that
+ *      from kh_fp_hook_wrap doesn't carry the kCFI hash that
  *      __arm64_sys_<name> functions do, so the call faults with
  *      "CFI failure at invoke_syscall+0x50/0x11c (target: ...,
  *      expected type: 0xb02b34d9)".
@@ -29,7 +29,7 @@
 
 #include <types.h>
 #include <kh_log.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <syscall.h>
 #include <uaccess.h>
@@ -95,7 +95,7 @@ static int match_user_path(const void *u_filename, const char *target)
  * the regs[0] slot to point at /system/bin/sh on the user stack so the
  * kernel proceeds with a real shell exec. */
 __attribute__((no_sanitize("kcfi")))
-static void kh_before_execve(hook_fargs1_t *args, void *udata)
+static void kh_before_execve(kh_hook_fargs1_t *args, void *udata)
 {
     (void)udata;
     void **u_filename_p = (void **)kh_syscall_argn_p(args, 0);
@@ -121,7 +121,7 @@ static void kh_before_execve(hook_fargs1_t *args, void *udata)
  * This makes shell `test -x /system/bin/kh_root` and `access(2)` succeed
  * even when no binary exists at that path. */
 __attribute__((no_sanitize("kcfi")))
-static void kh_before_path_arg1(hook_fargs1_t *args, void *udata)
+static void kh_before_path_arg1(kh_hook_fargs1_t *args, void *udata)
 {
     (void)udata;
     void **u_filename_p = (void **)kh_syscall_argn_p(args, 1);
@@ -164,15 +164,15 @@ int kh_root_install(void)
         return -1;
     }
 
-    /* Inline-hook the __arm64_sys_<name> wrappers. argno=1 because the
+    /* Inline-kh_hook the __arm64_sys_<name> wrappers. argno=1 because the
      * wrappers all have the pt_regs* signature; our callbacks reach
      * the actual syscall args via kh_syscall_argn_p() which indexes
      * pt_regs->regs[N]. */
-    hook_err_t e1 = hook_wrap((void *)kh_addr_execve,    1,
+    kh_hook_err_t e1 = kh_hook_wrap((void *)kh_addr_execve,    1,
         (void *)kh_before_execve,    NULL, NULL, 0);
-    hook_err_t e2 = hook_wrap((void *)kh_addr_faccessat, 1,
+    kh_hook_err_t e2 = kh_hook_wrap((void *)kh_addr_faccessat, 1,
         (void *)kh_before_path_arg1, NULL, NULL, 0);
-    hook_err_t e3 = hook_wrap((void *)kh_addr_fstatat,   1,
+    kh_hook_err_t e3 = kh_hook_wrap((void *)kh_addr_fstatat,   1,
         (void *)kh_before_path_arg1, NULL, NULL, 0);
 
     pr_info("[KH/Phase6] hooks installed: execve=%d faccessat=%d fstatat=%d\n",
@@ -194,11 +194,11 @@ void kh_root_uninstall(void)
 {
     if (!kh_root_installed) return;
     if (kh_addr_execve)
-        hook_unwrap((void *)kh_addr_execve,    (void *)kh_before_execve,    NULL);
+        kh_hook_unwrap((void *)kh_addr_execve,    (void *)kh_before_execve,    NULL);
     if (kh_addr_faccessat)
-        hook_unwrap((void *)kh_addr_faccessat, (void *)kh_before_path_arg1, NULL);
+        kh_hook_unwrap((void *)kh_addr_faccessat, (void *)kh_before_path_arg1, NULL);
     if (kh_addr_fstatat)
-        hook_unwrap((void *)kh_addr_fstatat,   (void *)kh_before_path_arg1, NULL);
+        kh_hook_unwrap((void *)kh_addr_fstatat,   (void *)kh_before_path_arg1, NULL);
     kh_addr_execve = kh_addr_faccessat = kh_addr_fstatat = 0;
     kh_root_installed = 0;
 }

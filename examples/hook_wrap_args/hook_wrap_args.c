@@ -2,20 +2,20 @@
 /*
  * hook_wrap_args.c — Argument inspection and return value override example.
  *
- * Demonstrates hook_wrap4 with both before and after callbacks:
+ * Demonstrates kh_hook_wrap4 with both before and after callbacks:
  *   - before: log arg0-arg3
  *   - after: log original return value, then override with 0
  */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -27,7 +27,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -59,7 +59,7 @@ static void *hooked_func = NULL;
  *
  * arg0 = dfd, arg1 = filename, arg2 = how pointer, arg3 = (unused)
  */
-static void openat2_before(hook_fargs4_t *fargs, void *udata)
+static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_wrap_args: BEFORE arg0(dfd)=%lld arg1(filename)=%llx "
 	      "arg2(how)=%llx arg3=%llx",
@@ -71,7 +71,7 @@ static void openat2_before(hook_fargs4_t *fargs, void *udata)
 
 /* ---- After callback: inspect and override return value ---- */
 
-static void openat2_after(hook_fargs4_t *fargs, void *udata)
+static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_wrap_args: AFTER original ret=%lld, overriding with 0",
 	      (long long)fargs->ret);
@@ -83,7 +83,7 @@ static void openat2_after(hook_fargs4_t *fargs, void *udata)
 static int __init hook_wrap_args_init(void)
 {
 	void *target;
-	hook_err_t err;
+	kh_hook_err_t err;
 
 #if !defined(KH_SDK_MODE)
 	int rc;
@@ -125,9 +125,9 @@ static int __init hook_wrap_args_init(void)
 		return 0;
 	}
 
-	err = hook_wrap4(target, openat2_before, openat2_after, NULL);
+	err = kh_hook_wrap4(target, openat2_before, openat2_after, NULL);
 	if (err != HOOK_NO_ERR) {
-		pr_err("hook_wrap_args: hook_wrap4 failed (%d)", (int)err);
+		pr_err("hook_wrap_args: kh_hook_wrap4 failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -143,7 +143,7 @@ static int __init hook_wrap_args_init(void)
 static void __exit hook_wrap_args_exit(void)
 {
 	if (hooked_func) {
-		hook_unwrap(hooked_func, (void *)openat2_before, (void *)openat2_after);
+		kh_hook_unwrap(hooked_func, (void *)openat2_before, (void *)openat2_after);
 		hooked_func = NULL;
 		pr_info("hook_wrap_args: unhooked");
 	}

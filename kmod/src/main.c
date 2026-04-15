@@ -11,7 +11,7 @@
 #include <linux/init.h>
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <sync.h>
 #include <memory.h>
 #include <symbol.h>
@@ -39,8 +39,8 @@ static unsigned long kallsyms_addr __attribute__((used, section(".data"))) = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required for freestanding builds)");
 
-extern void hook_chain_setup_transit(hook_chain_rox_t *rox);
-extern void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
+extern void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox);
+extern void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox);
 extern void kh_write_insts_init(void);
 extern void kh_write_insts_cleanup(void);
 
@@ -64,7 +64,7 @@ static int __init kernelhook_init(void)
         return rc;
     }
 
-    /* Initialize page table walker — required for hook_install() to
+    /* Initialize page table walker — required for kh_hook_install() to
      * modify kernel code pages via PTE manipulation. */
     rc = kh_pgtable_init();
     if (rc) {
@@ -76,7 +76,7 @@ static int __init kernelhook_init(void)
     /* Resolve set_memory_rw/ro/x for write_insts_at */
     kh_write_insts_init();
 
-    rc = sync_init();
+    rc = kh_sync_init();
     if (rc) {
         pr_err("kernelhook: sync init failed (%d)\n", rc);
         kmod_hook_mem_cleanup();
@@ -84,7 +84,7 @@ static int __init kernelhook_init(void)
     }
 
     /* Syscall infra + uaccess helpers. Non-fatal: the framework still
-     * provides inline/fp hook APIs if these fail to initialise. */
+     * provides inline/fp kh_hook APIs if these fail to initialise. */
     {
         extern int kh_syscall_init(void);
         extern int kh_uaccess_init(void);
@@ -102,7 +102,7 @@ static int __init kernelhook_init(void)
 }
 
 /*
- * IMPORTANT: Consumer modules MUST call hook_unwrap()/unhook() for all
+ * IMPORTANT: Consumer modules MUST call kh_hook_unwrap()/kh_unhook() for all
  * their hooks before kernelhook.ko is unloaded. This module does not
  * track or teardown hooks registered by other modules.
  */

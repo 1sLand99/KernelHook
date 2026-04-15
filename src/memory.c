@@ -6,7 +6,7 @@
 
 #include <types.h>
 #include <memory.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <kh_log.h>
 
 /* Pool configuration */
@@ -37,7 +37,7 @@ typedef struct {
     uint32_t total_blocks;
     uint32_t used_blocks;
     uint32_t block_size;
-    hook_mem_ops_t ops;
+    kh_mem_ops_t ops;
 } bitmap_pool_t;
 
 /* Static pools and their bitmaps */
@@ -150,7 +150,7 @@ static void bitmap_free(bitmap_pool_t *pool, void *ptr, size_t size)
 
 KCFI_EXEMPT
 static int pool_init(bitmap_pool_t *pool, uint8_t *bitmap, uint32_t bitmap_size,
-                     uintptr_t pool_size, const hook_mem_ops_t *ops, const char *label)
+                     uintptr_t pool_size, const kh_mem_ops_t *ops, const char *label)
 {
     if (!ops || !ops->alloc) {
         pr_err("hmem: %s pool has no allocator", label);
@@ -201,7 +201,7 @@ static void pool_cleanup(bitmap_pool_t *pool)
 
 /* ---- Public API ---- */
 
-int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, uintptr_t page_sz)
+int kh_mem_init(const kh_mem_ops_t *rox_ops, const kh_mem_ops_t *rw_ops, uintptr_t page_sz)
 {
     if (page_sz)
         hmem_page_size = page_sz;
@@ -222,7 +222,7 @@ int hook_mem_init(const hook_mem_ops_t *rox_ops, const hook_mem_ops_t *rw_ops, u
     return 0;
 }
 
-void hook_mem_cleanup(void)
+void kh_mem_cleanup(void)
 {
     pool_cleanup(&g_rox_pool);
     pool_cleanup(&g_rw_pool);
@@ -230,38 +230,38 @@ void hook_mem_cleanup(void)
     pr_info("hmem: memory manager cleaned up");
 }
 
-uintptr_t hook_mem_rox_pool_base(void)
+uintptr_t kh_mem_rox_pool_base(void)
 {
     return g_rox_pool.pool_base;
 }
 
-uintptr_t hook_mem_rox_pool_size(void)
+uintptr_t kh_mem_rox_pool_size(void)
 {
     return g_rox_pool.pool_size;
 }
 
-void *hook_mem_alloc_rox(size_t size)
+void *kh_mem_alloc_rox(size_t size)
 {
     return bitmap_alloc(&g_rox_pool, size);
 }
 
-void *hook_mem_alloc_rw(size_t size)
+void *kh_mem_alloc_rw(size_t size)
 {
     return bitmap_alloc(&g_rw_pool, size);
 }
 
-void hook_mem_free_rox(void *ptr, size_t size)
+void kh_mem_free_rox(void *ptr, size_t size)
 {
     bitmap_free(&g_rox_pool, ptr, size);
 }
 
-void hook_mem_free_rw(void *ptr, size_t size)
+void kh_mem_free_rw(void *ptr, size_t size)
 {
     bitmap_free(&g_rw_pool, ptr, size);
 }
 
 KCFI_EXEMPT
-int hook_mem_rox_write_enable(void *ptr, size_t size)
+int kh_mem_rox_write_enable(void *ptr, size_t size)
 {
     if (!ptr || size == 0)
         return -1;
@@ -279,7 +279,7 @@ int hook_mem_rox_write_enable(void *ptr, size_t size)
 }
 
 KCFI_EXEMPT
-int hook_mem_rox_write_disable(void *ptr, size_t size)
+int kh_mem_rox_write_disable(void *ptr, size_t size)
 {
     if (!ptr || size == 0)
         return -1;
@@ -311,7 +311,7 @@ int hook_mem_rox_write_disable(void *ptr, size_t size)
     return 0;
 }
 
-int hook_mem_register_origin(uintptr_t origin_addr, void *rox_ptr)
+int kh_mem_register_origin(uintptr_t origin_addr, void *rox_ptr)
 {
     if (!origin_addr || !rox_ptr)
         return -1;
@@ -334,7 +334,7 @@ int hook_mem_register_origin(uintptr_t origin_addr, void *rox_ptr)
     return 0;
 }
 
-void hook_mem_unregister_origin(uintptr_t origin_addr)
+void kh_mem_unregister_origin(uintptr_t origin_addr)
 {
     for (int32_t i = 0; i < origin_map_count; i++) {
         if (origin_map[i].origin_addr == origin_addr) {
@@ -346,7 +346,7 @@ void hook_mem_unregister_origin(uintptr_t origin_addr)
     }
 }
 
-void *hook_mem_get_rox_from_origin(uintptr_t origin_addr)
+void *kh_mem_get_rox_from_origin(uintptr_t origin_addr)
 {
     if (!origin_addr)
         return NULL;
@@ -358,20 +358,20 @@ void *hook_mem_get_rox_from_origin(uintptr_t origin_addr)
     return NULL;
 }
 
-void *hook_mem_get_rw_from_origin(uintptr_t origin_addr)
+void *kh_mem_get_rw_from_origin(uintptr_t origin_addr)
 {
-    hook_chain_rox_t *rox = (hook_chain_rox_t *)hook_mem_get_rox_from_origin(origin_addr);
+    kh_hook_chain_rox_t *rox = (kh_hook_chain_rox_t *)kh_mem_get_rox_from_origin(origin_addr);
     if (rox && rox->rw)
         return rox->rw;
     return NULL;
 }
 
-uint32_t hook_mem_rox_used_blocks(void)
+uint32_t kh_mem_rox_used_blocks(void)
 {
     return g_rox_pool.used_blocks;
 }
 
-uint32_t hook_mem_rw_used_blocks(void)
+uint32_t kh_mem_rw_used_blocks(void)
 {
     return g_rw_pool.used_blocks;
 }

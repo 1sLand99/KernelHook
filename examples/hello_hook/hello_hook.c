@@ -14,13 +14,13 @@
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -32,7 +32,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -54,7 +54,7 @@ module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required)");
 #endif
 
-/* The function we hooked — saved for unhook on exit */
+/* The function we hooked — saved for kh_unhook on exit */
 static void *hooked_func = NULL;
 
 /* ---- Before callback ---- */
@@ -64,10 +64,10 @@ static void *hooked_func = NULL;
  *                struct open_how *how)
  *
  * arg0 = dfd, arg1 = filename ptr, arg2 = open_how ptr
- * We only need the filename, so hook_wrap4 (≥4 regs captured) is
+ * We only need the filename, so kh_hook_wrap4 (≥4 regs captured) is
  * sufficient — arg1 is the user-space filename pointer.
  */
-static void open_before(hook_fargs4_t *fargs, void *udata)
+static void open_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     /* arg1 is the user-space filename pointer */
     const char *filename = (const char *)fargs->arg1;
@@ -120,9 +120,9 @@ static int __init hello_hook_init(void)
         return -ENOENT;
     }
 
-    hook_err_t err = hook_wrap4(target, open_before, NULL, NULL);
+    kh_hook_err_t err = kh_hook_wrap4(target, open_before, NULL, NULL);
     if (err != HOOK_NO_ERR) {
-        pr_err("hello_hook: hook_wrap4 failed (%d)", (int)err);
+        pr_err("hello_hook: kh_hook_wrap4 failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
         kmod_hook_mem_cleanup();
 #endif
@@ -137,7 +137,7 @@ static int __init hello_hook_init(void)
 static void __exit hello_hook_exit(void)
 {
     if (hooked_func) {
-        hook_unwrap(hooked_func, open_before, NULL);
+        kh_hook_unwrap(hooked_func, open_before, NULL);
         hooked_func = NULL;
         pr_info("hello_hook: unhooked");
     }

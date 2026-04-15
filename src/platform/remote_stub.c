@@ -11,19 +11,19 @@
 #include <remote_hook.h>
 #include <errno.h>
 
-remote_hook_handle_t remote_hook_attach(int pid)
+kh_remote_hook_handle_t kh_remote_hook_attach(int pid)
 {
     (void)pid;
     return NULL;
 }
 
-int remote_hook_detach(remote_hook_handle_t handle)
+int kh_remote_hook_detach(kh_remote_hook_handle_t handle)
 {
     (void)handle;
     return -ENOTSUP;
 }
 
-uint64_t remote_hook_alloc(remote_hook_handle_t handle, uint64_t size, int prot)
+uint64_t kh_remote_hook_alloc(kh_remote_hook_handle_t handle, uint64_t size, int prot)
 {
     (void)handle;
     (void)size;
@@ -31,7 +31,7 @@ uint64_t remote_hook_alloc(remote_hook_handle_t handle, uint64_t size, int prot)
     return 0;
 }
 
-int remote_hook_install(remote_hook_handle_t handle, uint64_t func_addr,
+int kh_remote_hook_install(kh_remote_hook_handle_t handle, uint64_t func_addr,
                         const void *transit_code, uint64_t transit_size)
 {
     (void)handle;

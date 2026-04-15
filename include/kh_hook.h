@@ -17,7 +17,7 @@ typedef enum
     HOOK_BAD_RELO = 4092,
     HOOK_TRANSIT_NO_MEM = 4091,
     HOOK_CHAIN_FULL = 4090,
-} hook_err_t;
+} kh_hook_err_t;
 
 enum hook_type
 {
@@ -118,7 +118,7 @@ enum hook_type
 
 #define HOOK_LOCAL_DATA_NUM 4
 
-/* ---- Core hook_t (inline hook state) ---- */
+/* ---- Core kh_hook_t (inline kh_hook state) ---- */
 
 typedef struct
 {
@@ -139,7 +139,7 @@ typedef struct
      * On non-kCFI kernels _relo_cfi_hash is harmless unused data. */
     uint32_t _relo_cfi_hash;
     uint32_t relo_insts[RELOCATE_INST_NUM];
-} hook_t __aligned(8);
+} kh_hook_t __aligned(8);
 
 /* ---- Per-item local storage ---- */
 
@@ -156,20 +156,20 @@ typedef struct
         };
         uint64_t data[HOOK_LOCAL_DATA_NUM];
     };
-} hook_local_t;
+} kh_hook_local_t;
 
 /* ---- Hook fargs: local is now a pointer ---- */
 
 #define HOOK_FARGS_COMMON                                                                    \
     void *chain;                                                                             \
     int32_t skip_origin;                                                                         \
-    hook_local_t *local;                                                                     \
+    kh_hook_local_t *local;                                                                     \
     uint64_t ret;
 
 typedef struct
 {
     HOOK_FARGS_COMMON
-} hook_fargs0_t __aligned(8);
+} kh_hook_fargs0_t __aligned(8);
 
 typedef struct
 {
@@ -179,11 +179,11 @@ typedef struct
         struct { uint64_t arg0; uint64_t arg1; uint64_t arg2; uint64_t arg3; };
         uint64_t args[4];
     };
-} hook_fargs4_t __aligned(8);
+} kh_hook_fargs4_t __aligned(8);
 
-typedef hook_fargs4_t hook_fargs1_t;
-typedef hook_fargs4_t hook_fargs2_t;
-typedef hook_fargs4_t hook_fargs3_t;
+typedef kh_hook_fargs4_t kh_hook_fargs1_t;
+typedef kh_hook_fargs4_t kh_hook_fargs2_t;
+typedef kh_hook_fargs4_t kh_hook_fargs3_t;
 
 typedef struct
 {
@@ -196,11 +196,11 @@ typedef struct
         };
         uint64_t args[8];
     };
-} hook_fargs8_t __aligned(8);
+} kh_hook_fargs8_t __aligned(8);
 
-typedef hook_fargs8_t hook_fargs5_t;
-typedef hook_fargs8_t hook_fargs6_t;
-typedef hook_fargs8_t hook_fargs7_t;
+typedef kh_hook_fargs8_t kh_hook_fargs5_t;
+typedef kh_hook_fargs8_t kh_hook_fargs6_t;
+typedef kh_hook_fargs8_t kh_hook_fargs7_t;
 
 typedef struct
 {
@@ -214,16 +214,16 @@ typedef struct
         };
         uint64_t args[12];
     };
-} hook_fargs12_t __aligned(8);
+} kh_hook_fargs12_t __aligned(8);
 
-typedef hook_fargs12_t hook_fargs9_t;
-typedef hook_fargs12_t hook_fargs10_t;
-typedef hook_fargs12_t hook_fargs11_t;
+typedef kh_hook_fargs12_t kh_hook_fargs9_t;
+typedef kh_hook_fargs12_t kh_hook_fargs10_t;
+typedef kh_hook_fargs12_t kh_hook_fargs11_t;
 
 /* ---- Callback typedefs (generated) ---- */
 
 #define _HOOK_DEFINE_CB_TYPEDEF(N) \
-    typedef void (*hook_chain##N##_callback)(hook_fargs##N##_t *fargs, void *udata);
+    typedef void (*kh_hook_chain##N##_callback)(kh_hook_fargs##N##_t *fargs, void *udata);
 
 _HOOK_DEFINE_CB_TYPEDEF(0)
 _HOOK_DEFINE_CB_TYPEDEF(1)
@@ -247,62 +247,62 @@ typedef struct
     void *after;
     void *udata;
     int32_t priority;
-    hook_local_t local;
-} hook_chain_item_t __aligned(8);
+    kh_hook_local_t local;
+} kh_hook_chain_item_t __aligned(8);
 
-/* ---- ROX/RW split: inline hook chain ---- */
+/* ---- ROX/RW split: inline kh_hook chain ---- */
 
-struct hook_chain_rw;
+struct kh_hook_chain_rw;
 
 typedef struct
 {
-    hook_t hook;
-    struct hook_chain_rw *rw;
+    kh_hook_t kh_hook;
+    struct kh_hook_chain_rw *rw;
     uint32_t transit[TRANSIT_INST_NUM];
-} hook_chain_rox_t __aligned(64);
+} kh_hook_chain_rox_t __aligned(64);
 
-typedef struct hook_chain_rw
+typedef struct kh_hook_chain_rw
 {
-    hook_chain_rox_t *rox;
+    kh_hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
     int32_t sorted_count;
     uint16_t occupied_mask;
     /* 2 bytes implicit padding */
     int32_t sorted_indices[HOOK_CHAIN_NUM];
-    hook_chain_item_t items[HOOK_CHAIN_NUM];
-} hook_chain_rw_t __aligned(8);
+    kh_hook_chain_item_t items[HOOK_CHAIN_NUM];
+} kh_hook_chain_rw_t __aligned(8);
 
-/* ---- Function pointer hook ---- */
+/* ---- Function pointer kh_hook ---- */
 
 typedef struct
 {
     uintptr_t fp_addr;
     uintptr_t replace_addr;
     uintptr_t origin_fp;
-} fp_hook_t __aligned(8);
+} kh_fp_hook_t __aligned(8);
 
-/* ---- ROX/RW split: function pointer hook chain ---- */
+/* ---- ROX/RW split: function pointer kh_hook chain ---- */
 
-struct fp_hook_chain_rw;
+struct kh_fp_hook_chain_rw;
 
 typedef struct
 {
-    fp_hook_t hook;
-    struct fp_hook_chain_rw *rw;
+    kh_fp_hook_t kh_hook;
+    struct kh_fp_hook_chain_rw *rw;
     uint32_t transit[TRANSIT_INST_NUM];
-} fp_hook_chain_rox_t __aligned(64);
+} kh_fp_hook_chain_rox_t __aligned(64);
 
-typedef struct fp_hook_chain_rw
+typedef struct kh_fp_hook_chain_rw
 {
-    fp_hook_chain_rox_t *rox;
+    kh_fp_hook_chain_rox_t *rox;
     int32_t chain_items_max;
     int32_t argno;
     int32_t sorted_count;
     uint32_t occupied_mask;
     int32_t sorted_indices[FP_HOOK_CHAIN_NUM];
-    hook_chain_item_t items[FP_HOOK_CHAIN_NUM];
-} fp_hook_chain_rw_t __aligned(8);
+    kh_hook_chain_item_t items[FP_HOOK_CHAIN_NUM];
+} kh_fp_hook_chain_rw_t __aligned(8);
 
 /* ---- Utility ---- */
 
@@ -320,67 +320,67 @@ static inline int is_bad_address(void *addr)
 
 /* ---- Hook prepare / install / uninstall ---- */
 
-hook_err_t hook_prepare(hook_t *hook);
-void hook_install(hook_t *hook);
-void hook_uninstall(hook_t *hook);
+kh_hook_err_t kh_hook_prepare(kh_hook_t *kh_hook);
+void kh_hook_install(kh_hook_t *kh_hook);
+void kh_hook_uninstall(kh_hook_t *kh_hook);
 
-/* ---- Inline hook API ---- */
+/* ---- Inline kh_hook API ---- */
 
-hook_err_t hook(void *func, void *replace, void **backup);
-void unhook(void *func);
+kh_hook_err_t kh_hook(void *func, void *replace, void **backup);
+void kh_unhook(void *func);
 
-hook_err_t hook_chain_add(hook_chain_rw_t *rw, void *before, void *after, void *udata, int32_t priority);
-void hook_chain_remove(hook_chain_rw_t *rw, void *before, void *after);
+kh_hook_err_t kh_hook_chain_add(kh_hook_chain_rw_t *rw, void *before, void *after, void *udata, int32_t priority);
+void kh_hook_chain_remove(kh_hook_chain_rw_t *rw, void *before, void *after);
 
-hook_err_t hook_wrap(void *func, int32_t argno, void *before, void *after, void *udata, int32_t priority);
+kh_hook_err_t kh_hook_wrap(void *func, int32_t argno, void *before, void *after, void *udata, int32_t priority);
 
-void hook_unwrap_remove(void *func, void *before, void *after, int remove);
+void kh_hook_unwrap_remove(void *func, void *before, void *after, int remove);
 
-static inline void hook_unwrap(void *func, void *before, void *after)
+static inline void kh_hook_unwrap(void *func, void *before, void *after)
 {
-    hook_unwrap_remove(func, before, after, 1);
+    kh_hook_unwrap_remove(func, before, after, 1);
 }
 
 /* ---- Origin function access ---- */
 
 static inline void *wrap_get_origin_func(void *hook_args)
 {
-    hook_fargs0_t *args = (hook_fargs0_t *)hook_args;
-    hook_chain_rox_t *rox = (hook_chain_rox_t *)args->chain;
-    return (void *)rox->hook.relo_addr;
+    kh_hook_fargs0_t *args = (kh_hook_fargs0_t *)hook_args;
+    kh_hook_chain_rox_t *rox = (kh_hook_chain_rox_t *)args->chain;
+    return (void *)rox->kh_hook.relo_addr;
 }
 
-/* ---- Function pointer hook API ---- */
+/* ---- Function pointer kh_hook API ---- */
 
-void fp_hook(uintptr_t fp_addr, void *replace, void **backup);
-void fp_unhook(uintptr_t fp_addr, void *backup);
+void kh_fp_hook(uintptr_t fp_addr, void *replace, void **backup);
+void kh_fp_unhook(uintptr_t fp_addr, void *backup);
 
-hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before, void *after, void *udata, int32_t priority);
+kh_hook_err_t kh_fp_hook_wrap(uintptr_t fp_addr, int32_t argno, void *before, void *after, void *udata, int32_t priority);
 
-void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after);
+void kh_fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after);
 
 static inline void *fp_get_origin_func(void *hook_args)
 {
-    hook_fargs0_t *args = (hook_fargs0_t *)hook_args;
-    fp_hook_chain_rox_t *rox = (fp_hook_chain_rox_t *)args->chain;
-    return (void *)rox->hook.origin_fp;
+    kh_hook_fargs0_t *args = (kh_hook_fargs0_t *)hook_args;
+    kh_fp_hook_chain_rox_t *rox = (kh_fp_hook_chain_rox_t *)args->chain;
+    return (void *)rox->kh_hook.origin_fp;
 }
 
 /* ---- Transit buffer setup (userspace) ---- */
 
-void hook_chain_setup_transit(hook_chain_rox_t *rox);
-void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox);
+void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox);
+void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox);
 
 /* ---- Typed convenience wrappers (generated via X-macro) ---- */
 
 #define _HOOK_WRAP_VARIANTS(N)                                                                     \
-    static inline hook_err_t hook_wrap##N(void *func, hook_chain##N##_callback before,             \
-        hook_chain##N##_callback after, void *udata) {                                             \
-        return hook_wrap(func, N, (void *)before, (void *)after, udata, 0);                        \
+    static inline kh_hook_err_t kh_hook_wrap##N(void *func, kh_hook_chain##N##_callback before,             \
+        kh_hook_chain##N##_callback after, void *udata) {                                             \
+        return kh_hook_wrap(func, N, (void *)before, (void *)after, udata, 0);                        \
     }                                                                                              \
-    static inline hook_err_t fp_hook_wrap##N(uintptr_t fp_addr, hook_chain##N##_callback before,   \
-        hook_chain##N##_callback after, void *udata) {                                             \
-        return fp_hook_wrap(fp_addr, N, (void *)before, (void *)after, udata, 0);                  \
+    static inline kh_hook_err_t kh_fp_hook_wrap##N(uintptr_t fp_addr, kh_hook_chain##N##_callback before,   \
+        kh_hook_chain##N##_callback after, void *udata) {                                             \
+        return kh_fp_hook_wrap(fp_addr, N, (void *)before, (void *)after, udata, 0);                  \
     }
 
 _HOOK_WRAP_VARIANTS(0)

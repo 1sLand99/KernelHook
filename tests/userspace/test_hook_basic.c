@@ -5,7 +5,7 @@
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <string.h>
@@ -71,18 +71,18 @@ static void reset_state(void)
 
 static void hook_setup(void)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void hook_teardown(void)
 {
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* ---- Callbacks ---- */
 
-static void before_capture_args(hook_fargs2_t *fargs, void *udata)
+static void before_capture_args(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     before_called = 1;
@@ -94,28 +94,28 @@ static void before_capture_args(hook_fargs2_t *fargs, void *udata)
     }
 }
 
-static void after_capture_ret(hook_fargs2_t *fargs, void *udata)
+static void after_capture_ret(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     after_called = 1;
     captured_ret = fargs->ret;
 }
 
-static void after_modify_ret(hook_fargs2_t *fargs, void *udata)
+static void after_modify_ret(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     after_called = 1;
     fargs->ret = 999;
 }
 
-static void before_nop(hook_fargs0_t *fargs, void *udata)
+static void before_nop(kh_hook_fargs0_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
     before_called = 1;
 }
 
-static void after_nop(hook_fargs0_t *fargs, void *udata)
+static void after_nop(kh_hook_fargs0_t *fargs, void *udata)
 {
     (void)fargs;
     (void)udata;
@@ -125,7 +125,7 @@ static void after_nop(hook_fargs0_t *fargs, void *udata)
 /* 8-arg callbacks */
 static uint64_t captured_args[8];
 
-static void before_8args(hook_fargs8_t *fargs, void *udata)
+static void before_8args(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     before_called = 1;
@@ -133,7 +133,7 @@ static void before_8args(hook_fargs8_t *fargs, void *udata)
         captured_args[i] = fargs->args[i];
 }
 
-static void after_8args(hook_fargs8_t *fargs, void *udata)
+static void after_8args(kh_hook_fargs8_t *fargs, void *udata)
 {
     (void)udata;
     after_called = 1;
@@ -147,7 +147,7 @@ TEST(hook_basic_before_captures_args)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_add, 2,
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -158,7 +158,7 @@ TEST(hook_basic_before_captures_args)
     ASSERT_EQ(captured_arg0, 10);
     ASSERT_EQ(captured_arg1, 20);
 
-    hook_unwrap((void *)target_add,
+    kh_hook_unwrap((void *)target_add,
                 (void *)before_capture_args, NULL);
     hook_teardown();
 }
@@ -168,7 +168,7 @@ TEST(hook_basic_after_captures_ret)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_add, 2,
         NULL, (void *)after_capture_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -178,7 +178,7 @@ TEST(hook_basic_after_captures_ret)
     ASSERT_TRUE(after_called);
     ASSERT_EQ(captured_ret, 10);
 
-    hook_unwrap((void *)target_add,
+    kh_hook_unwrap((void *)target_add,
                 NULL, (void *)after_capture_ret);
     hook_teardown();
 }
@@ -188,7 +188,7 @@ TEST(hook_basic_after_modifies_ret)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_add, 2,
         NULL, (void *)after_modify_ret, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -198,7 +198,7 @@ TEST(hook_basic_after_modifies_ret)
     ASSERT_EQ(result, 999);
     ASSERT_TRUE(after_called);
 
-    hook_unwrap((void *)target_add,
+    kh_hook_unwrap((void *)target_add,
                 NULL, (void *)after_modify_ret);
     hook_teardown();
 }
@@ -210,7 +210,7 @@ TEST(hook_basic_skip_origin)
     should_skip_origin = 1;
     skip_ret_value = 777;
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_add, 2,
         (void *)before_capture_args, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -220,7 +220,7 @@ TEST(hook_basic_skip_origin)
     ASSERT_EQ(result, 777);
     ASSERT_TRUE(before_called);
 
-    hook_unwrap((void *)target_add,
+    kh_hook_unwrap((void *)target_add,
                 (void *)before_capture_args, NULL);
     hook_teardown();
 }
@@ -230,7 +230,7 @@ TEST(hook_basic_nop_0args)
     hook_setup();
     reset_state();
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_nop, 0,
         (void *)before_nop, (void *)after_nop, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -240,7 +240,7 @@ TEST(hook_basic_nop_0args)
     ASSERT_TRUE(before_called);
     ASSERT_TRUE(after_called);
 
-    hook_unwrap((void *)target_nop,
+    kh_hook_unwrap((void *)target_nop,
                 (void *)before_nop, (void *)after_nop);
     hook_teardown();
 }
@@ -251,7 +251,7 @@ TEST(hook_basic_8args)
     reset_state();
     memset(captured_args, 0, sizeof(captured_args));
 
-    hook_err_t rc = hook_wrap(
+    kh_hook_err_t rc = kh_hook_wrap(
         (void *)target_8args, 8,
         (void *)before_8args, (void *)after_8args, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -266,7 +266,7 @@ TEST(hook_basic_8args)
     for (int i = 0; i < 8; i++)
         ASSERT_EQ(captured_args[i], (uint64_t)(i + 1));
 
-    hook_unwrap((void *)target_8args,
+    kh_hook_unwrap((void *)target_8args,
                 (void *)before_8args, (void *)after_8args);
     hook_teardown();
 }

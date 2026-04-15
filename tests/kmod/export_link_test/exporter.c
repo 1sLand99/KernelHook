@@ -5,7 +5,7 @@
  * Built through the full kmod.mk pipeline, so the resulting .ko pulls in
  * kmod/src/export.c + the kh_crc-generated kh_exports.S. That populates the
  * __ksymtab / __ksymtab_strings / __kcrctab sections with the real entries
- * (hook_wrap, ksyms_lookup, ...) that Ring 2's verify_elf.sh checks.
+ * (kh_hook_wrap, ksyms_lookup, ...) that Ring 2's verify_elf.sh checks.
  *
  * The init path bootstraps ksyms (via kmod_compat_init) so that when
  * importer.ko later calls ksyms_lookup("do_sys_openat2") it resolves to a

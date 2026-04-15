@@ -2,7 +2,7 @@
 /*
  * hook_chain.c — Hook chain with priority ordering example.
  *
- * Demonstrates hook_wrap with multiple callbacks at different priorities.
+ * Demonstrates kh_hook_wrap with multiple callbacks at different priorities.
  * Three before-callbacks are registered with priorities 0, 50, 100
  * (in arbitrary order) to show that priority controls execution order,
  * not registration order.
@@ -10,13 +10,13 @@
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #elif defined(KMOD_FREESTANDING)
 /* Mode A: freestanding shim */
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -28,7 +28,7 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -54,24 +54,24 @@ static void *hooked_func = NULL;
 
 /* ---- Before callbacks at different priorities ---- */
 
-static void before_high_priority(hook_fargs4_t *fargs, void *udata)
+static void before_high_priority(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_chain: [priority 0] HIGH priority before callback");
 }
 
-static void before_medium_priority(hook_fargs4_t *fargs, void *udata)
+static void before_medium_priority(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_chain: [priority 50] MEDIUM priority before callback");
 }
 
-static void before_low_priority(hook_fargs4_t *fargs, void *udata)
+static void before_low_priority(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_chain: [priority 100] LOW priority before callback");
 }
 
 /* ---- After callback ---- */
 
-static void after_callback(hook_fargs4_t *fargs, void *udata)
+static void after_callback(kh_hook_fargs4_t *fargs, void *udata)
 {
 	pr_info("hook_chain: after callback, ret=%lld", (long long)fargs->ret);
 }
@@ -81,7 +81,7 @@ static void after_callback(hook_fargs4_t *fargs, void *udata)
 static int __init hook_chain_init(void)
 {
 	void *target;
-	hook_err_t err;
+	kh_hook_err_t err;
 
 #if !defined(KH_SDK_MODE)
 	int rc;
@@ -128,30 +128,30 @@ static int __init hook_chain_init(void)
 	 * to demonstrate that priority controls execution order.
 	 * Lower priority number = higher priority = runs first.
 	 */
-	err = hook_wrap(target, 4, (void *)before_medium_priority, NULL, NULL, 50);
+	err = kh_hook_wrap(target, 4, (void *)before_medium_priority, NULL, NULL, 50);
 	if (err != HOOK_NO_ERR) {
-		pr_err("hook_chain: hook_wrap medium failed (%d)", (int)err);
+		pr_err("hook_chain: kh_hook_wrap medium failed (%d)", (int)err);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
 		return 0;
 	}
 
-	err = hook_wrap(target, 4, (void *)before_low_priority, (void *)after_callback, NULL, 100);
+	err = kh_hook_wrap(target, 4, (void *)before_low_priority, (void *)after_callback, NULL, 100);
 	if (err != HOOK_NO_ERR) {
-		pr_err("hook_chain: hook_wrap low failed (%d)", (int)err);
-		hook_unwrap(target, (void *)before_medium_priority, NULL);
+		pr_err("hook_chain: kh_hook_wrap low failed (%d)", (int)err);
+		kh_hook_unwrap(target, (void *)before_medium_priority, NULL);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
 		return 0;
 	}
 
-	err = hook_wrap(target, 4, (void *)before_high_priority, NULL, NULL, 0);
+	err = kh_hook_wrap(target, 4, (void *)before_high_priority, NULL, NULL, 0);
 	if (err != HOOK_NO_ERR) {
-		pr_err("hook_chain: hook_wrap high failed (%d)", (int)err);
-		hook_unwrap(target, (void *)before_medium_priority, NULL);
-		hook_unwrap(target, (void *)before_low_priority, (void *)after_callback);
+		pr_err("hook_chain: kh_hook_wrap high failed (%d)", (int)err);
+		kh_hook_unwrap(target, (void *)before_medium_priority, NULL);
+		kh_hook_unwrap(target, (void *)before_low_priority, (void *)after_callback);
 #if !defined(KH_SDK_MODE)
 		kmod_hook_mem_cleanup();
 #endif
@@ -168,9 +168,9 @@ static int __init hook_chain_init(void)
 static void __exit hook_chain_exit(void)
 {
 	if (hooked_func) {
-		hook_unwrap(hooked_func, (void *)before_high_priority, NULL);
-		hook_unwrap(hooked_func, (void *)before_medium_priority, NULL);
-		hook_unwrap(hooked_func, (void *)before_low_priority, (void *)after_callback);
+		kh_hook_unwrap(hooked_func, (void *)before_high_priority, NULL);
+		kh_hook_unwrap(hooked_func, (void *)before_medium_priority, NULL);
+		kh_hook_unwrap(hooked_func, (void *)before_low_priority, (void *)after_callback);
 		hooked_func = NULL;
 		pr_info("hook_chain: all callbacks removed");
 	}

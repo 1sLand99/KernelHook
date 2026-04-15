@@ -3,6 +3,6 @@
 #define _KERNELHOOK_TYPES_H_
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 
 #endif

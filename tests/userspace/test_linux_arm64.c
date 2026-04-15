@@ -20,7 +20,7 @@
 #include "test_framework.h"
 
 #ifdef __linux__
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <sys/mman.h>
@@ -35,19 +35,19 @@ TEST(linux_mprotect_wx_enforced)
     SKIP_TEST("Linux-only: mprotect W^X enforcement");
 #else
     /*
-     * Verify that the hook memory allocator produces executable pages
+     * Verify that the kh_hook memory allocator produces executable pages
      * that are not simultaneously writable (W^X invariant).
      *
      * On macOS, memory protection uses mach_vm_protect which has
      * different semantics.  This test exercises the Linux mprotect path.
      */
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     /* Simple verification that hook_mem is functional on Linux */
     ASSERT_TRUE(1); /* Placeholder — real W^X verification needs /proc/self/maps parsing */
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 #endif
 }
 
@@ -107,24 +107,24 @@ TEST(linux_scs_hook_basic)
 #if !defined(__linux__) || defined(__ANDROID__)
     SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_scs_prologue;
     ASSERT_EQ(fn(10, 20), 30);
 
     void *orig = NULL;
-    int ret = hook((void *)fn, (void *)fn, &orig);
+    int ret = kh_hook((void *)fn, (void *)fn, &orig);
     ASSERT_EQ(ret, 0);
     ASSERT_NOT_NULL(orig);
 
-    /* Call through hook — SCS push/pop should balance */
+    /* Call through kh_hook — SCS push/pop should balance */
     ASSERT_EQ(fn(10, 20), 30);
 
-    unhook((void *)fn);
+    kh_unhook((void *)fn);
     ASSERT_EQ(fn(10, 20), 30);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 #endif
 }
 
@@ -133,23 +133,23 @@ TEST(linux_bti_scs_interaction)
 #if !defined(__linux__) || defined(__ANDROID__)
     SKIP_TEST("Linux-only (non-Android): SCS X18 conflicts with Bionic SCS");
 #else
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 
     int (*volatile fn)(int, int) = target_bti_scs;
     ASSERT_EQ(fn(5, 7), 12);
 
     void *orig = NULL;
-    int ret = hook((void *)fn, (void *)fn, &orig);
+    int ret = kh_hook((void *)fn, (void *)fn, &orig);
     ASSERT_EQ(ret, 0);
     ASSERT_NOT_NULL(orig);
 
     ASSERT_EQ(fn(5, 7), 12);
 
-    unhook((void *)fn);
+    kh_unhook((void *)fn);
     ASSERT_EQ(fn(5, 7), 12);
 
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 #endif
 }
 

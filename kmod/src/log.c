@@ -23,8 +23,8 @@
 #endif
 #include <symbol.h>
 
-/* hook.h provides KCFI_EXEMPT */
-#include <hook.h>
+/* kh_hook.h provides KCFI_EXEMPT */
+#include <kh_hook.h>
 
 /* LOG_INFO is defined by the freestanding shim printk.h but not by the
  * real kernel <linux/printk.h>.  Define it here for kbuild builds. */

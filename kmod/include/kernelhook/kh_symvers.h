@@ -8,21 +8,21 @@
 /* Relies on _MODVER_ENTRY from kmod/shim/shim.h being in scope. */
 
 #define KH_DECLARE_VERSIONS() \
-    _MODVER_ENTRY(__modver_kh_hook_prepare, 0xe1e2e1f4u, "hook_prepare"); \
-    _MODVER_ENTRY(__modver_kh_hook_install, 0x1f641515u, "hook_install"); \
-    _MODVER_ENTRY(__modver_kh_hook_uninstall, 0x11902138u, "hook_uninstall"); \
-    _MODVER_ENTRY(__modver_kh_hook, 0xd3e76aacu, "hook"); \
-    _MODVER_ENTRY(__modver_kh_unhook, 0x335ffb6au, "unhook"); \
-    _MODVER_ENTRY(__modver_kh_hook_chain_add, 0x2aa1691bu, "hook_chain_add"); \
-    _MODVER_ENTRY(__modver_kh_hook_chain_remove, 0x6243efd4u, "hook_chain_remove"); \
-    _MODVER_ENTRY(__modver_kh_hook_wrap, 0x193a95acu, "hook_wrap"); \
-    _MODVER_ENTRY(__modver_kh_hook_unwrap_remove, 0xb885b3a5u, "hook_unwrap_remove"); \
-    _MODVER_ENTRY(__modver_kh_hook_chain_setup_transit, 0x66cd25a2u, "hook_chain_setup_transit"); \
-    _MODVER_ENTRY(__modver_kh_fp_hook, 0x6d12a6f0u, "fp_hook"); \
-    _MODVER_ENTRY(__modver_kh_fp_unhook, 0xc8ecc5d8u, "fp_unhook"); \
-    _MODVER_ENTRY(__modver_kh_fp_hook_wrap, 0x8da53a4fu, "fp_hook_wrap"); \
-    _MODVER_ENTRY(__modver_kh_fp_hook_unwrap, 0x019029a5u, "fp_hook_unwrap"); \
-    _MODVER_ENTRY(__modver_kh_fp_hook_chain_setup_transit, 0xffd3212du, "fp_hook_chain_setup_transit"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_prepare, 0x55326fcdu, "kh_hook_prepare"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_install, 0xabb49b2cu, "kh_hook_install"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_uninstall, 0x1514b675u, "kh_hook_uninstall"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook, 0x9d9f94a5u, "kh_hook"); \
+    _MODVER_ENTRY(__modver_kh_kh_unhook, 0x92edaea4u, "kh_unhook"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_chain_add, 0xc2f7069bu, "kh_hook_chain_add"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_chain_remove, 0x8cf85c93u, "kh_hook_chain_remove"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_wrap, 0x1b9ea611u, "kh_hook_wrap"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_unwrap_remove, 0x5e0bbf71u, "kh_hook_unwrap_remove"); \
+    _MODVER_ENTRY(__modver_kh_kh_hook_chain_setup_transit, 0x80432976u, "kh_hook_chain_setup_transit"); \
+    _MODVER_ENTRY(__modver_kh_kh_fp_hook, 0xb622a80cu, "kh_fp_hook"); \
+    _MODVER_ENTRY(__modver_kh_kh_fp_unhook, 0x13dccb24u, "kh_fp_unhook"); \
+    _MODVER_ENTRY(__modver_kh_kh_fp_hook_wrap, 0x65f355cfu, "kh_fp_hook_wrap"); \
+    _MODVER_ENTRY(__modver_kh_kh_fp_hook_unwrap, 0xc8309e66u, "kh_fp_hook_unwrap"); \
+    _MODVER_ENTRY(__modver_kh_kh_fp_hook_chain_setup_transit, 0xd3e65d0cu, "kh_fp_hook_chain_setup_transit"); \
     _MODVER_ENTRY(__modver_kh_ksyms_lookup, 0x866fa87bu, "ksyms_lookup")
 
 #endif /* _KERNELHOOK_KH_SYMVERS_H_ */

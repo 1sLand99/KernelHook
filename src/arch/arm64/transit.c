@@ -5,8 +5,8 @@
  *
  * Single naked asm stub + single C body, parameterized by rw->argno.
  *
- * Transit buffer layout (set up during hook installation):
- *   transit[0..1] = uint64_t self-pointer to containing hook_chain_rox_t
+ * Transit buffer layout (set up during kh_hook installation):
+ *   transit[0..1] = uint64_t self-pointer to containing kh_hook_chain_rox_t
  *   transit[2..]  = copied stub machine code
  *
  * Installation:
@@ -15,7 +15,7 @@
  */
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <sync.h>
 
 /* Platform-appropriate section attribute for transit stubs.
@@ -73,14 +73,14 @@ typedef uint64_t (*origin12_t)(uint64_t, uint64_t, uint64_t, uint64_t,
  */
 
 KCFI_EXEMPT __attribute__((__used__, __noinline__))
-uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
+uint64_t transit_body(kh_hook_chain_rox_t *rox, kh_hook_chain_rw_t *rw,
                       uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                       uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7,
                       uint64_t a8, uint64_t a9, uint64_t a10, uint64_t a11)
 {
     int32_t argno = rw->argno;
 
-    hook_fargs12_t fargs;
+    kh_hook_fargs12_t fargs;
     fargs.skip_origin = 0;
     fargs.chain = rox;
     fargs.local = NULL;
@@ -92,10 +92,10 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
     /* Snapshot dispatch state into stack-local storage while under RCU
      * read lock, then release the lock before calling the origin function.
      *
-     * Why: (1) prevents UAF — a concurrent hook_unwrap_remove can call
-     *      sync_write_unlock (= spin_unlock + synchronize_rcu); without
+     * Why: (1) prevents UAF — a concurrent kh_hook_unwrap_remove can call
+     *      kh_sync_write_unlock (= spin_unlock + synchronize_rcu); without
      *      the snapshot, synchronize_rcu returns immediately when there
-     *      are no readers, hook_mem_free_rw(rw) + hook_mem_free_rox(rox)
+     *      are no readers, kh_mem_free_rw(rw) + kh_mem_free_rox(rox)
      *      run, and we'd dereference freed memory in after-callbacks or
      *      for the origin call.
      *      (2) guarantees before/after pairing — if the chain is edited
@@ -104,7 +104,7 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
      *      which may block/sleep — avoids rcu_note_context_switch WARNs
      *      and expedited synchronize_rcu deadlocks.
      *
-     * Stack cost: HOOK_CHAIN_NUM * (3 pointers + sizeof(hook_local_t))
+     * Stack cost: HOOK_CHAIN_NUM * (3 pointers + sizeof(kh_hook_local_t))
      * — bounded by HOOK_CHAIN_NUM (small). */
     int32_t snap_count;
     uintptr_t snap_relo;
@@ -113,9 +113,9 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
         void *after;
         void *udata;
     } snap[HOOK_CHAIN_NUM];
-    hook_local_t snap_local[HOOK_CHAIN_NUM];
+    kh_hook_local_t snap_local[HOOK_CHAIN_NUM];
 
-    sync_read_lock();
+    kh_sync_read_lock();
     snap_count = rw->sorted_count;
     if (snap_count > HOOK_CHAIN_NUM) snap_count = HOOK_CHAIN_NUM;
     for (int32_t i = 0; i < snap_count; i++) {
@@ -125,17 +125,17 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
         snap[i].after  = rw->items[idx].after;
         snap[i].udata  = rw->items[idx].udata;
     }
-    snap_relo = rox->hook.relo_addr;
-    sync_read_unlock();
+    snap_relo = rox->kh_hook.relo_addr;
+    kh_sync_read_unlock();
 
     /* Run before-callbacks from snapshot. fargs.local points at stack
      * storage so each before/after pair shares per-invocation local state
      * without touching the freed-or-mutated chain. */
     for (int32_t i = 0; i < snap_count; i++) {
-        __builtin_memset(&snap_local[i], 0, sizeof(hook_local_t));
+        __builtin_memset(&snap_local[i], 0, sizeof(kh_hook_local_t));
         fargs.local = &snap_local[i];
-        hook_chain12_callback f = (hook_chain12_callback)snap[i].before;
-        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+        kh_hook_chain12_callback f = (kh_hook_chain12_callback)snap[i].before;
+        if (f) f((kh_hook_fargs12_t *)&fargs, snap[i].udata);
     }
 
     if (!fargs.skip_origin) {
@@ -170,8 +170,8 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
      * state set up above. No RCU lock needed — we're on the snapshot. */
     for (int32_t i = snap_count - 1; i >= 0; i--) {
         fargs.local = &snap_local[i];
-        hook_chain12_callback f = (hook_chain12_callback)snap[i].after;
-        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+        kh_hook_chain12_callback f = (kh_hook_chain12_callback)snap[i].after;
+        if (f) f((kh_hook_fargs12_t *)&fargs, snap[i].udata);
     }
 
     return fargs.ret;
@@ -180,7 +180,7 @@ uint64_t transit_body(hook_chain_rox_t *rox, hook_chain_rw_t *rw,
 /* ==== Universal naked asm stub ====
  *
  * Placed in .transit.text — this is the single template copied into every
- * hook's transit buffer, regardless of argno.
+ * kh_hook's transit buffer, regardless of argno.
  *
  * The stub:
  *   1. Loads rox self-pointer from transit[0..1]  (3 instructions, O(1))
@@ -249,26 +249,26 @@ uint64_t _transit(void)
         ".globl " ASM_SYM(_transit_end) "\n\t"
         ASM_SYM(_transit_end) ":\n\t"
         :
-        : [rwoff] "i" ((int)__builtin_offsetof(hook_chain_rox_t, rw))
+        : [rwoff] "i" ((int)__builtin_offsetof(kh_hook_chain_rox_t, rw))
     );
 }
 
-/* ==== Function pointer hook transit ====
+/* ==== Function pointer kh_hook transit ====
  *
- * Separate body + stub for fp_hook_chain_rox_t / fp_hook_chain_rw_t,
+ * Separate body + stub for kh_fp_hook_chain_rox_t / kh_fp_hook_chain_rw_t,
  * which have different field layouts (different sorted_indices/items sizes
  * and origin call via origin_fp instead of relo_addr).
  */
 
 KCFI_EXEMPT __attribute__((__used__, __noinline__))
-uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
+uint64_t fp_transit_body(kh_fp_hook_chain_rox_t *rox, kh_fp_hook_chain_rw_t *rw,
                          uint64_t a0, uint64_t a1, uint64_t a2, uint64_t a3,
                          uint64_t a4, uint64_t a5, uint64_t a6, uint64_t a7,
                          uint64_t a8, uint64_t a9, uint64_t a10, uint64_t a11)
 {
     int32_t argno = rw->argno;
 
-    hook_fargs12_t fargs;
+    kh_hook_fargs12_t fargs;
     fargs.skip_origin = 0;
     fargs.chain = rox;
     fargs.local = NULL;
@@ -281,7 +281,7 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
      * read lock. See transit_body for the full rationale (UAF prevention,
      * before/after pairing, no RCU across blocking origin call).
      *
-     * Stack cost: FP_HOOK_CHAIN_NUM * (3 pointers + sizeof(hook_local_t))
+     * Stack cost: FP_HOOK_CHAIN_NUM * (3 pointers + sizeof(kh_hook_local_t))
      * — bounded by FP_HOOK_CHAIN_NUM (small). */
     int32_t snap_count;
     uintptr_t snap_origin_fp;
@@ -290,9 +290,9 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
         void *after;
         void *udata;
     } snap[FP_HOOK_CHAIN_NUM];
-    hook_local_t snap_local[FP_HOOK_CHAIN_NUM];
+    kh_hook_local_t snap_local[FP_HOOK_CHAIN_NUM];
 
-    sync_read_lock();
+    kh_sync_read_lock();
     snap_count = rw->sorted_count;
     if (snap_count > FP_HOOK_CHAIN_NUM) snap_count = FP_HOOK_CHAIN_NUM;
     for (int32_t i = 0; i < snap_count; i++) {
@@ -302,15 +302,15 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
         snap[i].after  = rw->items[idx].after;
         snap[i].udata  = rw->items[idx].udata;
     }
-    snap_origin_fp = rox->hook.origin_fp;
-    sync_read_unlock();
+    snap_origin_fp = rox->kh_hook.origin_fp;
+    kh_sync_read_unlock();
 
     /* Run before-callbacks from snapshot. */
     for (int32_t i = 0; i < snap_count; i++) {
-        __builtin_memset(&snap_local[i], 0, sizeof(hook_local_t));
+        __builtin_memset(&snap_local[i], 0, sizeof(kh_hook_local_t));
         fargs.local = &snap_local[i];
-        hook_chain12_callback f = (hook_chain12_callback)snap[i].before;
-        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+        kh_hook_chain12_callback f = (kh_hook_chain12_callback)snap[i].before;
+        if (f) f((kh_hook_fargs12_t *)&fargs, snap[i].udata);
     }
 
     if (!fargs.skip_origin) {
@@ -345,8 +345,8 @@ uint64_t fp_transit_body(fp_hook_chain_rox_t *rox, fp_hook_chain_rw_t *rw,
      * state set up above. No RCU lock needed — we're on the snapshot. */
     for (int32_t i = snap_count - 1; i >= 0; i--) {
         fargs.local = &snap_local[i];
-        hook_chain12_callback f = (hook_chain12_callback)snap[i].after;
-        if (f) f((hook_fargs12_t *)&fargs, snap[i].udata);
+        kh_hook_chain12_callback f = (kh_hook_chain12_callback)snap[i].after;
+        if (f) f((kh_hook_fargs12_t *)&fargs, snap[i].udata);
     }
 
     return fargs.ret;
@@ -388,6 +388,6 @@ uint64_t _fp_transit(void)
         ".globl " ASM_SYM(_fp_transit_end) "\n\t"
         ASM_SYM(_fp_transit_end) ":\n\t"
         :
-        : [rwoff] "i" ((int)__builtin_offsetof(fp_hook_chain_rox_t, rw))
+        : [rwoff] "i" ((int)__builtin_offsetof(kh_fp_hook_chain_rox_t, rw))
     );
 }

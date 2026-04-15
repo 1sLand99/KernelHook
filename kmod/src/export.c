@@ -14,30 +14,30 @@
  *   the standard EXPORT_SYMBOL() macro.
  */
 
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <symbol.h>
 #include <linux/export.h>
 
 #define KH_EXPORT(sym) EXPORT_SYMBOL(sym)
 
-KH_EXPORT(hook_prepare);
-KH_EXPORT(hook_install);
-KH_EXPORT(hook_uninstall);
+KH_EXPORT(kh_hook_prepare);
+KH_EXPORT(kh_hook_install);
+KH_EXPORT(kh_hook_uninstall);
 
-KH_EXPORT(hook);
-KH_EXPORT(unhook);
+KH_EXPORT(kh_hook);
+KH_EXPORT(kh_unhook);
 
-KH_EXPORT(hook_chain_add);
-KH_EXPORT(hook_chain_remove);
-KH_EXPORT(hook_wrap);
-KH_EXPORT(hook_unwrap_remove);
-KH_EXPORT(hook_chain_setup_transit);
+KH_EXPORT(kh_hook_chain_add);
+KH_EXPORT(kh_hook_chain_remove);
+KH_EXPORT(kh_hook_wrap);
+KH_EXPORT(kh_hook_unwrap_remove);
+KH_EXPORT(kh_hook_chain_setup_transit);
 
-KH_EXPORT(fp_hook);
-KH_EXPORT(fp_unhook);
-KH_EXPORT(fp_hook_wrap);
-KH_EXPORT(fp_hook_unwrap);
-KH_EXPORT(fp_hook_chain_setup_transit);
+KH_EXPORT(kh_fp_hook);
+KH_EXPORT(kh_fp_unhook);
+KH_EXPORT(kh_fp_hook_wrap);
+KH_EXPORT(kh_fp_hook_unwrap);
+KH_EXPORT(kh_fp_hook_chain_setup_transit);
 
 KH_EXPORT(ksyms_lookup);

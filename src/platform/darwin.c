@@ -17,7 +17,7 @@
 #include <mach/mach.h>
 #include <libkern/OSCacheControl.h>
 
-uint64_t platform_page_size(void)
+uint64_t kh_platform_page_size(void)
 {
     static uint64_t cached;
     if (!cached)
@@ -26,30 +26,30 @@ uint64_t platform_page_size(void)
 }
 
 /* ROX pool: allocate initially RW so code can be written before the pool
- * is transitioned to RX by hook_mem_init (via set_memory_ro + set_memory_x).
+ * is transitioned to RX by kh_mem_init (via set_memory_ro + set_memory_x).
  * Subsequent write windows use vm_protect(VM_PROT_COPY) to get a writable
  * CoW copy of the page, then mprotect back to PROT_READ|PROT_EXEC. */
-void *platform_alloc_rox(uint64_t size)
+void *kh_platform_alloc_rox(uint64_t size)
 {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
-void *platform_alloc_rw(uint64_t size)
+void *kh_platform_alloc_rw(uint64_t size)
 {
     void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return (p == MAP_FAILED) ? NULL : p;
 }
 
-void platform_free(void *ptr, uint64_t size)
+void kh_platform_free(void *ptr, uint64_t size)
 {
     if (ptr)
         munmap(ptr, size);
 }
 
-int platform_set_rw(uint64_t addr, uint64_t size)
+int kh_platform_set_rw(uint64_t addr, uint64_t size)
 {
     mach_port_t task = mach_task_self();
     /* VM_PROT_COPY creates a CoW writable copy of the page(s), allowing
@@ -63,19 +63,19 @@ int platform_set_rw(uint64_t addr, uint64_t size)
     return kr == KERN_SUCCESS ? 0 : -1;
 }
 
-int platform_set_ro(uint64_t addr, uint64_t size)
+int kh_platform_set_ro(uint64_t addr, uint64_t size)
 {
     return mprotect((void *)addr, (size_t)size, PROT_READ);
 }
 
-int platform_set_rx(uint64_t addr, uint64_t size)
+int kh_platform_set_rx(uint64_t addr, uint64_t size)
 {
     return mprotect((void *)addr, (size_t)size, PROT_READ | PROT_EXEC);
 }
 
-int platform_write_code(uint64_t addr, const void *data, uint64_t size)
+int kh_platform_write_code(uint64_t addr, const void *data, uint64_t size)
 {
-    uint64_t ps = platform_page_size();
+    uint64_t ps = kh_platform_page_size();
     uint64_t start = addr & ~(ps - 1);
     uint64_t end = (addr + size - 1) & ~(ps - 1);
     uint64_t prot_size = (end - start) + ps;
@@ -111,7 +111,7 @@ int platform_write_code(uint64_t addr, const void *data, uint64_t size)
     return 0;
 }
 
-void platform_flush_icache(uint64_t addr, uint64_t size)
+void kh_platform_flush_icache(uint64_t addr, uint64_t size)
 {
     sys_icache_invalidate((void *)addr, (size_t)size);
 }

@@ -3,7 +3,7 @@
  * KernelHook SDK — public API for kernel module developers.
  *
  * Usage:
- *   #include <kernelhook/hook.h>
+ *   #include <kernelhook/kh_hook.h>
  *
  * Your module must depend on kernelhook.ko being loaded.
  *
@@ -16,7 +16,7 @@
 #define _KERNELHOOK_HOOK_H_
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <kernelhook/module.h>
 #include <symbol.h>
 

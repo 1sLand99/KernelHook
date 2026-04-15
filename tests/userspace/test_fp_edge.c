@@ -1,11 +1,11 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * FP hook edge case tests: nested hooks, wrap/unwrap cycle,
+ * FP kh_hook edge case tests: nested hooks, wrap/unwrap cycle,
  * multiple targets, chain priority, and fp_get_origin_func.
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <string.h>
@@ -14,13 +14,13 @@
 
 static void hook_setup(void)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void hook_teardown(void)
 {
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* ---- Execution order tracking ---- */
@@ -44,7 +44,7 @@ static void record_id(int id)
 /* ============================================================
  * Test 1: fp_nested_hooks
  * Two FP targets A and B, where A's implementation calls B.
- * Both hooked with fp_hook_wrap. Call A, verify both before
+ * Both hooked with kh_fp_hook_wrap. Call A, verify both before
  * callbacks fire.
  * ============================================================ */
 
@@ -69,13 +69,13 @@ static int (*fp_a)(int) = fp_impl_a;
 static int nested_before_a_called;
 static int nested_before_b_called;
 
-static void nested_before_a(hook_fargs1_t *fargs, void *udata)
+static void nested_before_a(kh_hook_fargs1_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     nested_before_a_called = 1;
 }
 
-static void nested_before_b(hook_fargs1_t *fargs, void *udata)
+static void nested_before_b(kh_hook_fargs1_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     nested_before_b_called = 1;
@@ -89,12 +89,12 @@ TEST(fp_nested_hooks)
     fp_a = fp_impl_a;
     fp_b = fp_impl_b;
 
-    hook_err_t rc;
-    rc = fp_hook_wrap((uintptr_t)&fp_a, 1,
+    kh_hook_err_t rc;
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_a, 1,
                           (void *)nested_before_a, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = fp_hook_wrap((uintptr_t)&fp_b, 1,
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_b, 1,
                           (void *)nested_before_b, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -104,15 +104,15 @@ TEST(fp_nested_hooks)
     ASSERT_TRUE(nested_before_a_called);
     ASSERT_TRUE(nested_before_b_called);
 
-    fp_hook_unwrap((uintptr_t)&fp_a, (void *)nested_before_a, NULL);
-    fp_hook_unwrap((uintptr_t)&fp_b, (void *)nested_before_b, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_a, (void *)nested_before_a, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_b, (void *)nested_before_b, NULL);
     hook_teardown();
 }
 
 /* ============================================================
  * Test 2: fp_hook_wrap_unwrap_cycle
- * fp_hook_wrap a target, call it (verify callback fires),
- * fp_hook_unwrap, call again (verify original behavior
+ * kh_fp_hook_wrap a target, call it (verify callback fires),
+ * kh_fp_hook_unwrap, call again (verify original behavior
  * restored, no callback).
  * ============================================================ */
 
@@ -127,7 +127,7 @@ static int (*fp_cycle)(int, int) = fp_cycle_impl;
 
 static int cycle_before_called;
 
-static void cycle_before(hook_fargs2_t *fargs, void *udata)
+static void cycle_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     cycle_before_called = 1;
@@ -139,7 +139,7 @@ TEST(fp_hook_wrap_unwrap_cycle)
     cycle_before_called = 0;
     fp_cycle = fp_cycle_impl;
 
-    hook_err_t rc = fp_hook_wrap((uintptr_t)&fp_cycle, 2,
+    kh_hook_err_t rc = kh_fp_hook_wrap((uintptr_t)&fp_cycle, 2,
                                      (void *)cycle_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -147,7 +147,7 @@ TEST(fp_hook_wrap_unwrap_cycle)
     ASSERT_EQ(result, 7);
     ASSERT_TRUE(cycle_before_called);
 
-    fp_hook_unwrap((uintptr_t)&fp_cycle, (void *)cycle_before, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_cycle, (void *)cycle_before, NULL);
 
     /* After unwrap, callback must not fire */
     cycle_before_called = 0;
@@ -177,9 +177,9 @@ static int (*fp_mt3)(int) = fp_mt_impl3;
 
 static int mt_called1, mt_called2, mt_called3;
 
-static void mt_before1(hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called1 = 1; }
-static void mt_before2(hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called2 = 1; }
-static void mt_before3(hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called3 = 1; }
+static void mt_before1(kh_hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called1 = 1; }
+static void mt_before2(kh_hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called2 = 1; }
+static void mt_before3(kh_hook_fargs1_t *fargs, void *udata) { (void)fargs; (void)udata; mt_called3 = 1; }
 
 TEST(fp_multiple_targets)
 {
@@ -189,14 +189,14 @@ TEST(fp_multiple_targets)
     fp_mt2 = fp_mt_impl2;
     fp_mt3 = fp_mt_impl3;
 
-    hook_err_t rc;
-    rc = fp_hook_wrap((uintptr_t)&fp_mt1, 1,
+    kh_hook_err_t rc;
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_mt1, 1,
                           (void *)mt_before1, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap((uintptr_t)&fp_mt2, 1,
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_mt2, 1,
                           (void *)mt_before2, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap((uintptr_t)&fp_mt3, 1,
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_mt3, 1,
                           (void *)mt_before3, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -215,15 +215,15 @@ TEST(fp_multiple_targets)
     ASSERT_EQ(r3, 13);
     ASSERT_TRUE(mt_called3);
 
-    fp_hook_unwrap((uintptr_t)&fp_mt1, (void *)mt_before1, NULL);
-    fp_hook_unwrap((uintptr_t)&fp_mt2, (void *)mt_before2, NULL);
-    fp_hook_unwrap((uintptr_t)&fp_mt3, (void *)mt_before3, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_mt1, (void *)mt_before1, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_mt2, (void *)mt_before2, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_mt3, (void *)mt_before3, NULL);
     hook_teardown();
 }
 
 /* ============================================================
  * Test 4: fp_chain_priority
- * fp_hook_wrap with priorities 10, 0, -5. Call target.
+ * kh_fp_hook_wrap with priorities 10, 0, -5. Call target.
  * Verify callbacks execute in priority order (highest first).
  * ============================================================ */
 
@@ -236,9 +236,9 @@ static int fp_prio_impl(int a, int b)
 
 static int (*fp_prio)(int, int) = fp_prio_impl;
 
-static void prio_before10(hook_fargs2_t *fargs, void *udata) { (void)fargs; (void)udata; record_id(10); }
-static void prio_before0(hook_fargs2_t *fargs, void *udata)  { (void)fargs; (void)udata; record_id(0); }
-static void prio_before_n5(hook_fargs2_t *fargs, void *udata){ (void)fargs; (void)udata; record_id(-5); }
+static void prio_before10(kh_hook_fargs2_t *fargs, void *udata) { (void)fargs; (void)udata; record_id(10); }
+static void prio_before0(kh_hook_fargs2_t *fargs, void *udata)  { (void)fargs; (void)udata; record_id(0); }
+static void prio_before_n5(kh_hook_fargs2_t *fargs, void *udata){ (void)fargs; (void)udata; record_id(-5); }
 
 TEST(fp_chain_priority)
 {
@@ -246,14 +246,14 @@ TEST(fp_chain_priority)
     reset_order();
     fp_prio = fp_prio_impl;
 
-    hook_err_t rc;
-    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
+    kh_hook_err_t rc;
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before10, NULL, NULL, 10);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before0, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
-    rc = fp_hook_wrap((uintptr_t)&fp_prio, 2,
+    rc = kh_fp_hook_wrap((uintptr_t)&fp_prio, 2,
                           (void *)prio_before_n5, NULL, NULL, -5);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -265,15 +265,15 @@ TEST(fp_chain_priority)
     ASSERT_EQ(exec_order[1], 0);
     ASSERT_EQ(exec_order[2], -5);
 
-    fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before10, NULL);
-    fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before0, NULL);
-    fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before_n5, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before10, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before0, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_prio, (void *)prio_before_n5, NULL);
     hook_teardown();
 }
 
 /* ============================================================
  * Test 5: fp_get_origin_func
- * fp_hook_wrap a target, in the before callback save
+ * kh_fp_hook_wrap a target, in the before callback save
  * fargs->chain. After the call, use fp_get_origin_func() to
  * get the original function, call it directly, verify result.
  * ============================================================ */
@@ -289,7 +289,7 @@ static int (*fp_origin)(int, int) = fp_origin_impl;
 
 static void *saved_fp_chain;
 
-static void origin_before(hook_fargs2_t *fargs, void *udata)
+static void origin_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     saved_fp_chain = fargs->chain;
@@ -301,7 +301,7 @@ TEST(fp_get_origin_func)
     saved_fp_chain = NULL;
     fp_origin = fp_origin_impl;
 
-    hook_err_t rc = fp_hook_wrap((uintptr_t)&fp_origin, 2,
+    kh_hook_err_t rc = kh_fp_hook_wrap((uintptr_t)&fp_origin, 2,
                                      (void *)origin_before, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -310,7 +310,7 @@ TEST(fp_get_origin_func)
     ASSERT_NOT_NULL(saved_fp_chain);
 
     /* Use fp_get_origin_func to retrieve the original function */
-    hook_fargs2_t fake_fargs;
+    kh_hook_fargs2_t fake_fargs;
     memset(&fake_fargs, 0, sizeof(fake_fargs));
     fake_fargs.chain = saved_fp_chain;
 
@@ -321,7 +321,7 @@ TEST(fp_get_origin_func)
     int direct_result = orig(4, 5);
     ASSERT_EQ(direct_result, 20);
 
-    fp_hook_unwrap((uintptr_t)&fp_origin, (void *)origin_before, NULL);
+    kh_fp_hook_unwrap((uintptr_t)&fp_origin, (void *)origin_before, NULL);
     hook_teardown();
 }
 

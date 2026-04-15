@@ -114,7 +114,7 @@ static void kill_child(pid_t pid)
 }
 
 /*
- * Test 1: Fork a child, attach via remote_hook_attach, detach —
+ * Test 1: Fork a child, attach via kh_remote_hook_attach, detach —
  * child continues running normally.
  */
 TEST(remote_attach_detach)
@@ -127,11 +127,11 @@ TEST(remote_attach_detach)
     ASSERT_NE(child, -1);
 
     /* Attach to child */
-    remote_hook_handle_t h = remote_hook_attach(child);
+    kh_remote_hook_handle_t h = kh_remote_hook_attach(child);
     ASSERT_NOT_NULL(h);
 
     /* Detach */
-    int ret = remote_hook_detach(h);
+    int ret = kh_remote_hook_detach(h);
     ASSERT_EQ(ret, 0);
 
     /* Give child a moment to continue */
@@ -158,21 +158,21 @@ TEST(remote_alloc_in_child)
     pid_t child = fork_looping_child(pipe_fd);
     ASSERT_NE(child, -1);
 
-    remote_hook_handle_t h = remote_hook_attach(child);
+    kh_remote_hook_handle_t h = kh_remote_hook_attach(child);
     ASSERT_NOT_NULL(h);
 
     /* Allocate RW memory in child */
-    uint64_t remote_addr = remote_hook_alloc(h, 4096, PROT_READ | PROT_WRITE);
+    uint64_t remote_addr = kh_remote_hook_alloc(h, 4096, PROT_READ | PROT_WRITE);
     ASSERT_NE(remote_addr, (uint64_t)0);
 
     /* Allocate RX memory in child */
-    uint64_t remote_rx = remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
+    uint64_t remote_rx = kh_remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
     ASSERT_NE(remote_rx, (uint64_t)0);
 
     /* Two allocations should be at different addresses */
     ASSERT_NE(remote_addr, remote_rx);
 
-    int ret = remote_hook_detach(h);
+    int ret = kh_remote_hook_detach(h);
     ASSERT_EQ(ret, 0);
 
     /* Child should still be alive */
@@ -185,7 +185,7 @@ TEST(remote_alloc_in_child)
 }
 
 /*
- * Test 3: Fork a child, remotely install a simple hook (write known bytes
+ * Test 3: Fork a child, remotely install a simple kh_hook (write known bytes
  * to a code page), verify the write took effect by reading back via
  * /proc/pid/mem.
  */
@@ -198,16 +198,16 @@ TEST(remote_install_hook_in_child)
     pid_t child = fork_looping_child(pipe_fd);
     ASSERT_NE(child, -1);
 
-    remote_hook_handle_t h = remote_hook_attach(child);
+    kh_remote_hook_handle_t h = kh_remote_hook_attach(child);
     ASSERT_NOT_NULL(h);
 
-    /* Allocate an RX page in the child to act as a "function" we hook */
-    uint64_t target_page = remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
+    /* Allocate an RX page in the child to act as a "function" we kh_hook */
+    uint64_t target_page = kh_remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
     ASSERT_NE(target_page, (uint64_t)0);
 
     /*
      * Create a small "transit" code payload: just a few NOP instructions
-     * followed by a RET. This simulates writing hook trampoline code.
+     * followed by a RET. This simulates writing kh_hook trampoline code.
      * ARM64: NOP = 0xD503201F, RET = 0xD65F03C0
      */
     uint32_t transit_code[] = {
@@ -218,7 +218,7 @@ TEST(remote_install_hook_in_child)
     };
     uint64_t transit_size = sizeof(transit_code);
 
-    int ret = remote_hook_install(h, target_page, transit_code, transit_size);
+    int ret = kh_remote_hook_install(h, target_page, transit_code, transit_size);
     ASSERT_EQ(ret, 0);
 
     /*
@@ -240,7 +240,7 @@ TEST(remote_install_hook_in_child)
     ASSERT_EQ(readback[2], transit_code[2]);
     ASSERT_EQ(readback[3], transit_code[3]);
 
-    ret = remote_hook_detach(h);
+    ret = kh_remote_hook_detach(h);
     ASSERT_EQ(ret, 0);
 
     close(pipe_fd[0]);
@@ -248,9 +248,9 @@ TEST(remote_install_hook_in_child)
 }
 
 /*
- * Test 4: Full remote hook + unhook lifecycle.
+ * Test 4: Full remote kh_hook + kh_unhook lifecycle.
  * Attach → alloc → install → detach → child continues.
- * Then re-attach → overwrite with original code (unhook) → detach → child ok.
+ * Then re-attach → overwrite with original code (kh_unhook) → detach → child ok.
  */
 TEST(remote_hook_unhook_lifecycle)
 {
@@ -261,11 +261,11 @@ TEST(remote_hook_unhook_lifecycle)
     pid_t child = fork_looping_child(pipe_fd);
     ASSERT_NE(child, -1);
 
-    /* Phase 1: Attach, alloc, install hook */
-    remote_hook_handle_t h = remote_hook_attach(child);
+    /* Phase 1: Attach, alloc, install kh_hook */
+    kh_remote_hook_handle_t h = kh_remote_hook_attach(child);
     ASSERT_NOT_NULL(h);
 
-    uint64_t target_page = remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
+    uint64_t target_page = kh_remote_hook_alloc(h, 4096, PROT_READ | PROT_EXEC);
     ASSERT_NE(target_page, (uint64_t)0);
 
     /* Hook: write NOP sled */
@@ -275,18 +275,18 @@ TEST(remote_hook_unhook_lifecycle)
         0xD65F03C0, /* RET */
         0xD503201F, /* NOP */
     };
-    int ret = remote_hook_install(h, target_page, hook_code, sizeof(hook_code));
+    int ret = kh_remote_hook_install(h, target_page, hook_code, sizeof(hook_code));
     ASSERT_EQ(ret, 0);
 
-    ret = remote_hook_detach(h);
+    ret = kh_remote_hook_detach(h);
     ASSERT_EQ(ret, 0);
 
     /* Child should still be alive after first detach */
     usleep(50000);
     ASSERT_TRUE(kill(child, 0) == 0);
 
-    /* Phase 2: Re-attach, overwrite with "original" code (unhook) */
-    h = remote_hook_attach(child);
+    /* Phase 2: Re-attach, overwrite with "original" code (kh_unhook) */
+    h = kh_remote_hook_attach(child);
     ASSERT_NOT_NULL(h);
 
     /* Unhook: overwrite with RET instructions */
@@ -296,10 +296,10 @@ TEST(remote_hook_unhook_lifecycle)
         0xD65F03C0, /* RET */
         0xD65F03C0, /* RET */
     };
-    ret = remote_hook_install(h, target_page, orig_code, sizeof(orig_code));
+    ret = kh_remote_hook_install(h, target_page, orig_code, sizeof(orig_code));
     ASSERT_EQ(ret, 0);
 
-    /* Verify the unhook by reading back */
+    /* Verify the kh_unhook by reading back */
     char proc_mem_path[64];
     snprintf(proc_mem_path, sizeof(proc_mem_path), "/proc/%d/mem", child);
     int mem_fd = open(proc_mem_path, O_RDONLY);
@@ -313,7 +313,7 @@ TEST(remote_hook_unhook_lifecycle)
     ASSERT_EQ(readback[0], orig_code[0]);
     ASSERT_EQ(readback[1], orig_code[1]);
 
-    ret = remote_hook_detach(h);
+    ret = kh_remote_hook_detach(h);
     ASSERT_EQ(ret, 0);
 
     /* Child should survive the full lifecycle */

@@ -3,7 +3,7 @@
  * KernelHook kernel module test harness
  *
  * Loads as a kernel module, initialises the full KernelHook subsystem, and
- * runs hook tests in kernel context with real page table manipulation.
+ * runs kh_hook tests in kernel context with real page table manipulation.
  * Results are emitted via pr_info/pr_err to dmesg.
  *
  * Build paths:
@@ -15,12 +15,12 @@
  *
  *   kCFI (CONFIG_CFI_CLANG):
  *     - Verify KCFI_EXEMPT attribute on transit_body bypasses kCFI checks
- *     - Verify indirect calls through hook callbacks do not trigger kCFI traps
+ *     - Verify indirect calls through kh_hook callbacks do not trigger kCFI traps
  *     - Requires: kernel built with CONFIG_CFI_CLANG=y, Clang >= 16
  *
  *   Shadow Call Stack (CONFIG_SHADOW_CALL_STACK):
  *     - Verify SCS push/pop instructions in prologue are relocated correctly
- *     - Verify SCS stack balance is maintained through hook call chain
+ *     - Verify SCS stack balance is maintained through kh_hook call chain
  *     - Requires: kernel built with CONFIG_SHADOW_CALL_STACK=y, GCC >= 12 or Clang >= 14
  *
  *   PAC (CONFIG_ARM64_PTR_AUTH_KERNEL):
@@ -53,7 +53,7 @@
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #else
 /* Mode A (freestanding) uses fake headers from kmod/shim/include/;
@@ -71,7 +71,7 @@
 
 #if !defined(KH_SDK_MODE)
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <symbol.h>
 #include <arch/arm64/pgtable.h>
@@ -87,7 +87,7 @@ extern int log_init(void);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
-MODULE_DESCRIPTION("KernelHook test harness for kernel-context hook verification");
+MODULE_DESCRIPTION("KernelHook test harness for kernel-context kh_hook verification");
 
 #ifdef KMOD_FREESTANDING
 MODULE_VERSIONS();
@@ -174,7 +174,7 @@ static void test_framework_sanity(void)
 
 /*
  * test_vmalloc_available — verify vmalloc/vfree round-trip.
- * (Prerequisite for hook memory allocation.)
+ * (Prerequisite for kh_hook memory allocation.)
  * Freestanding: SKIPped because vmalloc is resolved only after subsystem init.
  */
 static void test_vmalloc_available(void)
@@ -193,10 +193,10 @@ static void test_vmalloc_available(void)
 /* -------------------------------------------------------------------------
  * Phase 2: Security mechanism functional tests
  *
- * These tests are defined in test_hook_kernel.c and exercise the real hook
+ * These tests are defined in test_hook_kernel.c and exercise the real kh_hook
  * machinery under each security mechanism.  They require the subsystem to
  * be initialised first (ksyms, hook_mem, etc.), so they are called in
- * Phase 4 alongside the other hook tests.  Phase 2 is now a no-op
+ * Phase 4 alongside the other kh_hook tests.  Phase 2 is now a no-op
  * placeholder kept for numbering consistency.
  * ---------------------------------------------------------------------- */
 
@@ -255,9 +255,9 @@ static int kh_subsystem_init(void)
     }
 
     /* 2b. sync (RCU + spinlock for chain ops; no-op when CONFIG_KH_CHAIN_RCU=n) */
-    rc = sync_init();
+    rc = kh_sync_init();
     if (rc) {
-        pr_err(KH_TEST_TAG "sync_init failed: %d\n", rc);
+        pr_err(KH_TEST_TAG "kh_sync_init failed: %d\n", rc);
         return rc;
     }
 
@@ -357,7 +357,7 @@ static int __init kh_test_init(void)
     rc = kh_subsystem_init();
     if (rc) {
         pr_err(KH_TEST_TAG
-               "Subsystem init FAILED (%d) — skipping hook tests\n", rc);
+               "Subsystem init FAILED (%d) — skipping kh_hook tests\n", rc);
         goto results;
     }
     kh_initialized = 1;
@@ -374,7 +374,7 @@ static int __init kh_test_init(void)
         int srv = kh_syscall_init();
         KH_ASSERT(srv == 0, "syscall_init: returns 0");
         /* sys_call_table is diagnostic/discovery only after c877583 —
-         * kh_hook_syscalln uses inline hook regardless. On kernels where
+         * kh_hook_syscalln uses inline kh_hook regardless. On kernels where
          * the table is stripped from kallsyms we still work. The real
          * health check is the wrapper-ABI probe below. */
         KH_ASSERT(kh_has_syscall_wrapper == 1,
@@ -412,7 +412,7 @@ static int __init kh_test_init(void)
     test_hook_uninstall_restore();
     test_hook_chain_priority();
 
-    pr_info(KH_TEST_TAG "--- Phase 4b: Function pointer hook tests ---\n");
+    pr_info(KH_TEST_TAG "--- Phase 4b: Function pointer kh_hook tests ---\n");
     test_fp_hook_basic();
     test_fp_hook_wrap_before_after();
     test_fp_hook_chain_priority();
@@ -430,13 +430,13 @@ static int __init kh_test_init(void)
     test_scs_stack_integrity();
 
     /* ------------------------------------------------------------------
-     * Phase 5b: Real system function hook chain tests
+     * Phase 5b: Real system function kh_hook chain tests
      *
      * These tests resolve real kernel functions via ksyms_lookup() and
-     * verify hook chain installation, priority ordering, dynamic
+     * verify kh_hook chain installation, priority ordering, dynamic
      * add/remove, and cleanup — without invoking the hooked functions.
      * ---------------------------------------------------------------- */
-    pr_info(KH_TEST_TAG "--- Phase 5b: Real system function hook chain tests ---\n");
+    pr_info(KH_TEST_TAG "--- Phase 5b: Real system function kh_hook chain tests ---\n");
     test_getpid_single_hook();
     test_faccessat_chain_priority();
     test_filp_open_skip_origin();
@@ -462,7 +462,7 @@ static int __init kh_test_init(void)
 #endif
 
     /* ------------------------------------------------------------------
-     * Phase 6: kh_root demo -- hook execve/faccessat/fstatat to elevate
+     * Phase 6: kh_root demo -- kh_hook execve/faccessat/fstatat to elevate
      *          anyone who execs /system/bin/kh_root to uid=0.
      * ---------------------------------------------------------------- */
     pr_info(KH_TEST_TAG "--- Phase 6: kh_root demo ---\n");

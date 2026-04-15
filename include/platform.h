@@ -25,34 +25,34 @@
 /* ---- Platform API ---- */
 
 /* Returns the system page size in bytes. */
-uint64_t platform_page_size(void);
+uint64_t kh_platform_page_size(void);
 
 /* Allocate page-aligned memory with PROT_READ|PROT_EXEC (never RWX).
  * Returns NULL on failure. */
-void *platform_alloc_rox(uint64_t size);
+void *kh_platform_alloc_rox(uint64_t size);
 
 /* Allocate page-aligned memory with PROT_READ|PROT_WRITE (no execute).
  * Returns NULL on failure. */
-void *platform_alloc_rw(uint64_t size);
+void *kh_platform_alloc_rw(uint64_t size);
 
-/* Free memory previously allocated by platform_alloc_rox/rw. */
-void platform_free(void *ptr, uint64_t size);
+/* Free memory previously allocated by kh_platform_alloc_rox/rw. */
+void kh_platform_free(void *ptr, uint64_t size);
 
 /* Change memory protection to read-write. Returns 0 on success. */
-int platform_set_rw(uint64_t addr, uint64_t size);
+int kh_platform_set_rw(uint64_t addr, uint64_t size);
 
 /* Change memory protection to read-only. Returns 0 on success. */
-int platform_set_ro(uint64_t addr, uint64_t size);
+int kh_platform_set_ro(uint64_t addr, uint64_t size);
 
 /* Change memory protection to read-execute. Returns 0 on success. */
-int platform_set_rx(uint64_t addr, uint64_t size);
+int kh_platform_set_rx(uint64_t addr, uint64_t size);
 
 /* Write instructions to a code page.
  * Handles platform-specific memory protection (e.g., macOS W^X).
  * Flushes icache after writing.  Returns 0 on success. */
-int platform_write_code(uint64_t addr, const void *data, uint64_t size);
+int kh_platform_write_code(uint64_t addr, const void *data, uint64_t size);
 
 /* Flush instruction cache for the given range. */
-void platform_flush_icache(uint64_t addr, uint64_t size);
+void kh_platform_flush_icache(uint64_t addr, uint64_t size);
 
 #endif /* _KP_PLATFORM_H_ */

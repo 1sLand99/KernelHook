@@ -3,7 +3,7 @@
  * Ring 2 test: minimal freestanding importer (SDK mode).
  *
  * Built via kmod_sdk.mk — core library is NOT linked in. Instead, the module
- * references hook_wrap + ksyms_lookup as undefined symbols that the running
+ * references kh_hook_wrap + ksyms_lookup as undefined symbols that the running
  * kernel resolves against a loaded kernelhook.ko. KH_DECLARE_VERSIONS() emits
  * the __versions entries with frozen CRCs from <kernelhook/kh_symvers.h>.
  */
@@ -16,10 +16,10 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook Ring 2 importer test");
 
-/* Re-declare the two symbols we reference. Signatures match include/hook.h /
+/* Re-declare the two symbols we reference. Signatures match include/kh_hook.h /
  * include/symbol.h, but we avoid including them so this TU stays minimal. */
 extern uint64_t ksyms_lookup(const char *name);
-extern int hook_wrap(void *func, int argno, void *before, void *after,
+extern int kh_hook_wrap(void *func, int argno, void *before, void *after,
                      void *udata, int priority);
 
 static int __init importer_init(void)
@@ -30,10 +30,10 @@ static int __init importer_init(void)
     uint64_t addr = ksyms_lookup("vfs_open");
     pr_info("export_link_test importer: vfs_open = 0x%llx\n",
             (unsigned long long)addr);
-    /* Force an UND reference to hook_wrap so the symbol survives linking.
+    /* Force an UND reference to kh_hook_wrap so the symbol survives linking.
      * We never actually call it — addr==0 path returns before reaching it. */
     if (addr == 0) {
-        (void)hook_wrap((void *)(uintptr_t)addr, 4, 0, 0, 0, 0);
+        (void)kh_hook_wrap((void *)(uintptr_t)addr, 4, 0, 0, 0, 0);
         return -1;
     }
     return 0;

@@ -25,14 +25,14 @@
 #include <linux/init.h>
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook kbuild SDK consumer example: log every vfs_open");
 
-/* Saved target for unhook on exit */
+/* Saved target for kh_unhook on exit */
 static void *hooked_func;
 
 /*
@@ -42,7 +42,7 @@ static void *hooked_func;
  * Available since Linux 4.x — chosen over do_sys_openat2 for portability
  * (consistent with Plan 2 Ring 3 test which also hooks vfs_open).
  */
-static void vfs_open_before(hook_fargs2_t *fargs, void *udata)
+static void vfs_open_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     pr_info("kbuild_hello: vfs_open path=%llx file=%llx\n",
             (unsigned long long)fargs->arg0,
@@ -52,16 +52,16 @@ static void vfs_open_before(hook_fargs2_t *fargs, void *udata)
 static int __init kbuild_hello_init(void)
 {
     void *target = (void *)ksyms_lookup("vfs_open");
-    hook_err_t err;
+    kh_hook_err_t err;
 
     if (!target) {
         pr_err("kbuild_hello: vfs_open not found\n");
         return -ENOENT;
     }
 
-    err = hook_wrap2(target, vfs_open_before, NULL, NULL);
+    err = kh_hook_wrap2(target, vfs_open_before, NULL, NULL);
     if (err != HOOK_NO_ERR) {
-        pr_err("kbuild_hello: hook_wrap2 failed (%d)\n", (int)err);
+        pr_err("kbuild_hello: kh_hook_wrap2 failed (%d)\n", (int)err);
         return -EIO;
     }
 
@@ -74,7 +74,7 @@ static int __init kbuild_hello_init(void)
 static void __exit kbuild_hello_exit(void)
 {
     if (hooked_func) {
-        hook_unwrap(hooked_func, vfs_open_before, NULL);
+        kh_hook_unwrap(hooked_func, vfs_open_before, NULL);
         hooked_func = NULL;
         pr_info("kbuild_hello: unhooked\n");
     }

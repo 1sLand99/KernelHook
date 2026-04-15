@@ -2,7 +2,7 @@
 /* Android-specific tests. All SKIP on non-Android platforms. */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <platform.h>
@@ -17,7 +17,7 @@
 #include <dlfcn.h>
 #endif
 
-/* ---- Target for Bionic hook test ---- */
+/* ---- Target for Bionic kh_hook test ---- */
 /* aligned(4096) + visibility("hidden") ensures the target lands on its
  * own page, preventing same-page mprotect issues with library code
  * (transit_body orphan sections may land nearby in .text). */
@@ -36,7 +36,7 @@ int android_target(int a, int b)
 static int (*volatile call_android_target)(int, int) __attribute__((unused)) = android_target;
 static int android_before_called;
 
-static void android_before(hook_fargs2_t *fargs, void *udata)
+static void android_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     android_before_called = 1;
@@ -48,19 +48,19 @@ TEST(android_bionic_hook)
 {
     ANDROID_SKIP();
 
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
     android_before_called = 0;
 
-    hook_err_t err = hook_wrap2((void *)android_target, android_before, NULL, NULL);
+    kh_hook_err_t err = kh_hook_wrap2((void *)android_target, android_before, NULL, NULL);
     ASSERT_EQ(err, HOOK_NO_ERR);
 
     int result = call_android_target(3, 4);
     ASSERT_EQ(result, 7);
     ASSERT_TRUE(android_before_called);
 
-    hook_unwrap((void *)android_target, (void *)android_before, NULL);
-    hmem_user_cleanup();
+    kh_hook_unwrap((void *)android_target, (void *)android_before, NULL);
+    kh_hmem_user_cleanup();
 }
 
 TEST(android_mprotect_wx)
@@ -76,13 +76,13 @@ TEST(android_mprotect_wx)
         munmap(p, 4096);
     }
     /* The real test: our pool uses W^X correctly */
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
-    void *rox = hook_mem_alloc_rox(64);
+    void *rox = kh_mem_alloc_rox(64);
     ASSERT_NOT_NULL(rox);
     /* ROX memory should be readable but not writable */
-    hook_mem_free_rox(rox, 64);
-    hmem_user_cleanup();
+    kh_mem_free_rox(rox, 64);
+    kh_hmem_user_cleanup();
 #endif
 }
 
@@ -106,7 +106,7 @@ TEST(android_page_size)
     ANDROID_SKIP();
 
 #ifdef __ANDROID__
-    uint64_t ps = platform_page_size();
+    uint64_t ps = kh_platform_page_size();
     /* Android supports 4KB and 16KB pages */
     ASSERT_TRUE(ps == 4096 || ps == 16384);
 #endif

@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Integration tests: stress and edge cases.
- * Hook/unhook cycles, chain exhaustion, concurrency, nested hooks,
+ * Hook/kh_unhook cycles, chain exhaustion, concurrency, nested hooks,
  * and branch-prologue hooking.
  */
 
 #include "test_framework.h"
-#include <hook.h>
+#include <kh_hook.h>
 #include <memory.h>
 #include <hmem_user.h>
 #include <string.h>
@@ -22,7 +22,7 @@ int stress_target(int a, int b)
     return a + b;
 }
 
-/* Two functions for nested hook test.
+/* Two functions for nested kh_hook test.
  * Padded with nops to ensure each is >= 16 bytes (the trampoline size).
  * Without padding, Release-mode 8-byte functions cause the trampoline
  * to overwrite the adjacent function. */
@@ -71,23 +71,23 @@ static int (*volatile call_branch)(void) = branch_prologue_func;
 
 static void hook_setup(void)
 {
-    int rc = hmem_user_init();
+    int rc = kh_hmem_user_init();
     ASSERT_EQ(rc, 0);
 }
 
 static void hook_teardown(void)
 {
-    hmem_user_cleanup();
+    kh_hmem_user_cleanup();
 }
 
 /* ---- Dummy callbacks ---- */
 
-static void dummy_before(hook_fargs2_t *fargs, void *udata)
+static void dummy_before(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
 }
 
-static void dummy_after(hook_fargs2_t *fargs, void *udata)
+static void dummy_after(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
 }
@@ -98,11 +98,11 @@ TEST(stress_hook_unhook_1000)
 {
     hook_setup();
 
-    uint32_t rox_before = hook_mem_rox_used_blocks();
-    uint32_t rw_before = hook_mem_rw_used_blocks();
+    uint32_t rox_before = kh_mem_rox_used_blocks();
+    uint32_t rw_before = kh_mem_rw_used_blocks();
 
     for (int i = 0; i < 1000; i++) {
-        hook_err_t rc = hook_wrap((void *)stress_target, 2,
+        kh_hook_err_t rc = kh_hook_wrap((void *)stress_target, 2,
                                        (void *)dummy_before, (void *)dummy_after,
                                        NULL, 0);
         ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -111,13 +111,13 @@ TEST(stress_hook_unhook_1000)
         int result = call_stress(i, 1);
         ASSERT_EQ(result, i + 1);
 
-        hook_unwrap((void *)stress_target,
+        kh_hook_unwrap((void *)stress_target,
                     (void *)dummy_before, (void *)dummy_after);
     }
 
     /* Verify no memory leak */
-    ASSERT_EQ(hook_mem_rox_used_blocks(), rox_before);
-    ASSERT_EQ(hook_mem_rw_used_blocks(), rw_before);
+    ASSERT_EQ(kh_mem_rox_used_blocks(), rox_before);
+    ASSERT_EQ(kh_mem_rw_used_blocks(), rw_before);
 
     hook_teardown();
 }
@@ -130,8 +130,8 @@ TEST(stress_fill_chain_slots)
     void *befores[HOOK_CHAIN_NUM];
     void *afters[HOOK_CHAIN_NUM];
 
-    /* First, install the hook to create the chain */
-    hook_err_t rc = hook_wrap((void *)stress_target, 2,
+    /* First, install the kh_hook to create the chain */
+    kh_hook_err_t rc = kh_hook_wrap((void *)stress_target, 2,
                                    (void *)dummy_before, (void *)dummy_after,
                                    NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -142,14 +142,14 @@ TEST(stress_fill_chain_slots)
     for (int i = 1; i < HOOK_CHAIN_NUM; i++) {
         void *b = (void *)((uintptr_t)dummy_before + i);
         void *a = (void *)((uintptr_t)dummy_after + i);
-        rc = hook_wrap((void *)stress_target, 2, b, a, NULL, i);
+        rc = kh_hook_wrap((void *)stress_target, 2, b, a, NULL, i);
         ASSERT_EQ(rc, HOOK_NO_ERR);
         befores[i] = b;
         afters[i] = a;
     }
 
     /* Next add should fail */
-    rc = hook_wrap((void *)stress_target, 2,
+    rc = kh_hook_wrap((void *)stress_target, 2,
                         (void *)((uintptr_t)dummy_before + HOOK_CHAIN_NUM),
                         (void *)((uintptr_t)dummy_after + HOOK_CHAIN_NUM),
                         NULL, 99);
@@ -157,7 +157,7 @@ TEST(stress_fill_chain_slots)
 
     /* Remove all */
     for (int i = 0; i < HOOK_CHAIN_NUM; i++)
-        hook_unwrap((void *)stress_target, befores[i], afters[i]);
+        kh_hook_unwrap((void *)stress_target, befores[i], afters[i]);
 
     hook_teardown();
 }
@@ -194,7 +194,7 @@ struct thread_data {
     int success;
 };
 
-static void before_local_set(hook_fargs2_t *fargs, void *udata)
+static void before_local_set(kh_hook_fargs2_t *fargs, void *udata)
 {
     (void)udata;
     /* Store thread-specific data in local storage */
@@ -222,7 +222,7 @@ TEST(stress_concurrent_4threads)
 {
     hook_setup();
 
-    hook_err_t rc = hook_wrap((void *)stress_target, 2,
+    kh_hook_err_t rc = kh_hook_wrap((void *)stress_target, 2,
                                    (void *)before_local_set,
                                    NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -250,7 +250,7 @@ TEST(stress_concurrent_4threads)
     for (int i = 0; i < NUM_THREADS; i++)
         ASSERT_TRUE(tdata[i].success);
 
-    hook_unwrap((void *)stress_target,
+    kh_hook_unwrap((void *)stress_target,
                 (void *)before_local_set, NULL);
     hook_teardown();
 }
@@ -260,7 +260,7 @@ TEST(stress_concurrent_4threads)
 static int nested_A_hooked;
 static int nested_B_hooked;
 
-static void before_nested_A(hook_fargs1_t *fargs, void *udata)
+static void before_nested_A(kh_hook_fargs1_t *fargs, void *udata)
 {
     (void)udata;
     nested_A_hooked = 1;
@@ -270,7 +270,7 @@ static void before_nested_A(hook_fargs1_t *fargs, void *udata)
     fargs->local->data0 = (uint64_t)b_result;
 }
 
-static void before_nested_B(hook_fargs1_t *fargs, void *udata)
+static void before_nested_B(kh_hook_fargs1_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     nested_B_hooked = 1;
@@ -283,12 +283,12 @@ TEST(stress_nested_hooks)
     nested_B_hooked = 0;
 
     /* Hook both functions */
-    hook_err_t rc;
-    rc = hook_wrap((void *)nested_A, 1,
+    kh_hook_err_t rc;
+    rc = kh_hook_wrap((void *)nested_A, 1,
                         (void *)before_nested_A, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
-    rc = hook_wrap((void *)nested_B, 1,
+    rc = kh_hook_wrap((void *)nested_B, 1,
                         (void *)before_nested_B, NULL, NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
 
@@ -300,8 +300,8 @@ TEST(stress_nested_hooks)
     ASSERT_TRUE(nested_A_hooked);
     ASSERT_TRUE(nested_B_hooked);
 
-    hook_unwrap((void *)nested_A, (void *)before_nested_A, NULL);
-    hook_unwrap((void *)nested_B, (void *)before_nested_B, NULL);
+    kh_hook_unwrap((void *)nested_A, (void *)before_nested_A, NULL);
+    kh_hook_unwrap((void *)nested_B, (void *)before_nested_B, NULL);
     hook_teardown();
 }
 
@@ -309,7 +309,7 @@ TEST(stress_nested_hooks)
 
 static int branch_prologue_hooked;
 
-static void before_branch_prologue(hook_fargs0_t *fargs, void *udata)
+static void before_branch_prologue(kh_hook_fargs0_t *fargs, void *udata)
 {
     (void)fargs; (void)udata;
     branch_prologue_hooked = 1;
@@ -324,7 +324,7 @@ TEST(stress_branch_prologue)
     int orig = call_branch();
     ASSERT_EQ(orig, 77);
 
-    hook_err_t rc = hook_wrap((void *)branch_prologue_func, 0,
+    kh_hook_err_t rc = kh_hook_wrap((void *)branch_prologue_func, 0,
                                    (void *)before_branch_prologue, NULL,
                                    NULL, 0);
     ASSERT_EQ(rc, HOOK_NO_ERR);
@@ -333,7 +333,7 @@ TEST(stress_branch_prologue)
     ASSERT_EQ(result, 77);
     ASSERT_TRUE(branch_prologue_hooked);
 
-    hook_unwrap((void *)branch_prologue_func,
+    kh_hook_unwrap((void *)branch_prologue_func,
                 (void *)before_branch_prologue, NULL);
 
     /* Verify function works after unhooking */

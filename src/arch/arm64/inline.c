@@ -4,7 +4,7 @@
  * ARM64 instruction relocation engine
  */
 
-#include <hook.h>
+#include <kh_hook.h>
 #include <insn.h>
 #include <pgtable.h>
 #include <kh_log.h>
@@ -33,24 +33,24 @@ static int32_t relo_len[] = { 6, 8, 8, 4, 4, 6, 6, 6, 8, 8, 8, 8, 6, 6, 6, 6, 2 
 
 #define RELO_TYPE_COUNT (sizeof(relo_len) / sizeof(relo_len[0]))
 
-static int is_in_tramp(hook_t *hook, uintptr_t addr)
+static int is_in_tramp(kh_hook_t *kh_hook, uintptr_t addr)
 {
-    uintptr_t tramp_start = hook->origin_addr;
-    uintptr_t tramp_end = tramp_start + hook->tramp_insts_num * 4;
+    uintptr_t tramp_start = kh_hook->origin_addr;
+    uintptr_t tramp_end = tramp_start + kh_hook->tramp_insts_num * 4;
     if (addr >= tramp_start && addr < tramp_end) {
         return 1;
     }
     return 0;
 }
 
-static uintptr_t relo_in_tramp(hook_t *hook, uintptr_t addr)
+static uintptr_t relo_in_tramp(kh_hook_t *kh_hook, uintptr_t addr)
 {
-    if (!is_in_tramp(hook, addr)) return addr;
-    uintptr_t tramp_start = hook->origin_addr;
+    if (!is_in_tramp(kh_hook, addr)) return addr;
+    uintptr_t tramp_start = kh_hook->origin_addr;
     uint32_t addr_inst_index = (addr - tramp_start) / 4;
-    uintptr_t fix_addr = hook->relo_addr;
+    uintptr_t fix_addr = kh_hook->relo_addr;
     for (uint32_t i = 0; i < addr_inst_index; i++) {
-        inst_type_t inst = hook->origin_insts[i];
+        inst_type_t inst = kh_hook->origin_insts[i];
         for (uint32_t j = 0; j < RELO_TYPE_COUNT; j++) {
             if ((inst & masks[j]) == types[j]) {
                 fix_addr += relo_len[j] * 4;
@@ -61,9 +61,9 @@ static uintptr_t relo_in_tramp(hook_t *hook, uintptr_t addr)
     return fix_addr;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_b(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_b(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
     uint64_t imm64;
     if (type == INST_BC) {
         uint64_t imm19 = bits32(inst, 23, 5);
@@ -73,7 +73,7 @@ static __attribute__((__noinline__)) hook_err_t relo_b(hook_t *hook, uintptr_t i
         imm64 = sign64_extend(imm26 << 2u, 28u);
     }
     uintptr_t addr = inst_addr + imm64;
-    addr = relo_in_tramp(hook, addr);
+    addr = relo_in_tramp(kh_hook, addr);
 
     uint32_t idx = 0;
     if (type == INST_BC) {
@@ -95,9 +95,9 @@ static __attribute__((__noinline__)) hook_err_t relo_b(hook_t *hook, uintptr_t i
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_adr(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_adr(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
 
     uint32_t xd = bits32(inst, 4, 0);
     uint64_t immlo = bits32(inst, 30, 29);
@@ -108,7 +108,7 @@ static __attribute__((__noinline__)) hook_err_t relo_adr(hook_t *hook, uintptr_t
         addr = inst_addr + sign64_extend((immhi << 2u) | immlo, 21u);
     } else {
         addr = (inst_addr + sign64_extend((immhi << 14u) | (immlo << 12u), 33u)) & 0xFFFFFFFFFFFFF000;
-        if (is_in_tramp(hook, addr)) return HOOK_BAD_RELO;
+        if (is_in_tramp(kh_hook, addr)) return HOOK_BAD_RELO;
     }
     buf[0] = 0x58000040u | xd; /* LDR Xd, #8 */
     buf[1] = 0x14000003; /* B #12 */
@@ -117,18 +117,18 @@ static __attribute__((__noinline__)) hook_err_t relo_adr(hook_t *hook, uintptr_t
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_ldr(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_ldr(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
 
     uint32_t rt = bits32(inst, 4, 0);
     uint64_t imm19 = bits32(inst, 23, 5);
     uint64_t offset = sign64_extend((imm19 << 2u), 21u);
     uintptr_t addr = inst_addr + offset;
 
-    if (is_in_tramp(hook, addr) && type != INST_PRFM_LIT) return HOOK_BAD_RELO;
+    if (is_in_tramp(kh_hook, addr) && type != INST_PRFM_LIT) return HOOK_BAD_RELO;
 
-    addr = relo_in_tramp(hook, addr);
+    addr = relo_in_tramp(kh_hook, addr);
 
     if (type == INST_LDR_32 || type == INST_LDR_64 || type == INST_LDRSW_LIT) {
         buf[0] = 0x58000080u | rt; /* LDR Xt, #16 */
@@ -164,15 +164,15 @@ static __attribute__((__noinline__)) hook_err_t relo_ldr(hook_t *hook, uintptr_t
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_cb(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_cb(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
     (void)type;
 
     uint64_t imm19 = bits32(inst, 23, 5);
     uint64_t offset = sign64_extend((imm19 << 2u), 21u);
     uintptr_t addr = inst_addr + offset;
-    addr = relo_in_tramp(hook, addr);
+    addr = relo_in_tramp(kh_hook, addr);
 
     buf[0] = (inst & 0xFF00001F) | 0x40u; /* CB(N)Z Rt, #8 */
     buf[1] = 0x14000005; /* B #20 */
@@ -183,15 +183,15 @@ static __attribute__((__noinline__)) hook_err_t relo_cb(hook_t *hook, uintptr_t 
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_tb(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_tb(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
     (void)type;
 
     uint64_t imm14 = bits32(inst, 18, 5);
     uint64_t offset = sign64_extend((imm14 << 2u), 16u);
     uintptr_t addr = inst_addr + offset;
-    addr = relo_in_tramp(hook, addr);
+    addr = relo_in_tramp(kh_hook, addr);
 
     buf[0] = (inst & 0xFFF8001F) | 0x40u; /* TB(N)Z Rt, #<imm>, #8 */
     buf[1] = 0x14000005; /* B #20 */
@@ -202,9 +202,9 @@ static __attribute__((__noinline__)) hook_err_t relo_tb(hook_t *hook, uintptr_t 
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relo_ignore(hook_t *hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
+static __attribute__((__noinline__)) kh_hook_err_t relo_ignore(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst, inst_type_t type)
 {
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
     (void)inst_addr;
     (void)type;
     buf[0] = inst;
@@ -212,9 +212,9 @@ static __attribute__((__noinline__)) hook_err_t relo_ignore(hook_t *hook, uintpt
     return HOOK_NO_ERR;
 }
 
-static __attribute__((__noinline__)) hook_err_t relocate_inst(hook_t *hook, uintptr_t inst_addr, uint32_t inst)
+static __attribute__((__noinline__)) kh_hook_err_t relocate_inst(kh_hook_t *kh_hook, uintptr_t inst_addr, uint32_t inst)
 {
-    hook_err_t rc = HOOK_NO_ERR;
+    kh_hook_err_t rc = HOOK_NO_ERR;
     inst_type_t it = INST_IGNORE;
     int len = 1;
 
@@ -227,18 +227,18 @@ static __attribute__((__noinline__)) hook_err_t relocate_inst(hook_t *hook, uint
     }
 
     /* Bounds check BEFORE writing to prevent buffer overflow */
-    if (hook->relo_insts_num + len > RELOCATE_INST_NUM)
+    if (kh_hook->relo_insts_num + len > RELOCATE_INST_NUM)
         return HOOK_BAD_RELO;
 
     switch (it) {
     case INST_B:
     case INST_BC:
     case INST_BL:
-        rc = relo_b(hook, inst_addr, inst, it);
+        rc = relo_b(kh_hook, inst_addr, inst, it);
         break;
     case INST_ADR:
     case INST_ADRP:
-        rc = relo_adr(hook, inst_addr, inst, it);
+        rc = relo_adr(kh_hook, inst_addr, inst, it);
         break;
     case INST_LDR_32:
     case INST_LDR_64:
@@ -247,39 +247,39 @@ static __attribute__((__noinline__)) hook_err_t relocate_inst(hook_t *hook, uint
     case INST_LDR_SIMD_32:
     case INST_LDR_SIMD_64:
     case INST_LDR_SIMD_128:
-        rc = relo_ldr(hook, inst_addr, inst, it);
+        rc = relo_ldr(kh_hook, inst_addr, inst, it);
         break;
     case INST_CBZ:
     case INST_CBNZ:
-        rc = relo_cb(hook, inst_addr, inst, it);
+        rc = relo_cb(kh_hook, inst_addr, inst, it);
         break;
     case INST_TBZ:
     case INST_TBNZ:
-        rc = relo_tb(hook, inst_addr, inst, it);
+        rc = relo_tb(kh_hook, inst_addr, inst, it);
         break;
     case INST_IGNORE:
     default:
-        rc = relo_ignore(hook, inst_addr, inst, it);
+        rc = relo_ignore(kh_hook, inst_addr, inst, it);
         break;
     }
 
-    hook->relo_insts_num += len;
+    kh_hook->relo_insts_num += len;
 
     return rc;
 }
 
-hook_err_t hook_prepare(hook_t *hook)
+kh_hook_err_t kh_hook_prepare(kh_hook_t *kh_hook)
 {
-    if (is_bad_address((void *)hook->func_addr)) return HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->origin_addr)) return HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->replace_addr)) return HOOK_BAD_ADDRESS;
-    if (is_bad_address((void *)hook->relo_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)kh_hook->func_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)kh_hook->origin_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)kh_hook->replace_addr)) return HOOK_BAD_ADDRESS;
+    if (is_bad_address((void *)kh_hook->relo_addr)) return HOOK_BAD_ADDRESS;
 
     for (int i = 0; i < TRAMPOLINE_NUM; i++) {
-        hook->origin_insts[i] = *((uint32_t *)hook->origin_addr + i);
+        kh_hook->origin_insts[i] = *((uint32_t *)kh_hook->origin_addr + i);
     }
 
-    uint32_t first = hook->origin_insts[0];
+    uint32_t first = kh_hook->origin_insts[0];
     int is_bti = (first == ARM64_BTI_C || first == ARM64_BTI_J || first == ARM64_BTI_JC);
     int is_pac = (first == ARM64_PACIASP || first == ARM64_PACIBSP);
 
@@ -287,53 +287,53 @@ hook_err_t hook_prepare(hook_t *hook)
         /* BTI-only, PAC-only, or BTI+PAC combo: 5-instruction trampoline
          * tramp[0] = BTI_JC (preserves landing pad at hooked function entry)
          * tramp[1..4] = branch_absolute to replace_addr */
-        hook->tramp_insts[0] = ARM64_BTI_JC;
-        hook->tramp_insts_num = 1 + branch_from_to(&hook->tramp_insts[1],
-                                                     hook->origin_addr, hook->replace_addr);
+        kh_hook->tramp_insts[0] = ARM64_BTI_JC;
+        kh_hook->tramp_insts_num = 1 + branch_from_to(&kh_hook->tramp_insts[1],
+                                                     kh_hook->origin_addr, kh_hook->replace_addr);
     } else {
         /* Non-BTI/non-PAC: standard 4-instruction trampoline */
-        hook->tramp_insts_num = branch_from_to(hook->tramp_insts,
-                                                hook->origin_addr, hook->replace_addr);
+        kh_hook->tramp_insts_num = branch_from_to(kh_hook->tramp_insts,
+                                                kh_hook->origin_addr, kh_hook->replace_addr);
     }
 
     {
         uint32_t i;
-        for (i = 0; i < sizeof(hook->relo_insts) / sizeof(hook->relo_insts[0]); i++)
-            hook->relo_insts[i] = ARM64_NOP;
+        for (i = 0; i < sizeof(kh_hook->relo_insts) / sizeof(kh_hook->relo_insts[0]); i++)
+            kh_hook->relo_insts[i] = ARM64_NOP;
     }
 
-    uint32_t *bti = hook->relo_insts + hook->relo_insts_num;
+    uint32_t *bti = kh_hook->relo_insts + kh_hook->relo_insts_num;
     bti[0] = ARM64_BTI_JC;
     bti[1] = ARM64_NOP;
-    hook->relo_insts_num += 2;
+    kh_hook->relo_insts_num += 2;
 
     {
     int i;
-    for (i = 0; i < hook->tramp_insts_num; i++) {
-        uintptr_t inst_addr = hook->origin_addr + i * 4;
-        uint32_t inst = hook->origin_insts[i];
-        hook_err_t relo_res = relocate_inst(hook, inst_addr, inst);
+    for (i = 0; i < kh_hook->tramp_insts_num; i++) {
+        uintptr_t inst_addr = kh_hook->origin_addr + i * 4;
+        uint32_t inst = kh_hook->origin_insts[i];
+        kh_hook_err_t relo_res = relocate_inst(kh_hook, inst_addr, inst);
         if (relo_res) {
             return HOOK_BAD_RELO;
         }
     }
     }
 
-    uintptr_t back_src_addr = hook->relo_addr + hook->relo_insts_num * 4;
-    uintptr_t back_dst_addr = hook->origin_addr + hook->tramp_insts_num * 4;
-    uint32_t *buf = hook->relo_insts + hook->relo_insts_num;
-    hook->relo_insts_num += branch_from_to(buf, back_src_addr, back_dst_addr);
+    uintptr_t back_src_addr = kh_hook->relo_addr + kh_hook->relo_insts_num * 4;
+    uintptr_t back_dst_addr = kh_hook->origin_addr + kh_hook->tramp_insts_num * 4;
+    uint32_t *buf = kh_hook->relo_insts + kh_hook->relo_insts_num;
+    kh_hook->relo_insts_num += branch_from_to(buf, back_src_addr, back_dst_addr);
 
 #ifndef __USERSPACE__
     /* Copy the original function's kCFI type hash to the relocated code
      * prefix. kCFI checks *(target - 4) before every BLR; placing the
      * hash at _relo_cfi_hash (immediately before relo_insts[0]) allows
-     * the backup pointer returned by hook() to pass CFI validation.
+     * the backup pointer returned by kh_hook() to pass CFI validation.
      * On non-kCFI kernels this is harmless — just 4 bytes of data.
      * In userspace there is no kCFI, and origin_addr may not have
      * readable memory at -4, so skip. */
-    if (!is_bad_address((void *)(hook->origin_addr - 4)))
-        hook->_relo_cfi_hash = *(uint32_t *)(hook->origin_addr - 4);
+    if (!is_bad_address((void *)(kh_hook->origin_addr - 4)))
+        kh_hook->_relo_cfi_hash = *(uint32_t *)(kh_hook->origin_addr - 4);
 #endif
 
     return HOOK_NO_ERR;
@@ -383,7 +383,7 @@ static uint64_t kh_table_pa_mask = 0;
 
 #ifdef KMOD_FREESTANDING
 /* Spinlock serializes the alias PTE rewrite + patch + restore sequence.
- * kh_alias_entry is a single global PTE; concurrent hook_install on
+ * kh_alias_entry is a single global PTE; concurrent kh_hook_install on
  * different target functions would otherwise race and cause
  * aarch64_insn_patch_text_nosync to write to the wrong target. */
 typedef struct {
@@ -502,7 +502,7 @@ static void kh_alias_init(void)
  * on (a) single-writer serialisation via kh_alias_lock, (b) icache
  * flush from aarch64_insn_patch_text_nosync after each write, and
  * (c) the empirical observation that target functions are rarely
- * executed during hook install/uninstall (module-init / TDD flow).
+ * executed during kh_hook install/uninstall (module-init / TDD flow).
  * The residual theoretical race is documented in
  * docs/audits/kp-port-audit-2026-04-15.md §2.4 row 6.1. */
 __attribute__((no_sanitize("kcfi")))
@@ -661,7 +661,7 @@ void kh_write_insts_init(void)
 
 /* Free the vmalloc'd alias page. Must be called from the module exit path
  * to avoid leaking a page of virtual address space on rmmod. Callers MUST
- * ensure no concurrent hook_install calls are in flight before calling this.
+ * ensure no concurrent kh_hook_install calls are in flight before calling this.
  * (In practice, all hooks should have been uninstalled before module exit.) */
 __attribute__((no_sanitize("kcfi")))
 void kh_write_insts_cleanup(void)
@@ -724,7 +724,7 @@ static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
      * applies here too (one word written at a time, other CPUs could
      * execute the target between iterations).  In freestanding mode
      * stop_machine is unavailable; we rely on single-writer serialisation
-     * + the empirical observation that hook install/uninstall is rare. */
+     * + the empirical observation that kh_hook install/uninstall is rare. */
     if (kh_write_mode == 1 && kh_set_memory_rw && kh_set_memory_ro) {
 #ifndef KMOD_FREESTANDING
         struct kh_setmem_sm_arg sm_arg = { .va = va, .insts = insts, .count = count, .rc = 0 };
@@ -754,13 +754,13 @@ flush_icache:
     asm volatile("dsb ish\n\tisb" ::: "memory");
 }
 
-void hook_install(hook_t *hook)
+void kh_hook_install(kh_hook_t *kh_hook)
 {
-    write_insts_at(hook->origin_addr, hook->tramp_insts, hook->tramp_insts_num);
+    write_insts_at(kh_hook->origin_addr, kh_hook->tramp_insts, kh_hook->tramp_insts_num);
 }
 
-void hook_uninstall(hook_t *hook)
+void kh_hook_uninstall(kh_hook_t *kh_hook)
 {
-    write_insts_at(hook->origin_addr, hook->origin_insts, hook->tramp_insts_num);
+    write_insts_at(kh_hook->origin_addr, kh_hook->origin_insts, kh_hook->tramp_insts_num);
 }
 #endif /* !__USERSPACE__ */

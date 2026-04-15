@@ -7,7 +7,7 @@
  */
 /*
  * Copyright (C) 2026 bmax121.
- * Kernel-side hook_mem_ops_t backend.
+ * Kernel-side kh_mem_ops_t backend.
  *
  * Two build paths:
  *   Kbuild (default):     uses kernel headers (vmalloc, set_memory_*)
@@ -23,7 +23,7 @@
 #include <asm/set_memory.h>
 #endif
 #include <memory.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <linux/printk.h>
 
@@ -153,7 +153,7 @@ static int kmod_set_memory_x(unsigned long addr, int numpages)
 #endif /* KMOD_FREESTANDING */
 
 /* ========================================================================
- * hook_mem_ops_t callbacks (shared by both build paths)
+ * kh_mem_ops_t callbacks (shared by both build paths)
  * ======================================================================== */
 
 /* ROX pool — read / execute memory, modifiable transiently via set_memory_rw */
@@ -212,7 +212,7 @@ int kmod_hook_mem_init(void)
         return rc;
 #endif
 
-    static const hook_mem_ops_t rox_ops = {
+    static const kh_mem_ops_t rox_ops = {
         .alloc          = rox_alloc,
         .free           = rox_free,
         .set_memory_rw  = rox_set_memory_rw,
@@ -220,7 +220,7 @@ int kmod_hook_mem_init(void)
         .set_memory_x   = rox_set_memory_x,
     };
 
-    static const hook_mem_ops_t rw_ops = {
+    static const kh_mem_ops_t rw_ops = {
         .alloc          = rw_alloc,
         .free           = rw_free,
         .set_memory_rw  = rw_set_memory_nop,
@@ -228,18 +228,18 @@ int kmod_hook_mem_init(void)
         .set_memory_x   = rw_set_memory_nop,
     };
 
-    return hook_mem_init(&rox_ops, &rw_ops, PAGE_SIZE);
+    return kh_mem_init(&rox_ops, &rw_ops, PAGE_SIZE);
 }
 
 void kmod_hook_mem_cleanup(void)
 {
     /* Restore ROX pool to RW before vfree — vfree's clear_page writes
      * to the pages, which panics if they're still read-only. */
-    uint64_t rox_base = hook_mem_rox_pool_base();
-    uint64_t rox_size = hook_mem_rox_pool_size();
+    uint64_t rox_base = kh_mem_rox_pool_base();
+    uint64_t rox_size = kh_mem_rox_pool_size();
     if (rox_base && rox_size) {
         int npages = (int)(rox_size / PAGE_SIZE);
         kmod_set_memory_rw((unsigned long)rox_base, npages);
     }
-    hook_mem_cleanup();
+    kh_mem_cleanup();
 }

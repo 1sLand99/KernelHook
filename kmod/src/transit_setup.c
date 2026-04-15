@@ -2,16 +2,16 @@
 /*
  * Kernel-side transit buffer setup.
  *
- * Provides hook_chain_setup_transit() and fp_hook_chain_setup_transit()
+ * Provides kh_hook_chain_setup_transit() and kh_fp_hook_chain_setup_transit()
  * for the freestanding kernel build.  These copy the asm transit stubs
- * into the ROX buffer — no platform_write_code() needed because the
+ * into the ROX buffer — no kh_platform_write_code() needed because the
  * caller already holds the ROX write-enable.
  */
 
 #include <linux/string.h>
 
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <linux/printk.h>
 
 extern uint64_t _transit(void);
@@ -40,13 +40,13 @@ static void setup_transit(void *rox, uint32_t *transit,
     memcpy(&transit[2], stub_start, sz);
 }
 
-void hook_chain_setup_transit(hook_chain_rox_t *rox)
+void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox)
 {
     setup_transit(rox, rox->transit,
                   (void *)(uintptr_t)_transit, (void *)(uintptr_t)_transit_end);
 }
 
-void fp_hook_chain_setup_transit(fp_hook_chain_rox_t *rox)
+void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox)
 {
     setup_transit(rox, rox->transit,
                   (void *)(uintptr_t)_fp_transit, (void *)(uintptr_t)_fp_transit_end);
