@@ -577,7 +577,42 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
         return sm_rc;   /* stop_machine itself failed (OOM, etc.) */
     return arg.rc;       /* inner worker's return value */
 }
-#else
+
+/* set_memory fallback stop_machine arg: same shape as kh_alias_sm_arg.
+ * Used when the alias path is unavailable (vmalloc OOM, PTE_CONT) and
+ * the page is vmalloc-backed so set_memory_rw/ro succeeds.  The
+ * intermediate-trampoline-state hazard is identical to the alias path:
+ * a 4/5-word trampoline written one word at a time leaves broken
+ * branch sequences visible to other CPUs between iterations.  Wrapping
+ * in stop_machine() here gives symmetric protection matching the alias
+ * path and KP hotpatch(). */
+struct kh_setmem_sm_arg {
+    uintptr_t va;
+    uint32_t *insts;
+    int32_t count;
+    int rc;
+};
+
+__attribute__((no_sanitize("kcfi")))
+static int write_insts_via_setmem_sm_cb(void *data)
+{
+    struct kh_setmem_sm_arg *arg = (struct kh_setmem_sm_arg *)data;
+    unsigned long page_va = arg->va & ~(page_size - 1);
+
+    if (kh_set_memory_rw(page_va, 1) != 0) {
+        arg->rc = -1;
+        return -1;
+    }
+    /* All other CPUs are stopped — write the full trampoline atomically. */
+    for (int32_t i = 0; i < arg->count; i++)
+        *((uint32_t *)arg->va + i) = arg->insts[i];
+    kh_set_memory_ro(page_va, 1);
+    if (kh_set_memory_x)
+        kh_set_memory_x(page_va, 1);
+    arg->rc = 0;
+    return 0;
+}
+#else  /* KMOD_FREESTANDING */
 /* Freestanding fallback — cannot pull stop_machine from kernel headers.
  * Multi-instruction patches rely on empirical safety; see the comment
  * block on write_insts_via_alias_impl and §2.4 row 6.1 of the audit. */
@@ -586,7 +621,7 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
 {
     return write_insts_via_alias_impl(va, insts, count);
 }
-#endif
+#endif  /* !KMOD_FREESTANDING */
 
 /* Called from kmod init after ksyms resolution */
 __attribute__((no_sanitize("kcfi")))
@@ -683,8 +718,20 @@ static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
     if (write_insts_via_alias(va, insts, count) == 0)
         return;
 
-    /* Fallback 1: set_memory (for vmalloc-backed pages only). */
+    /* Fallback 1: set_memory (for vmalloc-backed pages only).
+     * In kbuild mode, wrap the write loop in stop_machine() — the same
+     * intermediate-trampoline-state hazard that the alias path carries
+     * applies here too (one word written at a time, other CPUs could
+     * execute the target between iterations).  In freestanding mode
+     * stop_machine is unavailable; we rely on single-writer serialisation
+     * + the empirical observation that hook install/uninstall is rare. */
     if (kh_write_mode == 1 && kh_set_memory_rw && kh_set_memory_ro) {
+#ifndef KMOD_FREESTANDING
+        struct kh_setmem_sm_arg sm_arg = { .va = va, .insts = insts, .count = count, .rc = 0 };
+        if (stop_machine(write_insts_via_setmem_sm_cb, &sm_arg, cpu_online_mask) == 0 &&
+            sm_arg.rc == 0)
+            goto flush_icache;
+#else
         unsigned long page_va = va & ~(page_size - 1);
         if (kh_set_memory_rw(page_va, 1) == 0) {
             for (int32_t i = 0; i < count; i++)
@@ -694,6 +741,7 @@ static void write_insts_at(uintptr_t va, uint32_t *insts, int32_t count)
                 kh_set_memory_x(page_va, 1);
             goto flush_icache;
         }
+#endif
     }
 
     /* Fallback 2: direct PTE modification. */
