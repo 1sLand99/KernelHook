@@ -3,7 +3,17 @@
  * Kernel log backend: printk() and log_level for kernel builds.
  * Freestanding: resolved via ksyms at runtime.
  * Kbuild: direct printk reference + module_param for log_level.
+ *
+ * SDK mode (kmod_sdk.mk) gets its log_level from the shim's
+ * <linux/printk.h> as a TU-local static; this file contributes
+ * nothing in that mode and is guarded out entirely. Note that
+ * kmod_sdk.mk's variable override correctly excludes this file
+ * from the final link, but GNU Make's pattern rules still
+ * schedule it for compilation — the guard keeps that compile
+ * clean (emits an empty object).
  */
+
+#ifndef KH_SDK_MODE
 
 #include <linux/printk.h>
 #if __has_include(<linux/stdarg.h>)
@@ -63,4 +73,6 @@ int log_init(void)
     return 0;
 }
 
-#endif
+#endif /* KMOD_FREESTANDING */
+
+#endif /* !KH_SDK_MODE */
