@@ -33,7 +33,7 @@
 #include <symbol.h>
 #include <syscall.h>
 #include <uaccess.h>
-#include "test_phase6_kh_root.h"
+#include "demo_kh_root.h"
 
 #ifndef KMOD_FREESTANDING
 #include <linux/cred.h>
