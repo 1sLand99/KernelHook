@@ -403,3 +403,46 @@ Note on pre-existing gap: `export_link_test/` Ring 3 exporter+importer on-device
 `kernelhook.ko` + `hello_hook.ko` only; `kh_test.ko` (which carries the Ring 3
 export_link_test) is not loaded in `--mode=sdk`. The gap is pre-existing from P1 —
 not P2-introduced; forwarded to a separate follow-up. Does not block P2 exit.
+
+### 4.1 Supplementary freestanding run (belt-and-suspenders closure)
+
+A full `--mode=freestanding` run was executed after the SDK closure to
+remove the "freestanding-not-re-run-in-T9" qualifier flagged by the T9
+reviewer. Between T6 (the last freestanding-validated checkpoint, 100/0)
+and T9, only one code commit landed (`c273598`, extending `stop_machine`
+to the `set_memory` fallback path) and it is strictly guarded by
+`#ifndef KMOD_FREESTANDING` — so the freestanding path is bit-identical
+to what T6 already validated. The supplementary run confirms this
+empirically:
+
+```
+==> device: kmod tests on physical device (--mode=freestanding)
+Mode: freestanding
+Device serial: 1B101FDF6003PM
+  SELinux: Permissive   modules_disabled: 0
+  API: 35   Kernel: 6.1.99-android14-11-gd7dac4b14270-ab12946699
+  Building kh_test.ko (freestanding)...
+  PASS 97 passed, 0 failed (API 35, kernel 6.1.99-android14-11-gd7dac4b14270-ab12946699)
+  Running export_link_test (Ring 3)...
+  Ring 3 __ksymtab layout: prel32
+  PASS Ring 3: 3/3
+
+Verifying Phase 6 kh_root...
+  baseline shell uid = 2000
+  kh_root -c id -u   = 0
+  PASS Phase 6: kh_root elevated 2000 → 0
+
+All device tests passed.
+=== Summary: 100 PASS, 0 FAIL ===
+<-- device: PASS
+=== Summary: 1 PASS, 0 FAIL ===
+```
+
+**Unexpected happy-path result:** the P1-documented pre-existing gap
+(`export_link_test/` Ring 3) now **passes 3/3**. The P1 handoff flagged
+this as "forward to P2 or separate follow-up"; the P2 audit work itself
+did not target it, so the resolution is incidental. A post-P2 diff vs
+the last P1 commit (`3fe5d84`) would be needed to explain the fix; for
+now, record that the gap is closed and no separate follow-up is
+required. Criterion 3 now reads **unconditional PASS** for both SDK
+and freestanding modes.
