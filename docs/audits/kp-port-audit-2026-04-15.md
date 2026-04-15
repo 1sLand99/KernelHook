@@ -294,7 +294,13 @@ comment block and acknowledged here.
 | 6.5 | TLBI sequence inside `write_insts_via_alias_impl` (pre + post) | Matches KP exactly. | no-action | Verified: `src/arch/arm64/inline.c:522–525` and 531–533 — `*alias_entry = new_pte → dsb ish → kh_flush_tlb_kernel_page` before, and `*alias_entry = kh_alias_pte → dsb ish → kh_flush_tlb_kernel_page` after. `kh_flush_tlb_kernel_page` (`include/arch/arm64/pgtable.h:122–129`) emits `dsb ishst → tlbi vaale1is → dsb ish → isb`, mirroring KP `flush_tlb_kernel_page` and the kernel's own `__tlbi(vaale1is, ...)` macro. The additional `dsb ish` before the TLBI-page call is redundant with the TLBI primitive's own pre-barrier but harmless; matches KP line 53/57. |
 
 ### 2.5 `src/arch/arm64/pgtable.c` + `include/arch/arm64/pgtable.h` ↔ `ref/KernelPatch/kernel/include/pgtable.h`
-(filled in T7)
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 7.1 | `kh_flush_tlb_kernel_page` TLBI sequence (`include/arch/arm64/pgtable.h:122-129`) | IDENTICAL: both use `dsb ishst` → `tlbi vaale1is, addr` → `dsb ish` → `isb`. KP uses the `tlbi_1(vaale1is, addr)` macro (ref `pgtable.h:162`); ours uses direct inline asm — same four instructions, same order. | **no-action** | CLAUDE.md documents the rationale (`vaale1is` = VA, All ASIDs, EL1, IS; pre-TLBI `dsb(ishst)` orders the preceding PTE store; post-TLBI `dsb(ish)+isb` completes maintenance). No drift detected. |
+| 7.2 | `kernel_pgd = swapper_pg_dir` only; no `init_mm.pgd` fallback (`pgtable.c:118-124`) | KP (`start.c:459-464`) reads `TTBR1_EL1` hardware register directly to obtain `pgd_pa`, then derives `pgd_va = phys_to_virt(pgd_pa)`. KP does not use `swapper_pg_dir` or `init_mm.pgd`. Our path (ksyms-resolve `swapper_pg_dir`) is a different approach; both arrive at the same physical pgd. No `init_mm` fallback in KP either. | **no-action** | GKI exports `swapper_pg_dir` unconditionally. `init_mm.pgd` is unsafe because `struct mm_struct` layout varies across kernel versions and reading at offset 0 of `init_mm` is not `pgd`. Comment in `pgtable.c:117` already states this. Keep single `swapper_pg_dir` path. |
+| 7.3 | `kva_min = page_offset ? page_offset : 0xffffff8000000000ULL` guard in `pgtable_entry` and `pgtable_phys_kernel` (`pgtable.c:180, 242`) | KP `pgtable_entry` (`start.c:127-173`) has no kva_min sanity check at all. Our guard is a defensive addition absent in KP. The fallback constant `0xffffff8000000000ULL` is the correct lower bound for 39-bit VA kernels (T1SZ=25). For all wider VA configs the runtime-computed `page_offset` is used. | **no-action** | Strictly stricter than KP. Prevents a nonsensical walk if `pgtable_init` was skipped or if a caller passes a userspace VA. The fallback constant is architecturally correct for the minimum GKI VA width (39-bit). |
+| 7.4 | VA-bits detection via `TCR_EL1.T1SZ` (`pgtable.c:141-154`) | IDENTICAL algorithm: both read `tcr_el1` via `mrs`, extract T1SZ from bits `[21:16]`, compute `va_bits = 64 - t1sz`. KP (`start.c:444-446`): `t1sz = bits(tcr_el1, 21, 16); va_bits = 64 - t1sz`. Our code: `t1sz = (tcr >> 16) & 0x3f; va_bits = 64 - t1sz`. Same for page-size detection via TG1 bits `[31:30]`. | **no-action** | Algorithm matches KP exactly. `page_level` formula differs slightly (`(va_bits - 4) / (page_shift - 3)` in KP vs ceiling formula in ours) but produces the same integer result for all valid GKI VA/page-size combinations. |
 
 ### 2.6 `tests/kmod/test_phase6_kh_root.c` ↔ `ref/KernelPatch/kernel/patch/common/sucompat.c`
 (filled in T8)
@@ -320,6 +326,10 @@ comment block and acknowledged here.
 | 6.3 | `src/arch/arm64/inline.c` | **no-action** | PTE_CONT guard in `kh_alias_init` — defensive vs KP; refuses the alias path rather than corrupt a contiguous PTE group | 431ad03 |
 | 6.4 | `src/arch/arm64/inline.c` | **no-action** | `_relo_cfi_hash` via `is_bad_address(origin_addr-4)` — kCFI-specific; KP has no equivalent because it predates kCFI | 431ad03 |
 | 6.5 | `src/arch/arm64/inline.c` | **no-action** | TLBI sequence inside alias patch (pre + post) — matches KP `hotpatch_nosync` lines 53/57 and the KP `flush_tlb_kernel_page` pattern | 431ad03 |
+| 7.1 | `include/arch/arm64/pgtable.h` | **no-action** | `kh_flush_tlb_kernel_page` TLBI sequence — IDENTICAL to KP `flush_tlb_kernel_page` (ref `pgtable.h:158-165`): `dsb ishst → tlbi vaale1is → dsb ish → isb` | TBD_7 |
+| 7.2 | `src/arch/arm64/pgtable.c` | **no-action** | `kernel_pgd` resolved via `swapper_pg_dir` only — KP uses `TTBR1_EL1` hardware register; no `init_mm.pgd` fallback in either. GKI exports `swapper_pg_dir`; `init_mm.pgd` unsafe due to struct layout variance | TBD_7 |
+| 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | TBD_7 |
+| 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | TBD_7 |
 
 (rows appended as audit tasks fill the sections above)
 
