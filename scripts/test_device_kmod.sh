@@ -148,12 +148,12 @@ if [ "$KH_MODE" = "sdk" ]; then
         exit 1
     fi
     if ! ( cd "$ROOT/examples/hello_hook" && \
-           { make -f Makefile.sdk clean >/dev/null 2>&1 || true; } && \
+           { make clean >/dev/null 2>&1 || true; } && \
            KERNELRELEASE="$UNAME" \
            CC="$KH_CC" \
            LD="$KH_LD" \
            CROSS_COMPILE="$KH_CROSS_COMPILE" \
-           make -f Makefile.sdk module \
+           make module \
                >>/tmp/kh_test_build.log 2>&1 ); then
         printf "  ${RED}FAIL${RESET} hello_hook.ko (SDK) build failed — see /tmp/kh_test_build.log\n"
         tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
