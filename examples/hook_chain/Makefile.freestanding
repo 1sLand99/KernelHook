@@ -2,4 +2,4 @@
 MODULE_NAME  := hook_chain
 MODULE_SRCS  := hook_chain.c
 KERNELHOOK_DIR := $(shell cd ../../kmod && pwd)
-include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
+include $(KERNELHOOK_DIR)/mk/kmod.mk
