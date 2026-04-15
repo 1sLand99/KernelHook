@@ -162,7 +162,22 @@ case "$KH_SUBCMD" in
     avd)           cmd_stub ;;
     device)        cmd_stub ;;
     sdk-consumer)  cmd_stub ;;
-    kbuild-verify) cmd_stub ;;
+    kbuild-verify)
+        if [ "${#KH_SUBCMD_ARGS[@]}" -lt 2 ]; then
+            printf "usage: scripts/test.sh kbuild-verify <ko-path> <expected-kver>\n" >&2
+            exit 2
+        fi
+        kh_section_start "kbuild-verify: ${KH_SUBCMD_ARGS[0]}"
+        if "$ROOT/scripts/ci/verify_kmod.sh" "${KH_SUBCMD_ARGS[0]}" "${KH_SUBCMD_ARGS[1]}"; then
+            kh_section_end "kbuild-verify" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            kh_section_end "kbuild-verify" FAIL
+            kh_summary_line 0 1
+            exit 1
+        fi
+        ;;
     all)           cmd_stub ;;
     *)
         printf "unknown subcommand: %s\n" "$KH_SUBCMD" >&2
