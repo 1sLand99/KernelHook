@@ -1,5 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
+ * Copyright (C) 2026 bmax121.
+ *
+ * Kernel module test harness entry point: initialises KernelHook subsystem
+ * and runs the full test suite (hook, chain, security mechanisms, kh_root demo).
+ *
+ * Build modes: kernel
+ * Depends on: kh_hook.h, symbol.h (ksyms_init), mem_ops.h, test_hook_kernel.h,
+ *   demo_kh_root.h, uaccess.h, syscall.h
+ *
  * KernelHook kernel module test harness
  *
  * Loads as a kernel module, initialises the full KernelHook subsystem, and

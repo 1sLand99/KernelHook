@@ -1,9 +1,18 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * ARM64 universal transit stub and callback dispatch.
  *
- * Single naked asm stub + single C body, parameterized by rw->argno.
+ * ARM64 universal transit stub: naked asm entry point + C callback dispatch
+ * for inline and fp hooks, parameterized by rw->argno.
+ *
+ * Build modes: shared
+ * Depends on: kh_hook.h (kh_hook_chain_rox_t), sync.h (RCU read-lock)
+ * Notes: RCU snapshot window covers before-origin-after in a SINGLE
+ *   sync_read_lock() window; do NOT reintroduce a second lock window between
+ *   origin call and after-callbacks — that was the original UAF bug (see
+ *   CLAUDE.md "RCU snapshot in transit_body").
+ *   Ported from KernelPatch kernel/patch/common/hotpatch.c; see
+ *   docs/audits/kp-port-audit-2026-04-15.md for deviations.
  *
  * Transit buffer layout (set up during kh_hook installation):
  *   transit[0..1] = uint64_t self-pointer to containing kh_hook_chain_rox_t

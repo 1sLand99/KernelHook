@@ -1,7 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * ARM64 instruction relocation engine
+ *
+ * ARM64 inline hook installation: patches origin prologue and emits
+ * relocated instructions into the transit buffer via alias-page write path.
+ *
+ * Build modes: shared
+ * Depends on: kh_hook.h, insn.h (relocation engine), pgtable.h (alias-page write)
+ * Notes: Primary write path is write_insts_via_alias (alias-page PTE swap) to
+ *   bypass __ro_after_init on GKI kernel text.
+ *   Ported from KernelPatch kernel/patch/common/hotpatch.c; see
+ *   docs/audits/kp-port-audit-2026-04-15.md for deviations.
  */
 
 #include <kh_hook.h>

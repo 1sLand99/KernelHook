@@ -1,11 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Page-alignment sentinels to isolate library .text.
+ * Copyright (C) 2026 bmax121.
  *
- * On macOS (ld64), these are placed at the head and tail of library code
- * via -order_file.  On GNU ld, the linker script handles isolation, but
- * the sentinels still provide __kh_text_fence_head/tail symbols for
- * verification in tests.
+ * Page-alignment sentinels defining __kh_text_fence_head/tail to isolate
+ * library .text for permission-switching in the hook install path.
+ *
+ * Build modes: shared
+ * Depends on: kh_page_align.h (KH_PAGE_ALIGN, platform linker macros)
+ * Notes: On macOS (ld64) placed via -order_file; on GNU ld via linker
+ *   script. Symbols are verified by userspace page-isolation tests.
  */
 
 #include "kh_page_align.h"

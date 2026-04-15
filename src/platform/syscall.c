@@ -2,9 +2,17 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * Syscall-level kh_hook infrastructure — port of KernelPatch
- * kernel/patch/common/syscall.c, 64-bit only (no compat branches,
- * no AArch32 table, no kstorage).
+ * Syscall-level hook infrastructure: resolves sys_call_table and per-syscall
+ * entry addresses, installs inline hooks on __arm64_sys_<name> wrappers.
+ *
+ * Build modes: shared
+ * Depends on: symbol.h (ksyms_lookup), syscall_names.h (name table),
+ *   kh_hook.h (kh_hook_wrap / kh_hook_unwrap)
+ * Notes: sys_call_table fp-hook path is intentionally NOT used — GKI ≥ 5.10
+ *   marks it __ro_after_init and kCFI in invoke_syscall() rejects the
+ *   trampoline (type hash mismatch). See CLAUDE.md "Syscall hooks".
+ *   Ported from KernelPatch kernel/patch/common/syscall.c, 64-bit only
+ *   (no compat branches, no AArch32 table, no kstorage).
  *
  * Responsibilities:
  *   - Resolve `sys_call_table` via kallsyms (kh_sys_call_table).

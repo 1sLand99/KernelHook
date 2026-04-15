@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Platform abstraction API: page-size query, ROX/RW memory allocation,
+ * code-page write-enable/disable, and icache flush for userspace builds.
+ *
+ * Build modes: shared
+ * Depends on: types.h
  */
 
 #ifndef _KP_PLATFORM_H_

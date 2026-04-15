@@ -2,7 +2,11 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * Remote process hooking via ptrace — Linux ARM64 implementation.
+ * Linux ARM64 remote hook implementation: ptrace-based code injection,
+ * memory read/write, and remote function invocation in a target process.
+ *
+ * Build modes: userspace
+ * Depends on: remote_hook.h, <sys/ptrace.h>, <sys/wait.h>, <sys/uio.h>
  */
 
 #ifdef __USERSPACE__

@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Userspace kh_mem_ops_t backends using platform.h abstraction.
+ *
+ * Userspace hook memory backend: implements kh_mem_ops_t alloc/free
+ * callbacks using kh_platform_alloc_rox/rw for ROX and RW pools.
+ *
+ * Build modes: shared
+ * Depends on: hmem_user.h, memory.h (kh_mem_ops_t), platform.h
  */
 
 #include <types.h>

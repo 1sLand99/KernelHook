@@ -1,16 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * ARM64 page table walking and permission modification.
  *
- * Dual-path header:
- * - Freestanding (Mode A): we reconstruct arm64 constants and expose
- *   runtime-resolved function pointers, because we have no access to
- *   asm/ headers.
- * - Kbuild (Mode C): we pull real kernel headers. PTE_RDONLY / PTE_DBM
- *   / etc. come from asm/pgtable-hwdef.h with the same hardware-fixed
- *   values. `page_size` is aliased to kernel's compile-time PAGE_SIZE
- *   so inline.c consumers keep working without source changes.
+ * ARM64 page table constants and permission-modification API: PTE flags,
+ * kh_flush_tlb_kernel_page, pgtable_entry_kernel, modify_entry_kernel.
+ *
+ * Build modes: shared
+ * Depends on: types.h; asm/pgtable-hwdef.h in kbuild mode
+ * Notes: TLBI sequence must stay dsb(ishst) -> tlbi vaale1is -> dsb(ish) -> isb
+ *   (vaale1is = VA, All ASIDs, EL1, IS — see CLAUDE.md TLBI correctness).
+ *   Dual-path: freestanding reconstructs ARM64 constants from hardware spec;
+ *   kbuild pulls real asm/ headers with identical hardware-fixed values.
  */
 
 #ifndef _KP_ARM64_PGTABLE_H_

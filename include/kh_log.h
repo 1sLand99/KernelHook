@@ -1,10 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Unified logging header for all build modes.
+ * Copyright (C) 2026 bmax121.
  *
- * - Kbuild:       real <linux/printk.h>
- * - Freestanding:  shim <linux/printk.h> (ksyms-resolved printk)
- * - Userspace:     printk implemented via vprintf in platform/log.c
+ * Unified logging header: routes pr_info/pr_err/pr_debug to the right
+ * printk backend for each build mode.
+ *
+ * Build modes: shared
+ * Depends on: <linux/printk.h> (kbuild/freestanding shim), platform/log.c (userspace)
+ * Notes: Freestanding shim resolves printk via ksyms at runtime;
+ *   userspace backend in src/platform/log.c wraps vprintf.
  */
 
 #ifndef _KH_LOG_H_

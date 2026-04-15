@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Hook memory pool API: kh_mem_ops_t callbacks and bitmap allocator
+ * interface for ROX (execute) and RW (data) pools.
+ *
+ * Build modes: shared
+ * Depends on: types.h
  */
 
 #ifndef _KP_MEMORY_H_

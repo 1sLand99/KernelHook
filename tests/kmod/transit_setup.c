@@ -1,17 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Test-environment adaptation of the kernel transit backend.
- * This file is NOT a copy of src/transit_setup.c — it provides the same interface
- * but is tailored for the test module's dual freestanding+kbuild build paths.
- * Kept separate to avoid polluting the core library with test-only code paths.
- */
-/*
- * Kernel-side transit buffer setup.
+ * Copyright (C) 2026 bmax121.
  *
- * Provides kh_hook_chain_setup_transit() and kh_fp_hook_chain_setup_transit()
- * for the freestanding kernel build.  These copy the asm transit stubs
- * into the ROX buffer — no kh_platform_write_code() needed because the
- * caller already holds the ROX write-enable.
+ * Test module transit buffer setup: copies asm transit stubs into the ROX
+ * buffer for kh_hook_chain_setup_transit / kh_fp_hook_chain_setup_transit.
+ *
+ * Build modes: kernel
+ * Depends on: kh_hook.h, <linux/string.h> (memcpy)
+ * Notes: NOT a copy of kmod/src/transit_setup.c — test-only adaptation.
+ *   Caller holds ROX write-enable; no kh_platform_write_code() needed.
  */
 
 #include <linux/string.h>

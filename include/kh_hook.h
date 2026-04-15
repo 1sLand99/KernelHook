@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Central public API: hook chain structs, error codes, and the
+ * kh_hook_wrap / kh_fp_hook_wrap / kh_hook macros for all build modes.
+ *
+ * Build modes: shared
+ * Depends on: types.h
  */
 
 #ifndef _KP_HOOK_H_

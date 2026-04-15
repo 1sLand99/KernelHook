@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Kernel symbol resolver implementation: stores the kallsyms_lookup_name
+ * function pointer and dispatches ksyms_lookup() calls through it.
+ *
+ * Build modes: shared
+ * Depends on: symbol.h, types.h, kh_hook.h
  */
 
 #include <types.h>

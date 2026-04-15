@@ -1,4 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * Copyright (C) 2026 bmax121.
+ *
+ * RCU + spinlock synchronization API for hook chain add/remove operations;
+ * compiles to empty stubs when CONFIG_KH_CHAIN_RCU is not defined.
+ *
+ * Build modes: shared
+ * Depends on: types.h; linux/rcupdate.h + linux/spinlock.h in kernel mode
+ */
+
 #ifndef _SYNC_H
 #define _SYNC_H
 

@@ -1,6 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Foundational type definitions: uint8_t..uint64_t, size_t, bool, NULL —
+ * bridges stdint.h (userspace), kernel types (kbuild), and freestanding shim.
+ *
+ * Build modes: shared
+ * Depends on: <stdint.h>/<stddef.h> in userspace; linux/types.h in kbuild;
+ *   kmod/shim/include/linux/types.h in freestanding
  */
 
 #ifndef _KP_TYPES_H_

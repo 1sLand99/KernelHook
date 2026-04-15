@@ -2,8 +2,11 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * Remote process hooking API — ptrace-based injection for Linux ARM64.
- * macOS returns -ENOTSUP for all operations.
+ * Remote process hook API: ptrace-based code injection into a target
+ * process on Linux ARM64; stub returns -ENOTSUP on other platforms.
+ *
+ * Build modes: userspace
+ * Depends on: types.h
  */
 
 #ifndef _KP_REMOTE_HOOK_H_

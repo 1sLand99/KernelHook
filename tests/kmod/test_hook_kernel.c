@@ -1,8 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Kernel-context kh_hook tests for KernelHook
+ * Copyright (C) 2026 bmax121.
  *
- * Fifteen tests covering:
+ * Kernel-context hook tests: 15 test cases covering inline/wrap hooks,
+ * chain ordering, kCFI/PAC/BTI/SCS security-mechanism compatibility,
+ * and dynamic add/remove lifecycle on real kernel functions.
+ *
+ * Build modes: kernel
+ * Depends on: kh_hook.h, uaccess.h, symbol.h (ksyms_lookup for target addrs)
+ *
+ * Tests covered:
  *   1. Inline kh_hook (kh_hook/kh_unhook) with zero-arg target
  *   2. Wrap kh_hook before/after callbacks with four-arg target
  *   3. Wrap kh_hook skip_origin via before callback

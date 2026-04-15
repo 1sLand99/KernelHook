@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * ARM64 instruction encoding helpers: branch generation and PC-relative
+ * instruction classification for the relocation engine.
+ *
+ * Build modes: shared
+ * Depends on: types.h
  */
 
 #ifndef _KP_ARM64_INSN_H_

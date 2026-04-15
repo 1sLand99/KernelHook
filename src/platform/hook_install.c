@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Userspace kh_hook_install / kh_hook_uninstall and transit buffer setup.
  *
- * Replaces kernel pgtable-based write_insts_at() with
- * kh_platform_set_rw / kh_platform_set_rx + icache flush.
+ * Userspace hook install/uninstall and transit buffer setup: replaces
+ * the kernel pgtable write path with kh_platform_set_rw/rx + icache flush.
+ *
+ * Build modes: shared
+ * Depends on: kh_hook.h, platform.h (set_rw/rx, flush_icache), pgtable.h
  */
 
 #include <types.h>

@@ -2,10 +2,12 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * KernelHook user-pointer helpers — trimmed port of KernelPatch
- * kernel/patch/common/utils.c. Provides the minimum primitives that
- * syscall hooks (Phase 5b, Phase 6) need to read and rewrite userspace
- * strings.
+ * User-pointer helper API: kh_strncpy_from_user, kh_copy_to_user, and
+ * kh_elevate_current for credential elevation in syscall hooks.
+ *
+ * Build modes: shared
+ * Depends on: types.h; linux/uaccess.h in kbuild mode; ksyms_lookup for
+ *   strncpy_from_user/copy_to_user/prepare_kernel_cred in freestanding
  */
 
 #ifndef _KH_UACCESS_H_

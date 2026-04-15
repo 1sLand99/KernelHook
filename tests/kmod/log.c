@@ -1,18 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Test-environment adaptation of the kernel log backend.
- * This file is NOT a copy of src/log.c — it provides the same interface
- * but is tailored for the test module's dual freestanding+kbuild build paths.
- * Kept separate to avoid polluting the core library with test-only code paths.
- */
-/*
- * Kernel log backend for test module.
- * Freestanding: resolved via ksyms at runtime.
- * Kbuild: direct printk reference + module_param for log_level.
+ * Copyright (C) 2026 bmax121.
  *
- * SDK mode (kmod_sdk.mk) gets its log_level from the shim's
- * <linux/printk.h> as a TU-local static; this file contributes
- * nothing in that mode and is guarded out entirely.
+ * Test module log backend: provides printk/log_level for the kmod test
+ * harness across freestanding (ksyms-resolved) and kbuild (direct) paths.
+ *
+ * Build modes: kernel
+ * Depends on: <linux/printk.h> (kbuild); ksyms_lookup("_printk") (freestanding)
+ * Notes: NOT a copy of src/platform/log.c — test-only adaptation.
+ *   SDK mode (KH_SDK_MODE) guards this file out entirely; log_level comes
+ *   from the shim's <linux/printk.h> as a TU-local static in that case.
  */
 
 #ifndef KH_SDK_MODE

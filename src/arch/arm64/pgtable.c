@@ -1,7 +1,16 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * ARM64 page table walking and permission modification.
+ *
+ * ARM64 page table walker and PTE permission modifier for freestanding
+ * (Mode A) and kbuild (Mode C) kernel builds.
+ *
+ * Build modes: shared
+ * Depends on: pgtable.h, symbol.h (ksyms_lookup for runtime PTE helpers)
+ * Notes: TLBI sequence must stay dsb(ishst) -> tlbi vaale1is -> dsb(ish) -> isb
+ *   (vaale1is = VA, All ASIDs, EL1, IS — see CLAUDE.md TLBI correctness).
+ *   Ported from KernelPatch kernel/patch/common/hotpatch.c; see
+ *   docs/audits/kp-port-audit-2026-04-15.md for deviations.
  */
 
 #include <types.h>

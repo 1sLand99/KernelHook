@@ -2,8 +2,16 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * User-pointer helpers. Trimmed port of KernelPatch
- * kernel/patch/common/utils.c — only what Phase 5b / Phase 6 need.
+ * User-pointer helpers: kh_strncpy_from_user, kh_copy_to_user, and
+ * credential-elevation primitives used by syscall hooks.
+ *
+ * Build modes: shared
+ * Depends on: symbol.h (ksyms_lookup for strncpy_from_user, copy_to_user,
+ *   prepare_kernel_cred, commit_creds, init_cred, init_task)
+ * Notes: Ported from KernelPatch kernel/patch/common/utils.c; see
+ *   docs/audits/kp-port-audit-2026-04-15.md for deviations.
+ *   Freestanding: current derived from sp_el0; cred/stack offsets probed
+ *   at init against init_task/init_cred (see body comment below).
  *
  * Freestanding notes:
  *   - No <asm/current.h>, <linux/cred.h>, <linux/sched.h>, <asm/ptrace.h>

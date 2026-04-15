@@ -1,4 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * Copyright (C) 2026 bmax121.
+ *
+ * Public interface for kernel-context hook tests: target function
+ * declarations and hook_test_state struct shared with test_main.c.
+ *
+ * Build modes: kernel
+ * Depends on: types.h, kh_hook.h
+ */
+
 #ifndef _TEST_HOOK_KERNEL_H_
 #define _TEST_HOOK_KERNEL_H_
 

@@ -1,10 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * RCU + spinlock synchronization for kh_hook chain operations.
  *
- * Enabled only when CONFIG_KH_CHAIN_RCU is defined.
- * When disabled, include/sync.h provides empty inline stubs — zero overhead.
+ * RCU + spinlock synchronization for hook chain add/remove operations;
+ * active only when CONFIG_KH_CHAIN_RCU is defined, otherwise sync.h stubs.
+ *
+ * Build modes: shared
+ * Depends on: sync.h, symbol.h (ksyms_lookup for rcu_read_lock in freestanding)
  */
 
 #ifdef CONFIG_KH_CHAIN_RCU

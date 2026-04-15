@@ -1,11 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Ring 2 test: minimal freestanding importer (SDK mode).
+ * Copyright (C) 2026 bmax121.
  *
- * Built via kmod_sdk.mk — core library is NOT linked in. Instead, the module
- * references kh_hook_wrap + ksyms_lookup as undefined symbols that the running
- * kernel resolves against a loaded kernelhook.ko. KH_DECLARE_VERSIONS() emits
- * the __versions entries with frozen CRCs from <kernelhook/kh_symvers.h>.
+ * Ring 2 / Ring 3 test: minimal SDK-mode importer module that resolves
+ * kh_hook_wrap + ksyms_lookup against a loaded kernelhook.ko at runtime.
+ *
+ * Build modes: kernel
+ * Depends on: kernelhook/kh_symvers.h (frozen CRCs), kh_hook.h, symbol.h
+ * Notes: Core library NOT linked in — symbols resolved by kernel module
+ *   loader against kernelhook.ko. KH_DECLARE_VERSIONS() emits __versions.
  */
 
 #include "shim.h"

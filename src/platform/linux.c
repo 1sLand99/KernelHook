@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * Linux userspace platform backend: implements kh_platform_* API
+ * using mmap/mprotect for ROX/RW allocation and permission switching.
+ *
+ * Build modes: userspace
+ * Depends on: platform.h, <sys/mman.h>, <unistd.h>
  */
 
 #ifdef __linux__

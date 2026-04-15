@@ -1,6 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
+ *
+ * ARM64 branch instruction encoder: generates B/BL (relative) and
+ * absolute indirect branch sequences for the relocation engine.
+ *
+ * Build modes: shared
+ * Depends on: insn.h, kh_hook.h
  */
 
 #include <kh_hook.h>

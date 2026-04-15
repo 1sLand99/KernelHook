@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Userspace log backend: printk() implemented via vprintf.
+ *
+ * Userspace log backend: provides the printk() symbol used by kh_log.h
+ * macros, implemented as a thin wrapper around vprintf.
+ *
+ * Build modes: shared
+ * Depends on: <stdio.h>, <stdarg.h>
  */
 
 #include <stdio.h>

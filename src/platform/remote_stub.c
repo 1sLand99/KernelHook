@@ -2,7 +2,11 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * Remote process hooking stub — returns -ENOTSUP on unsupported platforms.
+ * Remote hook no-op stub: returns -ENOTSUP for all kh_remote_hook_*
+ * operations on platforms other than Linux (e.g. macOS, Android).
+ *
+ * Build modes: userspace
+ * Depends on: remote_hook.h, <errno.h>
  */
 
 #ifdef __USERSPACE__

@@ -1,8 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Userspace kh_hook chain API — adapts the kernel core logic for
- * userspace memory management and kh_hook installation.
+ *
+ * Hook chain management: kh_hook_chain_add/remove, kh_hook/kh_unhook,
+ * kh_hook_wrap/kh_fp_hook_wrap — shared core for all build modes.
+ *
+ * Build modes: shared
+ * Depends on: kh_hook.h (chain structs), sync.h (RCU/spinlock),
+ *   memory.h (ROX/RW pool alloc), platform.h (icache flush)
  */
 
 #include <types.h>

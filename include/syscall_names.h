@@ -2,15 +2,14 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * 64-bit ARM64 syscall name table. Port of
- * ref/KernelPatch/kernel/patch/common/sysname.c:syscall_name_table,
- * compat table dropped.
+ * 64-bit ARM64 syscall number-to-name table, indexed by syscall number;
+ * used by syscall.c to resolve __arm64_sys_<name> via kallsyms.
  *
- * The table is indexed directly by syscall number. Entries with
- * name==NULL are reserved/unused slots. Names carry the `sys_` prefix
- * matching what the kernel emits as kallsyms symbols — the probe in
- * src/platform/syscall.c prepends `__arm64_` and tries `.cfi` /
- * `.cfi_jt` suffixes to cover CFI-jump-table builds (Pixel GKI 6.1).
+ * Build modes: shared
+ * Depends on: types.h
+ * Notes: Ported from KernelPatch kernel/patch/common/sysname.c, compat
+ *   table dropped. Names carry sys_ prefix; syscall.c prepends __arm64_
+ *   and probes .cfi/.cfi_jt suffixes for CFI-jump-table builds.
  */
 
 #ifndef _KH_SYSCALL_NAMES_H_

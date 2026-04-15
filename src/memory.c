@@ -1,7 +1,12 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Memory management: bitmap allocator with separate ROX and RW pools.
+ *
+ * Bitmap-based memory allocator with separate ROX (execute) and RW (data)
+ * pools; pools are wired to platform-specific backends via kh_mem_ops_t.
+ *
+ * Build modes: shared
+ * Depends on: memory.h (kh_mem_ops_t), kh_hook.h, kh_log.h
  */
 
 #include <types.h>

@@ -1,4 +1,14 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * Copyright (C) 2026 bmax121.
+ *
+ * Public interface for the kh_root privilege-escalation demo module:
+ * install/uninstall hooks on execve/faccessat/fstatat.
+ *
+ * Build modes: kernel
+ * Depends on: types.h
+ */
+
 #ifndef _KH_TEST_PHASE6_KH_ROOT_H_
 #define _KH_TEST_PHASE6_KH_ROOT_H_
 

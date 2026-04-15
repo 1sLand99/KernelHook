@@ -2,11 +2,13 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * macOS / Apple Silicon platform backend.
+ * macOS / Apple Silicon platform backend: implements kh_platform_* API
+ * using vm_remap + VM_FLAGS_OVERWRITE for atomic code-page patching.
  *
- * Code page patching uses vm_remap + VM_FLAGS_OVERWRITE to atomically
- * replace code pages. The ROX pool starts as RW, is transitioned to RX at
- * init, and uses vm_protect(VM_PROT_COPY) + mprotect for write windows.
+ * Build modes: userspace
+ * Depends on: platform.h, <sys/mman.h>, <mach/mach.h>
+ * Notes: ROX pool starts as RW, transitions to RX at init; write windows
+ *   use vm_protect(VM_PROT_COPY) + mprotect.
  */
 
 #ifdef __APPLE__

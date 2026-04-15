@@ -2,9 +2,14 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * KernelHook syscall-level kh_hook API. Ported from
- * ref/KernelPatch/kernel/patch/common/syscall.c, 64-bit only
- * (no compat / AArch32 paths).
+ * Syscall-level hook public API: kh_hook_syscalln, kh_unhook_syscalln,
+ * kh_syscalln_name_addr, kh_sys_call_table (diagnostic only).
+ *
+ * Build modes: shared
+ * Depends on: types.h, kh_hook.h
+ * Notes: Ported from KernelPatch kernel/patch/common/syscall.c, 64-bit only
+ *   (no compat / AArch32 paths). sys_call_table fp-hook is broken on GKI
+ *   kCFI — always use kh_hook_syscalln which hooks __arm64_sys_<name>.
  */
 
 #ifndef _KH_SYSCALL_H_

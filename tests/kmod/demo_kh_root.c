@@ -1,15 +1,27 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* /system/bin/kh_root demo (P4 was kh_root demo) -- kh_hook execve/faccessat/fstatat to
- * unconditionally elevate any caller of "/system/bin/kh_root" to uid=0
+/*
+ * Copyright (C) 2026 bmax121.
+ *
+ * /system/bin/kh_root privilege-escalation demo: hooks execve/faccessat/fstatat
+ * to unconditionally elevate any caller of "/system/bin/kh_root" to uid=0
  * and redirect the execve to /system/bin/sh.
  *
- * Mirrors ref/KernelPatch/kernel/patch/common/sucompat.c, simplified:
- *   - No kstorage / allowlist: any caller -> uid=0
- *   - No scontext change (SELinux label stays shell)
- *   - Single hardcoded magic path
- *   - 64-bit only, no compat
+ * Build modes: kernel
+ * Depends on: symbol.h (ksyms_lookup for prepare_kernel_cred, commit_creds),
+ *   uaccess.h (kh_strncpy_from_user, kh_copy_to_user),
+ *   syscall.h (kh_syscalln_name_addr)
+ * Notes: This is a demo, not a unit test.
+ *   SELinux not modified — caller's domain is preserved.
+ *   No allowlist — any caller of /system/bin/kh_root is elevated.
+ *   No kstorage; 64-bit only; single hardcoded magic path.
+ *   Recommended SELinux state on test devices: Permissive.
+ *   kh_root_uninstall() MUST be called from module_exit — inline hooks
+ *   leave trampolines pointing into module .text; rmmod without uninstall
+ *   causes kernel panic on next execve/faccessat/fstatat.
+ *   Ported from KernelPatch kernel/patch/common/sucompat.c; see
+ *   docs/audits/kp-port-audit-2026-04-15.md for deviations.
  *
- * IMPLEMENTATION NOTE: we kh_hook __arm64_sys_<name> via inline kh_hook
+ * IMPLEMENTATION NOTE: we hook __arm64_sys_<name> via inline hook
  * (kh_hook_wrap) rather than via kh_hook_syscalln(). Reasons:
  *   1. sys_call_table on Pixel 6 GKI 6.1 lives in __ro_after_init and
  *      cannot be written without temporarily clearing PTE_RDONLY.

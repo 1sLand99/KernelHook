@@ -1,17 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
- * Ring 2 / Ring 3 test: minimal freestanding exporter.
+ * Copyright (C) 2026 bmax121.
  *
- * Built through the full kmod.mk pipeline, so the resulting .ko pulls in
- * kmod/src/export.c + the kh_crc-generated kh_exports.S. That populates the
- * __ksymtab / __ksymtab_strings / __kcrctab sections with the real entries
- * (kh_hook_wrap, ksyms_lookup, ...) that Ring 2's verify_elf.sh checks.
+ * Ring 2 / Ring 3 test: minimal freestanding exporter module that validates
+ * the kh_exports.S pipeline and cross-module symbol resolution at load time.
  *
- * The init path bootstraps ksyms (via kmod_compat_init) so that when
- * importer.ko later calls ksyms_lookup("do_sys_openat2") it resolves to a
- * real address instead of 0. No hooking is done here — the module exists
- * purely to validate the export pipeline at the ELF level (Ring 2) and
- * that cross-module symbol resolution works at load time (Ring 3).
+ * Build modes: kernel
+ * Depends on: kmod/src/export.c (kh_exports.S), symbol.h (ksyms_lookup),
+ *   kmod/src/compat.c (kmod_compat_init)
+ * Notes: No hooking performed — exists to validate ELF export sections
+ *   (Ring 2) and that importer.ko resolves symbols against it (Ring 3).
  */
 
 #include "shim.h"

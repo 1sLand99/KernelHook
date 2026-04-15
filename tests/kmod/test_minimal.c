@@ -1,4 +1,13 @@
-/* Minimal freestanding .ko test — only printk */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/*
+ * Copyright (C) 2026 bmax121.
+ *
+ * Minimal freestanding .ko smoke test: verifies printk resolves and fires
+ * at module init/exit — used to validate the bare freestanding pipeline.
+ *
+ * Build modes: kernel
+ * Depends on: types.h; _printk resolved at runtime via ksyms or linker
+ */
 #include <types.h>
 
 extern int _printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));

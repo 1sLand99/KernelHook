@@ -1,17 +1,15 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
-/*
- * Test-environment adaptation of the kernel memory backend.
- * This file is NOT a copy of src/mem_ops.c — it provides the same interface
- * but is tailored for the test module's dual freestanding+kbuild build paths.
- * Kept separate to avoid polluting the core library with test-only code paths.
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C) 2026 bmax121.
- * Kernel-side kh_mem_ops_t backend.
  *
- * Two build paths:
- *   Kbuild (default):     uses kernel headers (vmalloc, set_memory_*)
- *   KMOD_FREESTANDING:    resolves all symbols via ksyms_lookup() at runtime
+ * Test module kernel memory backend: kh_mem_ops_t alloc/free callbacks
+ * using vmalloc/set_memory_* (kbuild) or ksyms-resolved equivalents (freestanding).
+ *
+ * Build modes: kernel
+ * Depends on: memory.h (kh_mem_ops_t), <linux/vmalloc.h>, <linux/set_memory.h>
+ *   (kbuild); ksyms_lookup for vmalloc/vfree/set_memory_* (freestanding)
+ * Notes: NOT a copy of kmod/src/mem_ops.c — test-only adaptation kept
+ *   separate to avoid polluting the core library with test-only code paths.
  */
 
 #include <linux/vmalloc.h>
