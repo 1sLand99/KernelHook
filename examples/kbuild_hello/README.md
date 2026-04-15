@@ -1,5 +1,14 @@
 # kbuild_hello — Mode C SDK consumer example
 
+> **Why this example is different from the others**
+>
+> `kbuild_hello` exists specifically to demonstrate **Mode C** — building
+> against a full kernel source tree using standard out-of-tree kbuild.
+> All other examples have switched to **SDK** as their default `make`;
+> this one stays kbuild-only because that is the demonstration value.
+> If you want SDK or freestanding builds, see any of the
+> `hello_hook` / `hook_chain` / `fp_hook` siblings.
+
 [中文](#中文) | [English](#english)
 
 ---
