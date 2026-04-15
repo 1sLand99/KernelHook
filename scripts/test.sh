@@ -73,7 +73,16 @@ while [ "$#" -gt 0 ]; do
         --no-build) KH_NO_BUILD=1; shift ;;
         --verbose) KH_VERBOSE=1; shift ;;
         --)        shift; while [ "$#" -gt 0 ]; do KH_SUBCMD_ARGS+=("$1"); shift; done ;;
-        -*)        printf "unknown global option: %s\n" "$1" >&2; usage >&2; exit 2 ;;
+        -*)
+            # Once a subcommand is set, dashed args belong to it (forward them).
+            # Pre-subcommand, dashed args that didn't match any global option
+            # above are typos / unknown — reject loudly.
+            if [ -n "$KH_SUBCMD" ]; then
+                KH_SUBCMD_ARGS+=("$1"); shift
+            else
+                printf "unknown global option: %s\n" "$1" >&2; usage >&2; exit 2
+            fi
+            ;;
         *)
             if [ -z "$KH_SUBCMD" ]; then
                 KH_SUBCMD="$1"
