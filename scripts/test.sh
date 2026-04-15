@@ -160,7 +160,19 @@ case "$KH_SUBCMD" in
         fi
         ;;
     avd)           cmd_stub ;;
-    device)        cmd_stub ;;
+    device)
+        kh_section_start "device: kmod tests on physical device (--mode=$KH_MODE)"
+        if "$ROOT/scripts/test_device_kmod.sh" --mode="$KH_MODE" "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"; then
+            kh_section_end "device" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            rc=$?
+            kh_section_end "device" FAIL
+            kh_summary_line 0 1
+            exit "$rc"
+        fi
+        ;;
     sdk-consumer)  cmd_stub ;;
     kbuild-verify)
         if [ "${#KH_SUBCMD_ARGS[@]}" -lt 2 ]; then
