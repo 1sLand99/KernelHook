@@ -254,9 +254,9 @@ stack snapshot — no second RCU window between origin and after-callbacks.
 | 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | — |
 | 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | — |
 | 4.5 | `src/platform/syscall.c` | **no-action** | `kh_sys_call_table` diagnostic-only; inline hook path only — GKI kCFI + `__ro_after_init` make fp-hook path broken; documented in CLAUDE.md | — |
-| 5.1 | `src/arch/arm64/transit.c` | **no-action** | RCU-snapshot design — deliberate deviation from KP upstream (which has no locking); fixes UAF in concurrent unwrap path; stress-validated 27.8M calls × 67K add/remove, zero Oops; see CLAUDE.md "RCU snapshot in transit_body" | TBD |
-| 5.2 | `src/arch/arm64/transit.c` | **no-action** | FPAC safety comment coverage — both `transit_body` (function header, lines 53–73) and `fp_transit_body` (body, lines 317–320) have accurate, non-contradictory FPAC disclaimers; verified correct | TBD |
-| 5.3 | `src/arch/arm64/transit.c` | **no-action** | Stack budget — transit_body ≈ 608 bytes, fp_transit_body ≈ 1040 bytes per invocation; both well under 4 KiB of the 16 KiB ARM64 kernel stack | TBD |
+| 5.1 | `src/arch/arm64/transit.c` | **no-action** | RCU-snapshot design — deliberate deviation from KP upstream (which has no locking); fixes UAF in concurrent unwrap path; stress-validated 27.8M calls × 67K add/remove, zero Oops; see CLAUDE.md "RCU snapshot in transit_body" | 3291b7a |
+| 5.2 | `src/arch/arm64/transit.c` | **no-action** | FPAC safety comment coverage — both `transit_body` (function header, lines 53–73) and `fp_transit_body` (body, lines 317–320) have accurate, non-contradictory FPAC disclaimers; verified correct | 3291b7a |
+| 5.3 | `src/arch/arm64/transit.c` | **no-action** | Stack budget — transit_body ≈ 608 bytes, fp_transit_body ≈ 1040 bytes per invocation; both well under 4 KiB of the 16 KiB ARM64 kernel stack | 3291b7a |
 
 (rows appended as audit tasks fill the sections above)
 
