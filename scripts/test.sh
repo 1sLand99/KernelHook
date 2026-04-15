@@ -187,6 +187,10 @@ case "$KH_SUBCMD" in
         fi
         ;;
     sdk-consumer)
+        kh_section_start "lint_exports (pre-step)"
+        "$ROOT/scripts/lint_exports.sh" || { kh_section_end "lint_exports (pre-step)" FAIL; exit 1; }
+        kh_section_end "lint_exports (pre-step)" PASS
+
         kh_section_start "sdk-consumer: SDK ABI link verification"
 
         # Pick first AVD or first non-emulator device (for Ring 3 step).
