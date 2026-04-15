@@ -230,7 +230,7 @@ wrapper detection, `kh_raw_syscallN` invocation path.
 | 3.2 | `src/uaccess.c` | **no-action** | `rc++` NUL-inclusive return — matches KP `compat_strncpy_from_user` lines 110–117 exactly | 68e39fd |
 | 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | 68e39fd |
 | 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | 68e39fd |
-| 4.1 | `src/platform/syscall.c` | **must-fix** | `regs.syscallno` not set in `kh_raw_syscallN` — active callers in test suite; fixed: added `regs.syscallno = (int32_t)nr;` in all 7 wrappers | (this task) |
+| 4.1 | `src/platform/syscall.c` | **must-fix** | `regs.syscallno` not set in `kh_raw_syscallN` — active callers in test suite; fixed: added `regs.syscallno = (int32_t)nr;` in all 7 wrappers | 178a698 |
 | 4.2 | `src/platform/syscall.c` | **no-action** | 64-bit only, no compat/AArch32 — deliberate deviation documented in file header; GKI targets are LP64-only | — |
 | 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | — |
 | 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | — |
