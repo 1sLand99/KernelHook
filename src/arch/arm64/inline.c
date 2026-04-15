@@ -428,6 +428,15 @@ static vfree_fn_t kh_vfree = NULL;
 /* Forward decl for kbuild mode — prototype matches arch/arm64/kernel/patching.c.
  * Symbol is EXPORT_SYMBOL_GPL so we can take its address. */
 extern int aarch64_insn_patch_text_nosync(void *addr, u32 insn);
+
+/* stop_machine wraps the multi-instruction alias patch loop in kbuild mode.
+ * Matches KernelPatch hotpatch()'s stop_machine(cpu_online_mask) usage —
+ * guarantees no other CPU can observe an intermediate trampoline state
+ * between the per-instruction writes of a 4/5-word trampoline.
+ * Freestanding builds have no access to this header; see the notes on
+ * write_insts_via_alias below for the freestanding trade-off. */
+#include <linux/stop_machine.h>
+#include <linux/cpumask.h>
 #endif
 
 __attribute__((no_sanitize("kcfi")))
@@ -484,8 +493,20 @@ static void kh_alias_init(void)
             (unsigned long long)kh_table_pa_mask);
 }
 
+/* Inner worker — does the actual per-instruction alias patch loop.
+ * Callers must guarantee cross-CPU quiescence for the full duration of
+ * this function (multi-instruction trampolines have intermediate states
+ * that would crash other CPUs executing the target). In kbuild mode
+ * this is enforced by stop_machine (see write_insts_via_alias wrapper
+ * below). In freestanding mode, there is no stop_machine, and we rely
+ * on (a) single-writer serialisation via kh_alias_lock, (b) icache
+ * flush from aarch64_insn_patch_text_nosync after each write, and
+ * (c) the empirical observation that target functions are rarely
+ * executed during hook install/uninstall (module-init / TDD flow).
+ * The residual theoretical race is documented in
+ * docs/audits/kp-port-audit-2026-04-15.md §2.4 row 6.1. */
 __attribute__((no_sanitize("kcfi")))
-static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+static int write_insts_via_alias_impl(uintptr_t va, uint32_t *insts, int32_t count)
 {
     if (!kh_alias_page || !kh_alias_pte || !kh_aarch64_insn_patch_text_nosync)
         return -1;  /* alias path unavailable; signal fallback */
@@ -517,6 +538,55 @@ static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
     }
     return 0;
 }
+
+#ifndef KMOD_FREESTANDING
+/* stop_machine callback arg: pack the per-call parameters so we can
+ * pass them through the single void* that stop_machine_fn_t accepts. */
+struct kh_alias_sm_arg {
+    uintptr_t va;
+    uint32_t *insts;
+    int32_t count;
+    int rc;
+};
+
+__attribute__((no_sanitize("kcfi")))
+static int write_insts_via_alias_sm_cb(void *data)
+{
+    struct kh_alias_sm_arg *arg = (struct kh_alias_sm_arg *)data;
+    /* All other CPUs are pinned in the stop_machine barrier — no CPU
+     * can observe an intermediate trampoline state. We still use the
+     * per-instruction alias lock + DAIF disable so the semantics are
+     * identical to the freestanding path. */
+    arg->rc = write_insts_via_alias_impl(arg->va, arg->insts, arg->count);
+    return arg->rc;
+}
+
+__attribute__((no_sanitize("kcfi")))
+static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+{
+    if (!kh_alias_page || !kh_alias_pte || !kh_aarch64_insn_patch_text_nosync)
+        return -1;  /* alias path unavailable; signal fallback */
+
+    /* Multi-instruction trampolines (4 or 5 words) have unsafe
+     * intermediate states between per-instruction writes. Wrap the
+     * whole sequence in stop_machine() so no other CPU can execute
+     * the target while we patch — matches KernelPatch hotpatch(). */
+    struct kh_alias_sm_arg arg = { .va = va, .insts = insts, .count = count, .rc = 0 };
+    int sm_rc = stop_machine(write_insts_via_alias_sm_cb, &arg, cpu_online_mask);
+    if (sm_rc)
+        return sm_rc;   /* stop_machine itself failed (OOM, etc.) */
+    return arg.rc;       /* inner worker's return value */
+}
+#else
+/* Freestanding fallback — cannot pull stop_machine from kernel headers.
+ * Multi-instruction patches rely on empirical safety; see the comment
+ * block on write_insts_via_alias_impl and §2.4 row 6.1 of the audit. */
+__attribute__((no_sanitize("kcfi")))
+static int write_insts_via_alias(uintptr_t va, uint32_t *insts, int32_t count)
+{
+    return write_insts_via_alias_impl(va, insts, count);
+}
+#endif
 
 /* Called from kmod init after ksyms resolution */
 __attribute__((no_sanitize("kcfi")))

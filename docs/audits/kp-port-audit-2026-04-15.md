@@ -233,7 +233,65 @@ stack snapshot — no second RCU window between origin and after-callbacks.
 | 5.3 | Stack budget per invocation | `transit_body`: snap[8]×24 = 192 B + snap_local[8]×32 = 256 B + hook_fargs12_t = 128 B + scalars ≈ 32 B = **608 bytes**. `fp_transit_body`: snap[16]×24 = 384 B + snap_local[16]×32 = 512 B + hook_fargs12_t = 128 B + scalars ≈ 16 B = **1040 bytes**. | **no-action** | Both well under the 4 KiB threshold; ARM64 kernel stack is 16 KiB. fp_transit_body uses FP_HOOK_CHAIN_NUM = 16 vs HOOK_CHAIN_NUM = 8 for inline transit, doubling the snapshot arrays, but the total remains well within budget. |
 
 ### 2.4 `src/arch/arm64/inline.c::write_insts_via_alias` ↔ `ref/KernelPatch/kernel/base/hotpatch.c`
-(filled in T6)
+
+Diff reviewed: KP's `hotpatch_nosync` is a single-instruction primitive. KP's `hotpatch()`
+(lines 106–122) wraps a whole-trampoline multi-instruction write in `stop_machine(cpu_online_mask)`
+via `hotpatch_cb` — the master CPU iterates `hotpatch_nosync` calls while all other CPUs yield
+inside the stop_machine barrier. Our port originally omitted the stop_machine wrapper and
+patched one instruction at a time via the alias page, each call guarded only by an internal
+per-instruction lock (DAIF-disable spin in freestanding, `spin_lock_irqsave` in kbuild).
+
+The key architectural question is whether ARMv8's 4-byte-aligned instruction-fetch atomicity
+(ARM ARM B2.2.1 "Concurrent modification and execution of instructions") is sufficient on its
+own. For a **single** 4-byte patch the answer is yes — another CPU observes either the old or
+new word, never a torn value, and the kernel's own `aarch64_insn_hotpatch_safe()` allowlist
+(B/BL/NOP/BKPT/SVC/HVC/SMC per arch/arm64 `patching.c:162`) confirms the single-instruction
+safe set. For a **multi-instruction trampoline**, however, intermediate states during the
+write sequence can fault.
+
+Our non-BTI/PAC trampoline (`branch_absolute`, `src/arch/arm64/insn.c:26–33`) is 4 words:
+
+```
+tramp[0] = LDR X17, #8         ; load from tramp[2..3]
+tramp[1] = BR  X17
+tramp[2] = replace_addr_lo     ; data, interpreted as instruction if
+tramp[3] = replace_addr_hi     ;       executed before BR X17 commits
+```
+
+`write_insts_via_alias` patches tramp[0]..tramp[3] sequentially through the alias page. Between
+iterations, other CPUs see hybrid states:
+
+- After write[0]: `LDR X17, #8 | orig[1] | orig[2] | orig[3]` — CPU loads X17 from orig[2]/orig[3]
+  (random values) then falls through to orig[1], which then executes with a clobbered X17. If
+  orig[1] references X17 (rare for a prologue, but legal), it uses garbage.
+- After write[1]: `LDR X17, #8 | BR X17 | orig[2] | orig[3]` — CPU branches to orig[2]:orig[3]
+  interpreted as a 64-bit address. This is almost always an invalid/non-executable address →
+  synchronous abort.
+- After write[2]: `LDR X17, #8 | BR X17 | replace_lo | orig[3]` — high half of the branch
+  target still corrupt.
+
+Arm's stock `aarch64_insn_patch_text()` (arch/arm64/kernel/patching.c:224–244) has the same
+rule: when `cnt > 1`, it falls through to `aarch64_insn_patch_text_sync()` which uses
+`stop_machine`. The comment on that path explicitly reads *"Unsafe to patch multiple
+instructions without synchronization."* KP follows the same pattern; we did not.
+
+**Resolution:** Added `stop_machine(write_insts_via_alias_sm_cb, &arg, cpu_online_mask)` inside
+`#ifndef KMOD_FREESTANDING` only (the kbuild build path), matching KP `hotpatch()`. The inner
+`write_insts_via_alias_impl` retains the per-instruction alias lock so freestanding semantics
+are preserved unchanged — freestanding cannot reach `linux/stop_machine.h` and keeps relying on
+(a) single-writer serialisation via `kh_alias_lock`, (b) icache flush inside
+`aarch64_insn_patch_text_nosync` after each write, and (c) the empirical observation that the
+27.8M-call × 67K add/remove stress sweep did not land in the vulnerable intermediate window.
+The residual theoretical race in freestanding mode is documented in the `write_insts_via_alias_impl`
+comment block and acknowledged here.
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 6.1 | No `stop_machine` around alias patch | KP wraps `hotpatch_nosync` in `stop_machine(cpu_online_mask)`; we didn't. | **must-fix** | ARMv8 B2.2.1 atomicity covers only a single 4-byte write. Our trampoline is 4 (or 5 with BTI/PAC) words; intermediate states between the per-instruction alias writes produce a corrupted branch sequence (`LDR X17, #8; BR X17; <data>; <data>`) that would crash any CPU executing the target during the patch window. Arm's own `aarch64_insn_patch_text()` comments this explicitly: *"Unsafe to patch multiple instructions without synchronization."* Empirical stress (27.8M calls × 67K add/remove in 3 seconds, zero Oops, freestanding mode) suggests the window is narrow — but empirical luck ≠ theoretical safety. **Fixed in kbuild mode** by wrapping the whole alias-patch loop in `stop_machine()` matching KP `hotpatch()` (lines 106–122). Freestanding remains on the empirical path because `linux/stop_machine.h` is unreachable there; residual risk documented in `write_insts_via_alias_impl` header comment. |
+| 6.2 | DAIF-disable spinlock (freestanding) vs `spin_lock_irqsave` (KP) | Different type, same semantics. | no-action | Freestanding cannot pull `struct spinlock` from kernel headers. Uses `__atomic_exchange_n(..., __ATOMIC_ACQUIRE)` + `msr daifset, #0xf` (mask DAIF) to serialize the alias PTE rewrite + patch + restore sequence (see `kh_alias_lock_acquire` at `src/arch/arm64/inline.c:394–405`). Semantically equivalent to `spin_lock_irqsave`: mutual exclusion + IRQ-safe. Kbuild path uses real `DEFINE_SPINLOCK` (line 414). Both paths stress-validated. |
+| 6.3 | PTE_CONT guard in `kh_alias_init` | KP lacks this guard; `modify_entry_kernel` rewrites the whole CONT group instead. | no-action | Defensive: refuses the alias path rather than silently corrupting the 16-entry contiguous PTE group. Guard is at `src/arch/arm64/inline.c:479–483` — `else if (pte & PTE_CONT) { pr_warn(...); } else { kh_alias_pte = pte; }`. When PTE_CONT is detected we leave `kh_alias_pte = 0`, which short-circuits `write_insts_via_alias_impl` (line 511) and forces fallback to `set_memory` or `write_insts_via_pte`. Verified `grep -c 'PTE_CONT' src/arch/arm64/inline.c` = 2 (comment + condition). |
+| 6.4 | `_relo_cfi_hash` via `is_bad_address(origin_addr-4)` | KP has no kCFI path so no equivalent. | no-action | kCFI-kernel-specific. kCFI checks `*(target - 4)` before every BLR, so placing the hash at `_relo_cfi_hash` (immediately before `relo_insts[0]`) allows the backup pointer returned by `hook()` to pass CFI validation. On non-kCFI kernels this is harmless — 4 bytes of data that never execute. Cited in `src/arch/arm64/inline.c:328–337`. Only copy when the address is readable; otherwise leave the field zero (no CFI impact on non-kCFI builds, and kCFI builds always have readable kernel text at `origin_addr - 4`). |
+| 6.5 | TLBI sequence inside `write_insts_via_alias_impl` (pre + post) | Matches KP exactly. | no-action | Verified: `src/arch/arm64/inline.c:522–525` and 531–533 — `*alias_entry = new_pte → dsb ish → kh_flush_tlb_kernel_page` before, and `*alias_entry = kh_alias_pte → dsb ish → kh_flush_tlb_kernel_page` after. `kh_flush_tlb_kernel_page` (`include/arch/arm64/pgtable.h:122–129`) emits `dsb ishst → tlbi vaale1is → dsb ish → isb`, mirroring KP `flush_tlb_kernel_page` and the kernel's own `__tlbi(vaale1is, ...)` macro. The additional `dsb ish` before the TLBI-page call is redundant with the TLBI primitive's own pre-barrier but harmless; matches KP line 53/57. |
 
 ### 2.5 `src/arch/arm64/pgtable.c` + `include/arch/arm64/pgtable.h` ↔ `ref/KernelPatch/kernel/include/pgtable.h`
 (filled in T7)
