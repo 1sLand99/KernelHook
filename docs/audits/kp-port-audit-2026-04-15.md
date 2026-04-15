@@ -214,10 +214,10 @@ broader surface (trace_seq / seq_buf copy helpers, random, `_task_pt_reg` with p
 
 | ID | File | Class | Summary | Commit |
 | -- | ---- | ----- | ------- | ------ |
-| 3.1 | `src/uaccess.c` | **no-action** | `kh_cred_uid_offset = 4` hardcoded — confirmed correct on GKI 6.1 (init_cred uid@+4 = 0) | (filled in T3 commit) |
-| 3.2 | `src/uaccess.c` | **no-action** | `rc++` NUL-inclusive return — matches KP `compat_strncpy_from_user` lines 110–117 exactly | (filled in T3 commit) |
-| 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | (filled in T3 commit) |
-| 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | (filled in T3 commit) |
+| 3.1 | `src/uaccess.c` | **no-action** | `kh_cred_uid_offset = 4` hardcoded — confirmed correct on GKI 6.1 (init_cred uid@+4 = 0) | 68e39fd |
+| 3.2 | `src/uaccess.c` | **no-action** | `rc++` NUL-inclusive return — matches KP `compat_strncpy_from_user` lines 110–117 exactly | 68e39fd |
+| 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | 68e39fd |
+| 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | 68e39fd |
 
 (rows appended as audit tasks fill the sections above)
 
