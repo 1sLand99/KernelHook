@@ -303,7 +303,40 @@ comment block and acknowledged here.
 | 7.4 | VA-bits detection via `TCR_EL1.T1SZ` (`pgtable.c:141-154`) | IDENTICAL algorithm: both read `tcr_el1` via `mrs`, extract T1SZ from bits `[21:16]`, compute `va_bits = 64 - t1sz`. KP (`start.c:444-446`): `t1sz = bits(tcr_el1, 21, 16); va_bits = 64 - t1sz`. Our code: `t1sz = (tcr >> 16) & 0x3f; va_bits = 64 - t1sz`. Same for page-size detection via TG1 bits `[31:30]`. | **no-action** | Algorithm matches KP exactly. `page_level` formula differs slightly (`(va_bits - 4) / (page_shift - 3)` in KP vs ceiling formula in ours) but produces the same integer result for all valid GKI VA/page-size combinations. |
 
 ### 2.6 `tests/kmod/test_phase6_kh_root.c` ↔ `ref/KernelPatch/kernel/patch/common/sucompat.c`
-(filled in T8)
+
+Diff reviewed: KP `sucompat.c` is a full production su-compat layer: kstorage allowlist
+(`su_kstorage_gid` + `is_su_allow_uid`), per-entry `su_profile` structs with `to_uid` and
+`scontext`, runtime-configurable su path (`current_su_path`), AArch32 compat hooks
+(`hook_compat_syscalln(11/327/334, ...)`), `apd_path` delegation, `set_user_arg_ptr`
+for argv rewriting, and SELinux scontext commit via `commit_su(to_uid, sctx)`. It uses
+`hook_syscalln()` which in KP can fall back to the `fp_wrap_syscalln` path.
+
+Our port retains only the minimum needed for the kh_root demo: execve redirection to sh,
+and faccessat/fstatat path faking so `test -x /system/bin/kh_root` succeeds. All
+production-grade features (kstorage, allowlist, SELinux, AArch32, apd) are deliberately
+absent. The file's header comment (lines 1–28) accurately lists each simplification.
+
+**Step 1 — `kh_root_uninstall` wired to `module_exit` (critical check):**
+
+```
+tests/kmod/test_main.c:502:  static void __exit kh_test_exit(void)
+tests/kmod/test_main.c:510:      extern void kh_root_uninstall(void);
+tests/kmod/test_main.c:511:      kh_root_uninstall();     /* FIRST call in exit body */
+tests/kmod/test_main.c:514:      kh_subsystem_cleanup();  /* teardown AFTER hooks removed */
+tests/kmod/test_main.c:520:  module_exit(kh_test_exit);
+```
+
+`kh_root_uninstall()` is the FIRST action in `kh_test_exit()`, before `kh_subsystem_cleanup()`.
+The ordering is commented at lines 504–508 ("Phase 6: uninstall syscall hooks BEFORE freeing
+module memory"). Requirement fully satisfied — **no-action**.
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 8.1 | `kh_root_uninstall` wired to `module_exit` | Must exist per CLAUDE.md ("rmmod without uninstall → next execve/faccessat/fstatat panic") | **no-action** | Confirmed wired: `test_main.c:511` calls `kh_root_uninstall()` as the first statement in `kh_test_exit()` (line 502), which is registered via `module_exit(kh_test_exit)` at line 520. Ordering contract also satisfied: uninstall precedes `kh_subsystem_cleanup()` at line 514. |
+| 8.2 | Hardcoded `__NR_execve=221` / `__NR_faccessat=48` / `__NR3264_fstatat=79` | KP resolves via `<uapi/scdefs.h>` constants from the kernel build environment | **no-action** | ARM64 ABI syscall numbers have been stable since kernel 3.7 (defined in `arch/arm64/include/asm/unistd.h`). CLAUDE.md "Common pitfalls" explicitly documents these three values. Guards `#ifndef __NR_*` at lines 45–53 allow kernel-header-supplied values to override the hardcoded fallbacks in kbuild mode. |
+| 8.3 | Inline `hook_wrap` on `__arm64_sys_<name>` (not `hook_syscalln` / sys_call_table fp-hook) | KP uses `hook_syscalln()` which can attempt `fp_wrap_syscalln` | **no-action** | GKI ≥ 5.10 marks `sys_call_table` as `__ro_after_init`; writing through it requires clearing PTE_RDONLY. Even if cleared, kCFI in `invoke_syscall+0x50` rejects the fp-hook trampoline (type hash mismatch). File header lines 13–27 document both constraints with the exact CFI failure message. CLAUDE.md "Syscall hooks" section confirms this is the required approach on GKI kCFI kernels. KP uses `hook_syscalln()` which hits the same inline path when `sys_call_table` is unwriteable; our port is simply unconditional on the safe path. |
+| 8.4 | `match_user_path` 64-byte buffer | KP uses `SU_PATH_MAX_LEN` (128 bytes in `sucompat.h`) | **no-action** | Target path `/system/bin/kh_root` is 20 bytes including NUL. A 64-byte buffer provides 3× margin. Comment at line 84 documents the reasoning. kh_strncpy_from_user truncates at `sizeof(buf)` regardless, so no overflow is possible. |
+| 8.5 | No SELinux / allowlist / kstorage / AArch32 compat | KP has all of: `su_kstorage_gid` allowlist, per-uid `su_profile` with `scontext`, `commit_su(to_uid, sctx)` SELinux patch, AArch32 compat hooks (syscalls 11/327/334), `apd_path` delegation, `set_user_arg_ptr` argv rewriting, runtime-configurable su path | **no-action** | Demo scope. File header lines 6–10 explicitly lists all omissions: "No kstorage / allowlist: any caller → uid=0", "No scontext change (SELinux label stays shell)", "Single hardcoded magic path", "64-bit only, no compat". These are deliberate simplifications for the kh_root demo, not a production su tool. P4 will preserve these header comments in the rename. |
 
 ## 3. Resolution tracker
 
@@ -330,6 +363,11 @@ comment block and acknowledged here.
 | 7.2 | `src/arch/arm64/pgtable.c` | **no-action** | `kernel_pgd` resolved via `swapper_pg_dir` only — KP uses `TTBR1_EL1` hardware register; no `init_mm.pgd` fallback in either. GKI exports `swapper_pg_dir`; `init_mm.pgd` unsafe due to struct layout variance | 2424040 |
 | 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | 2424040 |
 | 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | 2424040 |
+| 8.1 | `tests/kmod/test_main.c` | **no-action** | `kh_root_uninstall` wired as first call in `kh_test_exit()` (line 511) before `kh_subsystem_cleanup()`; `module_exit(kh_test_exit)` at line 520 — ordering contract satisfied | (this commit) |
+| 8.2 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Hardcoded `__NR_execve=221`, `__NR_faccessat=48`, `__NR3264_fstatat=79` — stable ARM64 ABI since kernel 3.7; `#ifndef` guards allow kernel-supplied override in kbuild | (this commit) |
+| 8.3 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Inline `hook_wrap` on `__arm64_sys_<name>` — GKI kCFI + `__ro_after_init` make sys_call_table fp-hook path broken; documented in file header and CLAUDE.md | (this commit) |
+| 8.4 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | `match_user_path` 64-byte buffer vs 128-byte KP `SU_PATH_MAX_LEN` — target path is 20 bytes; 3× margin; overflow impossible (kh_strncpy_from_user truncates) | (this commit) |
+| 8.5 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | No SELinux / allowlist / kstorage / AArch32 compat — demo scope; all omissions listed in file header lines 6–10; deliberate simplifications vs production KP sucompat | (this commit) |
 
 (rows appended as audit tasks fill the sections above)
 
