@@ -145,7 +145,20 @@ case "$KH_SUBCMD" in
             exit 1
         fi
         ;;
-    android)       cmd_stub ;;
+    android)
+        kh_section_start "android: userspace tests via adb"
+        # Pass through subcommand args (e.g. --serial S, --emulator-only).
+        if "$ROOT/scripts/run_android_tests.sh" "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"; then
+            kh_section_end "android" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            rc=$?
+            kh_section_end "android" FAIL
+            kh_summary_line 0 1
+            exit "$rc"
+        fi
+        ;;
     avd)           cmd_stub ;;
     device)        cmd_stub ;;
     sdk-consumer)  cmd_stub ;;
