@@ -326,10 +326,10 @@ comment block and acknowledged here.
 | 6.3 | `src/arch/arm64/inline.c` | **no-action** | PTE_CONT guard in `kh_alias_init` — defensive vs KP; refuses the alias path rather than corrupt a contiguous PTE group | 431ad03 |
 | 6.4 | `src/arch/arm64/inline.c` | **no-action** | `_relo_cfi_hash` via `is_bad_address(origin_addr-4)` — kCFI-specific; KP has no equivalent because it predates kCFI | 431ad03 |
 | 6.5 | `src/arch/arm64/inline.c` | **no-action** | TLBI sequence inside alias patch (pre + post) — matches KP `hotpatch_nosync` lines 53/57 and the KP `flush_tlb_kernel_page` pattern | 431ad03 |
-| 7.1 | `include/arch/arm64/pgtable.h` | **no-action** | `kh_flush_tlb_kernel_page` TLBI sequence — IDENTICAL to KP `flush_tlb_kernel_page` (ref `pgtable.h:158-165`): `dsb ishst → tlbi vaale1is → dsb ish → isb` | TBD_7 |
-| 7.2 | `src/arch/arm64/pgtable.c` | **no-action** | `kernel_pgd` resolved via `swapper_pg_dir` only — KP uses `TTBR1_EL1` hardware register; no `init_mm.pgd` fallback in either. GKI exports `swapper_pg_dir`; `init_mm.pgd` unsafe due to struct layout variance | TBD_7 |
-| 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | TBD_7 |
-| 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | TBD_7 |
+| 7.1 | `include/arch/arm64/pgtable.h` | **no-action** | `kh_flush_tlb_kernel_page` TLBI sequence — IDENTICAL to KP `flush_tlb_kernel_page` (ref `pgtable.h:158-165`): `dsb ishst → tlbi vaale1is → dsb ish → isb` | 2424040 |
+| 7.2 | `src/arch/arm64/pgtable.c` | **no-action** | `kernel_pgd` resolved via `swapper_pg_dir` only — KP uses `TTBR1_EL1` hardware register; no `init_mm.pgd` fallback in either. GKI exports `swapper_pg_dir`; `init_mm.pgd` unsafe due to struct layout variance | 2424040 |
+| 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | 2424040 |
+| 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | 2424040 |
 
 (rows appended as audit tasks fill the sections above)
 
