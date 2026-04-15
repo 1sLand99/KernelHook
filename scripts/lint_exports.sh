@@ -1,84 +1,76 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-2.0-or-later
-# lint_exports.sh — assert kmod/exports.manifest and kmod/src/export.c
-# list the same set of symbol names, and that each side is duplicate-free.
-#
-# Called by kmod/mk/kmod.mk as a build-time check.
-#
-# The export.c parser is NOT a raw grep — it uses Python to strip C comments
-# (both /* */ and //), #if 0 / #endif disabled blocks, and #define lines
-# before searching for KH_EXPORT(name) call sites. A commented-out or
-# preprocessor-disabled call must NOT be counted, because the compiler will
-# not see it and the resulting symbol would be absent from kernelhook.ko
-# while the lint silently considered it present.
+# Fail if any legacy bare (non-kh_) public API symbol appears in scope.
+# Wired into scripts/test.sh sdk-consumer so regressions surface in CI.
 
-set -euo pipefail
-
+set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MANIFEST="$ROOT/kmod/exports.manifest"
-EXPORT_C="$ROOT/kmod/src/export.c"
+cd "$ROOT"
 
-if [ ! -f "$MANIFEST" ]; then
-    echo "lint_exports: $MANIFEST not found" >&2
-    exit 2
-fi
-if [ ! -f "$EXPORT_C" ]; then
-    echo "lint_exports: $EXPORT_C not found" >&2
-    exit 2
-fi
+# Legacy patterns — every one MUST NOT appear as an independent word in scope.
+# \b is word-boundary; _ is a word character so e.g. `\bhook_install\b`
+# matches standalone `hook_install` but not `kh_hook_install`.
+PATTERNS=(
+  # bare hook_* functions
+  '\bhook_install\b' '\bhook_uninstall\b' '\bhook_prepare\b'
+  '\bhook_wrap\b' '\bhook_unwrap\b' '\bhook_unwrap_remove\b'
 
-# Extract symbol names from manifest (skip blank/comment lines, first
-# colon-separated field). Sort WITHOUT -u so duplicates remain visible
-# for the uniq -d check below.
-manifest_syms=$(awk -F: '!/^[[:space:]]*#/ && NF >= 2 { gsub(/[[:space:]]/, "", $1); if ($1 != "") print $1 }' "$MANIFEST" | sort)
+  # hook_chain_* functions
+  '\bhook_chain_add\b' '\bhook_chain_remove\b' '\bhook_chain_setup_transit\b'
 
-# Extract KH_EXPORT(<name>) from export.c using a minimal Python parser
-# that strips comments, #if 0 blocks, and #define lines first.
-export_c_syms=$(python3 - "$EXPORT_C" <<'PY'
-import re, sys
-with open(sys.argv[1]) as f:
-    src = f.read()
-# Strip /* ... */ comments (multi-line).
-src = re.sub(r'/\*.*?\*/', '', src, flags=re.DOTALL)
-# Strip // ... line comments.
-src = re.sub(r'//[^\n]*', '', src)
-# Strip #if 0 ... #endif blocks (flat only; no nested #if support — this
-# is sufficient for export.c's discipline of at most one #if 0 depth).
-src = re.sub(r'(?ms)^\s*#\s*if\s+0\b.*?^\s*#\s*endif\b[^\n]*', '', src)
-# Drop #define lines so the macro definition (e.g. "#define KH_EXPORT(sym)")
-# does not contribute its formal parameter as a bogus symbol name.
-src = '\n'.join(l for l in src.split('\n') if not re.match(r'\s*#\s*define\b', l))
-# Find KH_EXPORT(name) call sites.
-for m in re.finditer(r'\bKH_EXPORT\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)', src):
-    print(m.group(1))
-PY
+  # hook_mem_* (entire family — prefix replaces to kh_mem_)
+  '\bhook_mem_[a-z0-9_]+\b'
+
+  # hook_ typedefs
+  '\bhook_chain_rox_t\b' '\bhook_chain_rw_t\b'
+  '\bhook_fargs[0-9]+_t\b' '\bhook_local_t\b' '\bhook_err_t\b' '\bhook_t\b'
+  '\bhook_chain[0-9]+_callback\b' '\bhook_chain_item_t\b'
+
+  # hook_wrap0..12 / fp_hook_wrap0..12 numbered variants
+  '\bhook_wrap[0-9]+\b' '\bfp_hook_wrap[0-9]+\b'
+
+  # fp_hook_* family
+  '\bfp_hook\b' '\bfp_unhook\b' '\bfp_hook_wrap\b' '\bfp_hook_unwrap\b'
+  '\bfp_hook_chain_setup_transit\b' '\bfp_hook_t\b'
+  '\bfp_hook_chain_rox_t\b' '\bfp_hook_chain_rw_t\b'
+
+  # platform_* (entire family)
+  '\bplatform_alloc_rox\b' '\bplatform_alloc_rw\b' '\bplatform_free\b'
+  '\bplatform_page_size\b' '\bplatform_set_rw\b' '\bplatform_set_ro\b'
+  '\bplatform_set_rx\b' '\bplatform_write_code\b' '\bplatform_flush_icache\b'
+
+  # sync_*
+  '\bsync_read_lock\b' '\bsync_read_unlock\b'
+  '\bsync_write_lock\b' '\bsync_write_unlock\b' '\bsync_init\b'
+
+  # hmem_user_*
+  '\bhmem_user_init\b' '\bhmem_user_cleanup\b'
+
+  # remote_hook_*
+  '\bremote_hook_install\b' '\bremote_hook_alloc\b' '\bremote_hook_attach\b'
+  '\bremote_hook_detach\b' '\bremote_hook_handle_t\b'
+
+  # bare "unhook" (stand-alone syscall hook removal)
+  '\bunhook\b'
 )
-export_c_syms=$(printf '%s\n' "$export_c_syms" | sort)
 
-# Duplicate detection on each side (manifest and export.c independently).
-manifest_dupes=$(printf '%s\n' "$manifest_syms" | uniq -d || true)
-if [ -n "$manifest_dupes" ]; then
-    echo "lint_exports: duplicate symbol(s) in $MANIFEST:" >&2
-    printf '  %s\n' $manifest_dupes >&2
-    exit 1
-fi
-export_c_dupes=$(printf '%s\n' "$export_c_syms" | uniq -d || true)
-if [ -n "$export_c_dupes" ]; then
-    echo "lint_exports: duplicate KH_EXPORT call(s) in $EXPORT_C:" >&2
-    printf '  %s\n' $export_c_dupes >&2
-    exit 1
-fi
+SCOPE=(src include kmod tests examples)
 
-# Cross-check: same set on both sides (order-independent).
-manifest_uniq=$(printf '%s\n' "$manifest_syms" | uniq)
-export_c_uniq=$(printf '%s\n' "$export_c_syms" | uniq)
-set_diff=$(diff <(echo "$manifest_uniq") <(echo "$export_c_uniq") || true)
-if [ -n "$set_diff" ]; then
-    echo "lint_exports: manifest and export.c disagree" >&2
-    echo "  (< = in manifest only, > = in export.c only)" >&2
-    echo "$set_diff" >&2
-    exit 1
+FAIL=0
+for pat in "${PATTERNS[@]}"; do
+  if hits=$(grep -rnE --include='*.c' --include='*.h' --include='*.manifest' "$pat" "${SCOPE[@]}" 2>/dev/null); then
+    if [ -n "$hits" ]; then
+      printf '\033[31mFAIL\033[0m legacy symbol matched: %s\n' "$pat" >&2
+      printf '%s\n' "$hits" >&2
+      FAIL=$((FAIL+1))
+    fi
+  fi
+done
+
+if [ $FAIL -gt 0 ]; then
+  printf '\n\033[31m=== lint_exports: %d legacy pattern(s) found ===\033[0m\n' "$FAIL" >&2
+  exit 1
 fi
 
-count=$(echo "$manifest_uniq" | wc -l | tr -d ' ')
-echo "lint_exports: OK ($count symbols)"
+printf '\033[32mlint_exports: OK (zero legacy patterns in %s)\033[0m\n' "${SCOPE[*]}"
+exit 0

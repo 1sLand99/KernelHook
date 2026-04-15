@@ -63,7 +63,7 @@ $(KH_SYMVERS_H): $(KH_CRC) $(KH_MANIFEST)
 # Always lint export.c <-> manifest consistency before linking.
 .PHONY: _kh_lint
 _kh_lint:
-	@$(KH_ROOT)/scripts/lint_exports.sh
+	@$(KH_ROOT)/scripts/lint_manifest.sh
 
 # ---------- Module name / sources ----------
 

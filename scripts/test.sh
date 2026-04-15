@@ -18,6 +18,7 @@ KH_SUBCOMMANDS=(
     "device|kmod tests on physical USB device"
     "sdk-consumer|SDK ABI link verification"
     "kbuild-verify|Static .ko validation"
+    "lint|Grep-based legacy-symbol regression gate"
     "all|Every subcommand whose env is available"
 )
 
@@ -242,6 +243,9 @@ case "$KH_SUBCMD" in
         fi
         kh_summary_line "$pass" "$fail" "$skip"
         [ "$fail" -eq 0 ]
+        ;;
+    lint)
+        "$ROOT/scripts/lint_exports.sh"
         ;;
     kbuild-verify)
         if [ "${#KH_SUBCMD_ARGS[@]}" -lt 2 ]; then
