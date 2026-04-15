@@ -124,7 +124,18 @@ case "$KH_SUBCMD" in
             exit 1
         fi
         ;;
-    host-all)      cmd_stub ;;
+    host-all)
+        kh_section_start "host-all: Debug + Release"
+        if "$ROOT/tests/userspace/run_tests.sh"; then
+            kh_section_end "host-all" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            kh_section_end "host-all" FAIL
+            kh_summary_line 0 1
+            exit 1
+        fi
+        ;;
     android)       cmd_stub ;;
     avd)           cmd_stub ;;
     device)        cmd_stub ;;
