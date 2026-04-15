@@ -211,7 +211,26 @@ wrapper detection, `kh_raw_syscallN` invocation path.
 | 4.5 | `kh_sys_call_table` resolved but never written through; `kh_hook_syscalln` uses inline hook exclusively | KP's `hook_syscalln` prefers `fp_wrap_syscalln` when `sys_call_table` is present. | **no-action** | Documented in CLAUDE.md "Syscall hooks" section and in the file header: `sys_call_table` is `__ro_after_init` on GKI ≥ 5.10 and kCFI in `invoke_syscall+0x50` rejects the fp-hook trampoline. `kh_sys_call_table` exported for diagnostic/discovery use only. Deliberate deviation from KP, justified by GKI constraints. |
 
 ### 2.3 `src/arch/arm64/transit.c` ↔ `ref/KernelPatch/kernel/base/hook.c`
-(filled in T5)
+
+Diff reviewed: KP upstream (`hook.c` lines 346–506 for inline transit, `fphook.c` lines
+16–176 for fp transit) uses **no locking at all** — each transit function accesses
+`hook_chain->states[i]`, `hook_chain->befores[i]`, `hook_chain->afters[i]`, and
+`hook_chain->hook.relo_addr` directly across the full before+origin+after sequence, with no
+critical section. KP's `fp_hook_unwrap` marks items as `CHAIN_ITEM_STATE_BUSY` then
+`CHAIN_ITEM_STATE_EMPTY` but does not wait for in-flight transit calls, leaving a
+window where `hook_mem_free` runs while a transit body is still executing.
+
+Our port replaces all four transit functions (transit0/4/8/12 + fp_transit0/4/8/12) with a
+single unified `transit_body` + `fp_transit_body`, using a single `sync_read_lock()` window
+to snapshot `sorted_count`, `items[idx].{before,after,udata}`, and `rox->hook.relo_addr`
+onto the stack, then releases the lock before calling origin. After-callbacks iterate the
+stack snapshot — no second RCU window between origin and after-callbacks.
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 5.1 | RCU-snapshot design in `transit_body` / `fp_transit_body` | KP has no RCU locking at all across the entire before+origin+after sequence; our port takes a single `sync_read_lock()` window, snapshots dispatch state to stack, then drops the lock before calling origin. No second lock window between origin and after-callbacks. | **no-action** | Fixes UAF: concurrent `hook_unwrap_remove` + `synchronize_rcu` + `hook_mem_free_rw/rox` races against in-flight transit in KP upstream. Our deviation is stress-validated at 27.8M calls × 67K add/remove in 3 seconds, zero Oops. Reintroducing a second `sync_read_lock` window between origin and after-callbacks would recreate the original bug (pre-commit e41e543). See CLAUDE.md "RCU snapshot in transit_body". |
+| 5.2 | FPAC safety comment coverage | `transit_body` has a detailed FPAC-safety invariant comment block (lines 53–73) covering why the BLR to `relo_addr` is safe and what the SP stability requirement is. `fp_transit_body` has a shorter disclaimer at the `if (!fargs.skip_origin)` branch (lines 317–320) noting it is exempt from the inline-transit FPAC invariant because `origin_fp` enters at its natural entry point. Both comments are accurate and not contradictory. | **no-action** | `transit_body` calls relocated code that may begin with PACIASP (from the original function prologue) — SP stability is a real requirement and the comment explains why the compiler upholds it. `fp_transit_body` calls `origin_fp` at its natural entry point with its own PAC context; relocated-code PACIASP does not apply. Both coverage points are verified correct. |
+| 5.3 | Stack budget per invocation | `transit_body`: snap[8]×24 = 192 B + snap_local[8]×32 = 256 B + hook_fargs12_t = 128 B + scalars ≈ 32 B = **608 bytes**. `fp_transit_body`: snap[16]×24 = 384 B + snap_local[16]×32 = 512 B + hook_fargs12_t = 128 B + scalars ≈ 16 B = **1040 bytes**. | **no-action** | Both well under the 4 KiB threshold; ARM64 kernel stack is 16 KiB. fp_transit_body uses FP_HOOK_CHAIN_NUM = 16 vs HOOK_CHAIN_NUM = 8 for inline transit, doubling the snapshot arrays, but the total remains well within budget. |
 
 ### 2.4 `src/arch/arm64/inline.c::write_insts_via_alias` ↔ `ref/KernelPatch/kernel/base/hotpatch.c`
 (filled in T6)
@@ -235,6 +254,9 @@ wrapper detection, `kh_raw_syscallN` invocation path.
 | 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | — |
 | 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | — |
 | 4.5 | `src/platform/syscall.c` | **no-action** | `kh_sys_call_table` diagnostic-only; inline hook path only — GKI kCFI + `__ro_after_init` make fp-hook path broken; documented in CLAUDE.md | — |
+| 5.1 | `src/arch/arm64/transit.c` | **no-action** | RCU-snapshot design — deliberate deviation from KP upstream (which has no locking); fixes UAF in concurrent unwrap path; stress-validated 27.8M calls × 67K add/remove, zero Oops; see CLAUDE.md "RCU snapshot in transit_body" | TBD |
+| 5.2 | `src/arch/arm64/transit.c` | **no-action** | FPAC safety comment coverage — both `transit_body` (function header, lines 53–73) and `fp_transit_body` (body, lines 317–320) have accurate, non-contradictory FPAC disclaimers; verified correct | TBD |
+| 5.3 | `src/arch/arm64/transit.c` | **no-action** | Stack budget — transit_body ≈ 608 bytes, fp_transit_body ≈ 1040 bytes per invocation; both well under 4 KiB of the 16 KiB ARM64 kernel stack | TBD |
 
 (rows appended as audit tasks fill the sections above)
 
