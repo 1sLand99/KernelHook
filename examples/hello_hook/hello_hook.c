@@ -1,16 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * hello_hook.c — minimal KernelHook example module.
- *
- * Hooks do_sys_openat2 (or do_sys_open on older kernels) and logs
- * the filename pointer on every open syscall.
- *
- * Build:
- *   cd kmod/examples/hello_hook && make module
- *
- * Load (requires kallsyms_lookup_name address):
- *   insmod hello_hook.ko kallsyms_addr=0x<addr>
- */
+/* hello_hook example: hook `do_sys_openat2` and log the filename on every open(). */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */

@@ -1,18 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Integration tests: real compiler-generated BTI+PAC prologues (US-013)
- *
- * Unlike test_interaction.c (which uses naked/.inst for precise control),
- * this file is compiled with -mbranch-protection=standard so the compiler
- * itself generates BTI and/or PAC prologue instructions.  This verifies
- * that kh_hook_prepare correctly detects and handles real-world prologues.
- *
- * On Apple clang with -mbranch-protection=standard:
- *   - Leaf functions get BTI C prologue
- *   - Non-leaf functions get PACIASP prologue (PACIASP acts as BTI landing pad)
- *
- * Tests skip gracefully if the compiler does not support -mbranch-protection.
- */
+/* Userspace unit test: real compiler-generated BTI+PAC prologues via -mbranch-protection=standard, verifying kh_hook_prepare detection (US-013). */
 
 #include "test_framework.h"
 #include <kh_hook.h>

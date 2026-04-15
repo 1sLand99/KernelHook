@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Unit tests for kh_hook chain add/remove and priority sorting logic.
- * Operates directly on kh_hook_chain_rw_t without installing hooks.
- */
+/* Userspace unit test: kh_hook chain add/remove and priority sorting logic, operating directly on kh_hook_chain_rw_t. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

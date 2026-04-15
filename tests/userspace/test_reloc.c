@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Unit tests for ARM64 instruction relocation engine.
- * Uses hand-crafted uint32_t instruction words, not compiled code.
- */
+/* Userspace unit test: ARM64 instruction relocation engine using hand-crafted instruction words. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

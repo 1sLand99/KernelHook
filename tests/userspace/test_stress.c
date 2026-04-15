@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Integration tests: stress and edge cases.
- * Hook/kh_unhook cycles, chain exhaustion, concurrency, nested hooks,
- * and branch-prologue hooking.
- */
+/* Userspace unit test: stress and edge cases — hook/unhook cycles, chain exhaustion, concurrency, nested hooks, branch-prologue hooking. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

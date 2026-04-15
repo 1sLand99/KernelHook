@@ -1,20 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Consolidated unit tests for struct layout, bitmap operations,
- * and instruction generation changes (US-012).
- *
- * Verifies:
- *   - Struct sizes (kh_hook_chain_item_t == 64, kh_hook_local_t == 32)
- *   - Bitmap chain_add slot finding via __builtin_ctz
- *   - Bitmap chain_remove bit clearing
- *   - Bitmap chain_all_empty (mask == 0)
- *   - rebuild_sorted priority ordering with bitmap
- *   - BR-based trampoline (0xd61f0220 not 0xD65F0220)
- *   - BTI-only prologue detection
- *   - BTI+PAC combo prologue detection
- *   - SCS push instruction in prologue
- *   - PAC-stripped address identity
- */
+/* Userspace unit test: struct layout, bitmap allocator, priority ordering, trampoline encoding, and prologue detection (US-012). */
 
 #include "test_framework.h"
 #include <kh_hook.h>

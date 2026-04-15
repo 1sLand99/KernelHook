@@ -1,11 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
+/* Userspace unit test: pairwise ARM64 security mechanism interactions (BTI/PAC/SCS) during kh_hook/call/kh_unhook cycles (US-011). */
+
 /*
- * Integration tests: multi-mechanism security interactions (US-011)
- *
- * Tests pairwise interactions between ARM64 security mechanisms during
- * real kh_hook/call/kh_unhook cycles.  Uses naked functions with .inst to
- * emit specific prologue sequences.
- *
  * Pairwise interaction matrix:
  *
  * +----------+--------+---------+--------+

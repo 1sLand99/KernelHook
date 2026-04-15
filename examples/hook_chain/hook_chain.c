@@ -1,12 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * hook_chain.c — Hook chain with priority ordering example.
- *
- * Demonstrates kh_hook_wrap with multiple callbacks at different priorities.
- * Three before-callbacks are registered with priorities 0, 50, 100
- * (in arbitrary order) to show that priority controls execution order,
- * not registration order.
- */
+/* hook_chain example: multiple prioritized callbacks on the same target via kh_hook_wrap. */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */

@@ -1,13 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * kh_fp_hook.c — Function pointer hooking example.
- *
- * Demonstrates kh_fp_hook / kh_fp_unhook / fp_get_origin_func:
- *   - Define a struct with a function pointer callback
- *   - Hook it with a replacement function
- *   - Call the original via a backup pointer
- *   - Unhook on exit
- */
+/* fp_hook example: demonstrate kh_fp_hook_wrap on a function-pointer target (kh_fp_hook / kh_fp_unhook / fp_get_origin_func). */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */

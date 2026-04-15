@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Unit tests for PAC function pointer stripping at API entry (US-007).
- * Verifies that STRIP_PAC macro works and that kh_hook APIs accept
- * PAC-signed pointers correctly.
- */
+/* Userspace unit test: PAC function pointer stripping at API entry — STRIP_PAC macro and signed-pointer acceptance (US-007). */
 
 #include "test_framework.h"
 #include <kh_hook.h>

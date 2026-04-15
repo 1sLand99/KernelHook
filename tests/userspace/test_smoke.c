@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Smoke test for the test framework itself.
- * Validates TEST(), ASSERT_*, SKIP_TEST, and RUN_ALL_TESTS macros.
- */
+/* Userspace unit test: smoke test for the test framework itself — validates TEST(), ASSERT_*, SKIP_TEST, and RUN_ALL_TESTS macros. */
 #include "test_framework.h"
 
 TEST(assert_true_passes)

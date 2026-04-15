@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* API misuse and robustness tests */
+/* Userspace unit test: API misuse and robustness — exercise error codes and null/double-install/double-remove paths. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

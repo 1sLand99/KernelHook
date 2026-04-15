@@ -1,11 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Verify library code is page-isolated from test (user) code.
- *
- * These tests confirm that the linker script (GNU ld) or order file (macOS)
- * successfully places library .text in its own page-aligned region, so
- * kh_platform_write_code() never removes execute permission from its own page.
- */
+/* Userspace unit test: verify library .text is page-isolated from test code so kh_platform_write_code() never de-executes its own page. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

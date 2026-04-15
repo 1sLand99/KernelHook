@@ -1,15 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * ksyms_lookup.c — Runtime symbol resolution example.
- *
- * Demonstrates ksyms_lookup() and ksyms_lookup():
- *   - Look up multiple kernel symbols
- *   - Show cached vs uncached lookup
- *   - Handle nonexistent symbols gracefully
- *
- * This example does NOT need kh_mem_init or pgtable_init —
- * only kmod_compat_init for ksyms resolution.
- */
+/* ksyms_lookup example: demonstrate runtime kernel symbol resolution via ksyms_lookup() with graceful miss handling. */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */

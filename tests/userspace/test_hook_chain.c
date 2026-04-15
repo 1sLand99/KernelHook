@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Integration tests: kh_hook chains, unwrap, and local storage.
- * Tests multi-callback chains, priority ordering, per-item local,
- * wrap_get_origin_func, and function pointer hooks.
- */
+/* Userspace unit test: kh_hook chains, unwrap, local storage, priority ordering, and wrap_get_origin_func. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

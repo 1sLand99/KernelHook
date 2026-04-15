@@ -1,21 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * ARM64 Linux-specific integration tests (US-014)
- *
- * These tests verify Linux-specific functionality:
- * - mprotect-based W^X memory protection
- * - Real BTI enforcement (hardware BTI on Linux aarch64)
- * - SCS (Shadow Call Stack) with X18 as shadow stack pointer
- * - kCFI interaction (requires CONFIG_CFI_CLANG kernel)
- *
- * On non-Linux platforms, all tests skip gracefully.
- *
- * Running on ARM64 Linux:
- *   Native:  cmake -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build && ctest --test-dir build
- *   QEMU:    cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake \
- *                  -DCMAKE_BUILD_TYPE=Debug && cmake --build build
- *            qemu-aarch64 -L /usr/aarch64-linux-gnu ./build/tests/test_linux_arm64
- */
+/* Userspace unit test: ARM64 Linux-specific functionality — W^X, hardware BTI, SCS/X18, kCFI interaction (US-014). */
 
 #include "test_framework.h"
 

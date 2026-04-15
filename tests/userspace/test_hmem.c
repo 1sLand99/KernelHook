@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Unit tests for the bitmap allocator (memory.c).
- */
+/* Userspace unit test: bitmap allocator (memory.c) alloc/free correctness and boundary conditions. */
 
 #include "test_framework.h"
 #include <hmem_user.h>

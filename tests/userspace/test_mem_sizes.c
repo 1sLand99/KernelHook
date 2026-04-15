@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Memory layout diagnostic: captures struct sizes and block counts.
- * Values are updated as optimizations land. */
+/* Userspace unit test: memory layout diagnostic — captures struct sizes and block counts. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

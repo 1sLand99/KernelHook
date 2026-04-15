@@ -1,24 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0-or-later
-/*
- * kbuild_hello_main.c — Mode C (kbuild) SDK consumer example.
- *
- * Unlike examples/hello_hook/ which statically links the KernelHook
- * core library into its own .ko, this module depends on an externally
- * built kernelhook.ko being loaded at insmod time. The Kbuild file
- * wires the dependency via KBUILD_EXTRA_SYMBOLS pointing at
- * kmod/Module.symvers (see the sibling Kbuild file).
- *
- * Build:
- *   # 1. Build kernelhook.ko first (produces kmod/Module.symvers):
- *   make -C $KERNEL_SRC M=$(pwd)/kmod modules
- *   # 2. Then build this consumer against those symbols:
- *   make -C $KERNEL_SRC M=$(pwd)/examples/kbuild_hello \
- *        KBUILD_EXTRA_SYMBOLS=$(pwd)/kmod/Module.symvers modules
- *
- * Load order at runtime:
- *   insmod kernelhook.ko kallsyms_addr=0x<addr>  # (or rely on kprobes fallback)
- *   insmod kbuild_hello.ko
- */
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* kbuild_hello example: Mode C (kbuild) SDK consumer that hooks `vfs_open` and logs path+file pointers. */
 
 #include <linux/module.h>
 #include <linux/kernel.h>

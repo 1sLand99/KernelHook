@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Integration tests: basic in-process hooking.
- * Hooks real compiled functions and verifies callback invocation.
- */
+/* Userspace unit test: basic inline hook install + fire + uninstall on real compiled functions. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

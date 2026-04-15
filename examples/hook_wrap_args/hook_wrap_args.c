@@ -1,11 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * hook_wrap_args.c — Argument inspection and return value override example.
- *
- * Demonstrates kh_hook_wrap4 with both before and after callbacks:
- *   - before: log arg0-arg3
- *   - after: log original return value, then override with 0
- */
+/* hook_wrap_args example: inspect arguments and override return value using kh_hook_wrap4 before/after callbacks. */
 
 #if defined(KH_SDK_MODE)
 /* Mode B: SDK — kernelhook.ko provides the API */

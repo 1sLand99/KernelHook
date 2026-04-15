@@ -1,9 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Typed wrapper tests: verifies all 13 hook_wrapN arities (0-12).
- * Each test calls hook_wrapN, invokes via a volatile function pointer,
- * asserts both callbacks fired, and checks the captured return value.
- */
+/* Userspace unit test: typed hook_wrapN arities 0–12 — verifies callbacks fire and return value is captured correctly. */
 
 #include "test_framework.h"
 #include <kh_hook.h>

@@ -1,8 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/*
- * Integration tests for remote process hooking API.
- * Linux ARM64 only — skips gracefully on macOS and when ptrace is restricted.
- */
+/* Userspace unit test: remote process hooking API — Linux ARM64 only, skips gracefully on macOS and restricted ptrace. */
 
 #include "test_framework.h"
 
