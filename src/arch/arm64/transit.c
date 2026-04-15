@@ -8,7 +8,7 @@
  * Build modes: shared
  * Depends on: kh_hook.h (kh_hook_chain_rox_t), sync.h (RCU read-lock)
  * Notes: RCU snapshot window covers before-origin-after in a SINGLE
- *   sync_read_lock() window; do NOT reintroduce a second lock window between
+ *   kh_sync_read_lock() window; do NOT reintroduce a second lock window between
  *   origin call and after-callbacks — that was the original UAF bug (see
  *   CLAUDE.md "RCU snapshot in transit_body").
  *   Ported from KernelPatch kernel/patch/common/hotpatch.c; see

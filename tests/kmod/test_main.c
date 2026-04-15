@@ -421,7 +421,7 @@ static int __init kh_test_init(void)
     test_hook_uninstall_restore();
     test_hook_chain_priority();
 
-    pr_info(KH_TEST_TAG "--- fp_hook API tests ---\n");
+    pr_info(KH_TEST_TAG "--- kh_fp_hook API tests ---\n");
     test_fp_hook_basic();
     test_fp_hook_wrap_before_after();
     test_fp_hook_chain_priority();

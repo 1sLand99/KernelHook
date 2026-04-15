@@ -173,7 +173,7 @@ void hook_test_state_reset(void)
 }
 
 /* ==================================================================
- * fp_hook API tests — targets and shared state
+ * kh_fp_hook API tests — targets and shared state
  * ================================================================== */
 static int my_add(int a, int b)          { return a + b; }
 static int my_add_plus_100(int a, int b) { return a + b + 100; }
@@ -1584,10 +1584,10 @@ void test_concurrent_add_remove(void)
 #endif /* CONFIG_KH_CHAIN_RCU && !KH_SDK_MODE */
 
 /* ================================================================
- * fp_hook API tests
+ * kh_fp_hook API tests
  * ================================================================ */
 
-/* All fp_hook API tests call through fp_target which, when hooked, points at a
+/* All kh_fp_hook API tests call through fp_target which, when hooked, points at a
  * dynamically generated ROX transit stub with no kCFI hash. Mark them exempt. */
 KCFI_EXEMPT void test_fp_hook_basic(void)
 {

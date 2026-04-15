@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Userspace unit test: fp_hook edge cases — nested hooks, wrap/unwrap cycle, multiple targets, chain priority, fp_get_origin_func. */
+/* Userspace unit test: kh_fp_hook edge cases — nested hooks, wrap/unwrap cycle, multiple targets, chain priority, fp_get_origin_func. */
 
 #include "test_framework.h"
 #include <kh_hook.h>
