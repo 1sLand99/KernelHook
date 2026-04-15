@@ -32,8 +32,8 @@ src/arch/arm64/inline.c:586:     * This is the KernelPatch approach — works on
 src/arch/arm64/inline.c:611:    /* Primary: alias-page + aarch64_insn_patch_text_nosync (KP path).
 src/uaccess.c:5: * User-pointer helpers. Trimmed port of KernelPatch
 src/uaccess.c:100:         * is already the NUL. Adjust to include NUL to match KP. */
-tests/kmod/test_phase6_kh_root.c:6: * Mirrors ref/KernelPatch/kernel/patch/common/sucompat.c, simplified:
-tests/kmod/test_phase6_kh_root.c:22: *   3. KernelPatch's sucompat.c uses inline hooks on __arm64_sys_<name>
+tests/kmod/demo_kh_root.c:6: * Mirrors ref/KernelPatch/kernel/patch/common/sucompat.c, simplified:
+tests/kmod/demo_kh_root.c:22: *   3. KernelPatch's sucompat.c uses inline hooks on __arm64_sys_<name>
 include/syscall_names.h:6: * ref/KernelPatch/kernel/patch/common/sysname.c:syscall_name_table,
 include/syscall_names.h:21:/* Table capacity — matches KernelPatch (covers __NR_cachestat = 451). */
 include/uaccess.h:5: * KernelHook user-pointer helpers — trimmed port of KernelPatch
@@ -91,10 +91,10 @@ src/uaccess.c:244:            ksyms_lookup("__arch_copy_to_user");
 src/uaccess.c:246:    /* In kbuild, strncpy_from_user / copy_to_user may be macros that
 src/uaccess.c:250:    kh_strncpy_from_user_fn = (kh_strncpy_from_user_fn_t)&strncpy_from_user;
 src/uaccess.c:254:    pr_info("uaccess: strncpy_from_user=%llx copy_to_user=%llx\n",
-tests/kmod/test_phase6_kh_root.c:58:/* Kernel 6.1 signature: struct cred *prepare_kernel_cred(struct task_struct *).
-tests/kmod/test_phase6_kh_root.c:139:        ksyms_lookup("prepare_kernel_cred");
-tests/kmod/test_phase6_kh_root.c:141:        ksyms_lookup("commit_creds");
-tests/kmod/test_phase6_kh_root.c:143:        pr_warn("kh_root: prepare_kernel_cred=%llx commit_creds=%llx -- "
+tests/kmod/demo_kh_root.c:58:/* Kernel 6.1 signature: struct cred *prepare_kernel_cred(struct task_struct *).
+tests/kmod/demo_kh_root.c:139:        ksyms_lookup("prepare_kernel_cred");
+tests/kmod/demo_kh_root.c:141:        ksyms_lookup("commit_creds");
+tests/kmod/demo_kh_root.c:143:        pr_warn("kh_root: prepare_kernel_cred=%llx commit_creds=%llx -- "
 tests/kmod/log.c:61:    kh_vprintk_func = (vprintk_func_t)(uintptr_t)ksyms_lookup("vprintk");
 tests/kmod/export_link_test/importer.c:6: * references kh_hook_wrap + ksyms_lookup as undefined symbols that the running
 tests/kmod/export_link_test/importer.c:21:extern uint64_t ksyms_lookup(const char *name);
@@ -102,13 +102,13 @@ tests/kmod/export_link_test/importer.c:30:    uint64_t addr = ksyms_lookup("vfs_
 tests/kmod/export_link_test/exporter.c:8: * (kh_hook_wrap, ksyms_lookup, ...) that Ring 2's verify_elf.sh checks.
 tests/kmod/export_link_test/exporter.c:11: * importer.ko later calls ksyms_lookup("do_sys_openat2") it resolves to a
 tests/kmod/export_link_test/verify_elf.sh:76:assert_symbol  importer.ko ksyms_lookup
-tests/kmod/test_phase6_kh_root.h:7: * required symbols (prepare_kernel_cred, commit_creds) unresolvable. */
+tests/kmod/demo_kh_root.h:7: * required symbols (prepare_kernel_cred, commit_creds) unresolvable. */
 tests/kmod/test_main.c:294:    /* 7. uaccess helpers — resolve strncpy_from_user/copy_to_user +
 tests/kmod/test_main.c:435:     * These tests resolve real kernel functions via ksyms_lookup() and
 tests/kmod/mem_ops.c:14: *   KMOD_FREESTANDING:    resolves all symbols via ksyms_lookup() at runtime
 tests/kmod/mem_ops.c:52:    uint64_t addr = ksyms_lookup(fb->primary);
 tests/kmod/mem_ops.c:54:        addr = ksyms_lookup(fb->fallback);
-tests/kmod/test_hook_kernel.c:70: * ksyms_lookup so that Phase 5d concurrency tests can run without
+tests/kmod/test_hook_kernel.c:70: * ksyms_lookup so that concurrency tests can run without
 tests/kmod/test_hook_kernel.c:81: * resolve them via ksyms_lookup and call through function pointers instead. */
 tests/kmod/test_hook_kernel.c:107:        ksyms_lookup("kthread_create_on_node");
 tests/kmod/test_hook_kernel.c:109:        ksyms_lookup("wake_up_process");
@@ -143,7 +143,7 @@ Spec §4 enumerates six files. Sweep result:
 | src/arch/arm64/transit.c | ✅ | ❌ |
 | src/arch/arm64/inline.c | ✅ | ✅ |
 | src/arch/arm64/pgtable.c | ✅ | ✅ |
-| tests/kmod/test_phase6_kh_root.c | ✅ | ✅ |
+| tests/kmod/demo_kh_root.c | ✅ | ✅ |
 
 Note on `src/arch/arm64/transit.c` (❌ in sweep): the file carries no KP attribution
 comment and none of the KP-API footprint identifiers appear in its body. It was derived
@@ -169,7 +169,7 @@ Extra sites discovered by sweep:
 | `tests/kmod/mem_ops.c` | Calls `ksyms_lookup()` for memory-op symbol resolution | noise — generic helper; not KP-derived |
 | `tests/kmod/test_hook_kernel.c` | Heavy use of `ksyms_lookup()` throughout test suite | noise — test code using the KH API; not KP-derived |
 | `tests/kmod/test_main.c` | "strncpy_from_user" and "ksyms_lookup" in comments | noise — test orchestrator referencing API names; not KP-derived |
-| `tests/kmod/test_phase6_kh_root.h` | `prepare_kernel_cred` / `commit_creds` in guard comment | noise — companion header for `test_phase6_kh_root.c`; covered under §2.6 |
+| `tests/kmod/demo_kh_root.h` | `prepare_kernel_cred` / `commit_creds` in guard comment | noise — companion header for `demo_kh_root.c`; covered under §2.6 |
 
 Summary: 0 extra sites need a new audit task. All 15 extra hits are noise (header companions,
 the `ksyms_lookup` implementation itself, or test code that calls the KH API without
@@ -181,7 +181,7 @@ containing KP-ported logic).
 
 Diff reviewed: `src/uaccess.c` is a deliberately trimmed port. KP `utils.c` covers a much
 broader surface (trace_seq / seq_buf copy helpers, random, `_task_pt_reg` with pre-5.10
-`pt_regs` size variants). Our port retains only what Phase 5b / Phase 6 callers need.
+`pt_regs` size variants). Our port retains only what real-trigger + kh_root demo callers need.
 
 | # | Site | Delta | Class | Rationale |
 |---|------|-------|-------|-----------|
@@ -204,7 +204,7 @@ wrapper detection, `kh_raw_syscallN` invocation path.
 
 | # | Site | Delta | Class | Rationale |
 |---|------|-------|-------|-----------|
-| 4.1 | `regs.syscallno` not set in `kh_raw_syscallN` | KP sets both `regs.syscallno = nr` AND `regs.regs[8] = nr`; our port only sets `regs.regs[8]` via `KH_SYS_NR_FIELD`. Active callers exist in `tests/kmod/test_hook_kernel.c` (kh_raw_syscall0/1/3/4 used in Phase 5c/5d/kh_root tests). | **must-fix** | `syscallno` is the field the kernel syscall entry path reads for audit/tracing and ptrace interception. Missing it means any handler that inspects `regs->syscallno` instead of `regs->regs[8]` sees 0. Callers confirmed active (grep hit 8 call sites). Fixed: `regs.syscallno = (int32_t)nr;` added after `KH_SYS_NR_FIELD` in all 7 wrappers. Both fields present in `struct kh_pt_regs_shim` (line 55: `int32_t syscallno`) and kernel `struct pt_regs`. |
+| 4.1 | `regs.syscallno` not set in `kh_raw_syscallN` | KP sets both `regs.syscallno = nr` AND `regs.regs[8] = nr`; our port only sets `regs.regs[8]` via `KH_SYS_NR_FIELD`. Active callers exist in `tests/kmod/test_hook_kernel.c` (kh_raw_syscall0/1/3/4 used in stress/concurrency/kh_root tests). | **must-fix** | `syscallno` is the field the kernel syscall entry path reads for audit/tracing and ptrace interception. Missing it means any handler that inspects `regs->syscallno` instead of `regs->regs[8]` sees 0. Callers confirmed active (grep hit 8 call sites). Fixed: `regs.syscallno = (int32_t)nr;` added after `KH_SYS_NR_FIELD` in all 7 wrappers. Both fields present in `struct kh_pt_regs_shim` (line 55: `int32_t syscallno`) and kernel `struct pt_regs`. |
 | 4.2 | No compat/AArch32 table or `compat_sys_call_table` | KP has full compat support (`compat_syscall_name_table`, `has_config_compat`, `compat_sys_call_table`). | **no-action** | Documented in file header: "64-bit only (no compat branches, no AArch32 table, no kstorage)." GKI Android targets are LP64-only in practice; AArch32 compat is not required for the current feature set. Deliberate deviation. |
 | 4.3 | `kh_zero_regs` pre-zeros the `KH_PT_REGS` frame before field assignment | KP does NOT zero the struct — it assigns only `syscallno`, `regs[8]`, and argument registers, leaving all other fields uninitialised. | **no-action** | Our approach is strictly safer: no risk of stale stack values leaking into kernel entry path. Cost is negligible (one loop over ~200 bytes at inline-kh_hook invocation frequency). Deliberate improvement over KP. |
 | 4.4 | Name-table caching stores resolved address back into `kh_syscall_name_table[nr].addr` (monotonic; never invalidated) | Identical to KP `syscalln_name_addr` caching pattern. | **no-action** | Matches KP exactly. Safe because symbol addresses are stable for the kernel lifetime; modules that export `__arm64_sys_*` are built-in. No issue. |
@@ -302,7 +302,7 @@ comment block and acknowledged here.
 | 7.3 | `kva_min = page_offset ? page_offset : 0xffffff8000000000ULL` guard in `pgtable_entry` and `pgtable_phys_kernel` (`pgtable.c:180, 242`) | KP `pgtable_entry` (`start.c:127-173`) has no kva_min sanity check at all. Our guard is a defensive addition absent in KP. The fallback constant `0xffffff8000000000ULL` is the correct lower bound for 39-bit VA kernels (T1SZ=25). For all wider VA configs the runtime-computed `page_offset` is used. | **no-action** | Strictly stricter than KP. Prevents a nonsensical walk if `pgtable_init` was skipped or if a caller passes a userspace VA. The fallback constant is architecturally correct for the minimum GKI VA width (39-bit). |
 | 7.4 | VA-bits detection via `TCR_EL1.T1SZ` (`pgtable.c:141-154`) | IDENTICAL algorithm: both read `tcr_el1` via `mrs`, extract T1SZ from bits `[21:16]`, compute `va_bits = 64 - t1sz`. KP (`start.c:444-446`): `t1sz = bits(tcr_el1, 21, 16); va_bits = 64 - t1sz`. Our code: `t1sz = (tcr >> 16) & 0x3f; va_bits = 64 - t1sz`. Same for page-size detection via TG1 bits `[31:30]`. | **no-action** | Algorithm matches KP exactly. `page_level` formula differs slightly (`(va_bits - 4) / (page_shift - 3)` in KP vs ceiling formula in ours) but produces the same integer result for all valid GKI VA/page-size combinations. |
 
-### 2.6 `tests/kmod/test_phase6_kh_root.c` ↔ `ref/KernelPatch/kernel/patch/common/sucompat.c`
+### 2.6 `tests/kmod/demo_kh_root.c` ↔ `ref/KernelPatch/kernel/patch/common/sucompat.c`
 
 Diff reviewed: KP `sucompat.c` is a full production su-compat layer: kstorage allowlist
 (`su_kstorage_gid` + `is_su_allow_uid`), per-entry `su_profile` structs with `to_uid` and
@@ -327,7 +327,7 @@ tests/kmod/test_main.c:520:  module_exit(kh_test_exit);
 ```
 
 `kh_root_uninstall()` is the FIRST action in `kh_test_exit()`, before `kh_subsystem_cleanup()`.
-The ordering is commented at lines 504–508 ("Phase 6: uninstall syscall hooks BEFORE freeing
+The ordering is commented at lines 504–508 ("kh_root demo: uninstall syscall hooks BEFORE freeing
 module memory"). Requirement fully satisfied — **no-action**.
 
 | # | Site | Delta | Class | Rationale |
@@ -364,10 +364,10 @@ module memory"). Requirement fully satisfied — **no-action**.
 | 7.3 | `src/arch/arm64/pgtable.c` | **no-action** | `kva_min` guard with `0xffffff8000000000ULL` fallback — defensive addition absent in KP; fallback is correct 39-bit VA lower bound | 2424040 |
 | 7.4 | `src/arch/arm64/pgtable.c` | **no-action** | VA-bits detection via `TCR_EL1.T1SZ` — identical algorithm to KP `start.c:444-446`; `page_level` formula difference produces same integer result for all GKI configs | 2424040 |
 | 8.1 | `tests/kmod/test_main.c` | **no-action** | `kh_root_uninstall` wired as first call in `kh_test_exit()` (line 511) before `kh_subsystem_cleanup()`; `module_exit(kh_test_exit)` at line 520 — ordering contract satisfied | aa19c3f |
-| 8.2 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Hardcoded `__NR_execve=221`, `__NR_faccessat=48`, `__NR3264_fstatat=79` — stable ARM64 ABI since kernel 3.7; `#ifndef` guards allow kernel-supplied override in kbuild | aa19c3f |
-| 8.3 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | Inline `kh_hook_wrap` on `__arm64_sys_<name>` — GKI kCFI + `__ro_after_init` make sys_call_table fp-kh_hook path broken; documented in file header and CLAUDE.md | aa19c3f |
-| 8.4 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | `match_user_path` 64-byte buffer vs 128-byte KP `SU_PATH_MAX_LEN` — target path is 20 bytes; 3× margin; overflow impossible (kh_strncpy_from_user truncates) | aa19c3f |
-| 8.5 | `tests/kmod/test_phase6_kh_root.c` | **no-action** | No SELinux / allowlist / kstorage / AArch32 compat — demo scope; all omissions listed in file header lines 6–10; deliberate simplifications vs production KP sucompat | aa19c3f |
+| 8.2 | `tests/kmod/demo_kh_root.c` | **no-action** | Hardcoded `__NR_execve=221`, `__NR_faccessat=48`, `__NR3264_fstatat=79` — stable ARM64 ABI since kernel 3.7; `#ifndef` guards allow kernel-supplied override in kbuild | aa19c3f |
+| 8.3 | `tests/kmod/demo_kh_root.c` | **no-action** | Inline `kh_hook_wrap` on `__arm64_sys_<name>` — GKI kCFI + `__ro_after_init` make sys_call_table fp-kh_hook path broken; documented in file header and CLAUDE.md | aa19c3f |
+| 8.4 | `tests/kmod/demo_kh_root.c` | **no-action** | `match_user_path` 64-byte buffer vs 128-byte KP `SU_PATH_MAX_LEN` — target path is 20 bytes; 3× margin; overflow impossible (kh_strncpy_from_user truncates) | aa19c3f |
+| 8.5 | `tests/kmod/demo_kh_root.c` | **no-action** | No SELinux / allowlist / kstorage / AArch32 compat — demo scope; all omissions listed in file header lines 6–10; deliberate simplifications vs production KP sucompat | aa19c3f |
 
 (rows appended as audit tasks fill the sections above)
 
@@ -427,10 +427,10 @@ Device serial: 1B101FDF6003PM
   Ring 3 __ksymtab layout: prel32
   PASS Ring 3: 3/3
 
-Verifying Phase 6 kh_root...
+Verifying kh_root demo kh_root...
   baseline shell uid = 2000
   kh_root -c id -u   = 0
-  PASS Phase 6: kh_root elevated 2000 → 0
+  PASS kh_root demo: kh_root elevated 2000 → 0
 
 All device tests passed.
 === Summary: 100 PASS, 0 FAIL ===
