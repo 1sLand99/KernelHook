@@ -39,9 +39,9 @@ ksyms_lookup: all lookups complete
 
 ## Notes / 备注
 
-This example only needs `kmod_compat_init` -- no `hook_mem_init` or `pgtable_init` required since it does not install any hooks.
+This example only needs `kmod_compat_init` -- no `kh_mem_init` or `pgtable_init` required since it does not install any hooks.
 
-本示例只需要 `kmod_compat_init`，不安装任何 hook，因此无需 `hook_mem_init` 或 `pgtable_init`。
+本示例只需要 `kmod_compat_init`，不安装任何 hook，因此无需 `kh_mem_init` 或 `pgtable_init`。
 
 ## Other modes
 

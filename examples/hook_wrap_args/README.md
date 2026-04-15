@@ -6,7 +6,7 @@ Hook `do_sys_openat2` with before and after callbacks. Inspect all arguments in 
 
 ## API
 
-- `hook_wrap4` -- register before + after callbacks for a 4-arg function
+- `kh_hook_wrap4` -- register before + after callbacks for a 4-arg function
 - `fargs->arg0` ... `fargs->arg3` -- read/write function arguments
 - `fargs->ret` -- read original return value (in after), write to override
 

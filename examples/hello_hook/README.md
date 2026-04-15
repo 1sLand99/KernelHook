@@ -6,8 +6,8 @@ Hook `do_sys_openat2`，记录每次 `open()` 系统调用的文件名指针。
 
 ## API
 
-- `hook_wrap4` -- register a before callback capturing 4 arguments
-- `hook_unwrap` -- remove the callback on module exit
+- `kh_hook_wrap4` -- register a before callback capturing 4 arguments
+- `kh_hook_unwrap` -- remove the callback on module exit
 
 ## Build (SDK mode — default)
 
