@@ -136,7 +136,7 @@ fi
 if [ "$KH_MODE" = "sdk" ]; then
     printf "  Building kernelhook.ko + hello_hook.ko (SDK mode) for %s...\n" "$UNAME"
     if ! ( cd "$ROOT/kmod" && \
-           make clean >/dev/null 2>&1; \
+           { make clean >/dev/null 2>&1 || true; } && \
            make module \
                KERNELRELEASE="$UNAME" \
                CC="$KH_CC" \
@@ -148,7 +148,7 @@ if [ "$KH_MODE" = "sdk" ]; then
         exit 1
     fi
     if ! ( cd "$ROOT/examples/hello_hook" && \
-           make -f Makefile.sdk clean >/dev/null 2>&1; \
+           { make -f Makefile.sdk clean >/dev/null 2>&1 || true; } && \
            KERNELRELEASE="$UNAME" \
            CC="$KH_CC" \
            LD="$KH_LD" \
