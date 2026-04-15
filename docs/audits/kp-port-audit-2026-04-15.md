@@ -196,7 +196,19 @@ broader surface (trace_seq / seq_buf copy helpers, random, `_task_pt_reg` with p
 - `uaccess: task_struct.stack offset = 0x38 (probed)`
 
 ### 2.2 `src/platform/syscall.c` ↔ `ref/KernelPatch/kernel/patch/common/syscall.c`
-(filled in T4)
+
+Diff reviewed: our port strips compat/AArch32 branches, kstorage, `KP_EXPORT_SYMBOL`,
+`link2runtime` name-table fixups, `fp_wrap_syscalln` / `hook_syscalln` (fp path),
+`get_user_arg_ptr` / `set_user_arg_ptr`. Core logic retained: name-table caching,
+wrapper detection, `kh_raw_syscallN` invocation path.
+
+| # | Site | Delta | Class | Rationale |
+|---|------|-------|-------|-----------|
+| 4.1 | `regs.syscallno` not set in `kh_raw_syscallN` | KP sets both `regs.syscallno = nr` AND `regs.regs[8] = nr`; our port only sets `regs.regs[8]` via `KH_SYS_NR_FIELD`. Active callers exist in `tests/kmod/test_hook_kernel.c` (kh_raw_syscall0/1/3/4 used in Phase 5c/5d/kh_root tests). | **must-fix** | `syscallno` is the field the kernel syscall entry path reads for audit/tracing and ptrace interception. Missing it means any handler that inspects `regs->syscallno` instead of `regs->regs[8]` sees 0. Callers confirmed active (grep hit 8 call sites). Fixed: `regs.syscallno = (int32_t)nr;` added after `KH_SYS_NR_FIELD` in all 7 wrappers. Both fields present in `struct kh_pt_regs_shim` (line 55: `int32_t syscallno`) and kernel `struct pt_regs`. |
+| 4.2 | No compat/AArch32 table or `compat_sys_call_table` | KP has full compat support (`compat_syscall_name_table`, `has_config_compat`, `compat_sys_call_table`). | **no-action** | Documented in file header: "64-bit only (no compat branches, no AArch32 table, no kstorage)." GKI Android targets are LP64-only in practice; AArch32 compat is not required for the current feature set. Deliberate deviation. |
+| 4.3 | `kh_zero_regs` pre-zeros the `KH_PT_REGS` frame before field assignment | KP does NOT zero the struct — it assigns only `syscallno`, `regs[8]`, and argument registers, leaving all other fields uninitialised. | **no-action** | Our approach is strictly safer: no risk of stale stack values leaking into kernel entry path. Cost is negligible (one loop over ~200 bytes at inline-hook invocation frequency). Deliberate improvement over KP. |
+| 4.4 | Name-table caching stores resolved address back into `kh_syscall_name_table[nr].addr` (monotonic; never invalidated) | Identical to KP `syscalln_name_addr` caching pattern. | **no-action** | Matches KP exactly. Safe because symbol addresses are stable for the kernel lifetime; modules that export `__arm64_sys_*` are built-in. No issue. |
+| 4.5 | `kh_sys_call_table` resolved but never written through; `kh_hook_syscalln` uses inline hook exclusively | KP's `hook_syscalln` prefers `fp_wrap_syscalln` when `sys_call_table` is present. | **no-action** | Documented in CLAUDE.md "Syscall hooks" section and in the file header: `sys_call_table` is `__ro_after_init` on GKI ≥ 5.10 and kCFI in `invoke_syscall+0x50` rejects the fp-hook trampoline. `kh_sys_call_table` exported for diagnostic/discovery use only. Deliberate deviation from KP, justified by GKI constraints. |
 
 ### 2.3 `src/arch/arm64/transit.c` ↔ `ref/KernelPatch/kernel/base/hook.c`
 (filled in T5)
@@ -218,6 +230,11 @@ broader surface (trace_seq / seq_buf copy helpers, random, `_task_pt_reg` with p
 | 3.2 | `src/uaccess.c` | **no-action** | `rc++` NUL-inclusive return — matches KP `compat_strncpy_from_user` lines 110–117 exactly | 68e39fd |
 | 3.3 | `src/uaccess.c` | **no-action** | `probe_pointer_offset` 0x1000 walk range — confirmed sufficient: cred@0x830, stack@0x38 on GKI 6.1 | 68e39fd |
 | 3.4 | `src/uaccess.c` | **no-action** | 3-way `copy_to_user` fallback vs KP 4-way — different fallback axis; GKI resolves `_copy_to_user` directly | 68e39fd |
+| 4.1 | `src/platform/syscall.c` | **must-fix** | `regs.syscallno` not set in `kh_raw_syscallN` — active callers in test suite; fixed: added `regs.syscallno = (int32_t)nr;` in all 7 wrappers | (this task) |
+| 4.2 | `src/platform/syscall.c` | **no-action** | 64-bit only, no compat/AArch32 — deliberate deviation documented in file header; GKI targets are LP64-only | — |
+| 4.3 | `src/platform/syscall.c` | **no-action** | `kh_zero_regs` pre-zeros frame — strictly safer than KP; cost negligible | — |
+| 4.4 | `src/platform/syscall.c` | **no-action** | Name-table caching monotonic — matches KP exactly; stable kernel-lifetime symbol addresses | — |
+| 4.5 | `src/platform/syscall.c` | **no-action** | `kh_sys_call_table` diagnostic-only; inline hook path only — GKI kCFI + `__ro_after_init` make fp-hook path broken; documented in CLAUDE.md | — |
 
 (rows appended as audit tasks fill the sections above)
 

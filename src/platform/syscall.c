@@ -486,6 +486,7 @@ long kh_raw_syscall0(long nr)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         return ((kh_wrap_raw_t)addr)(&regs);
     }
     return ((kh_raw0_t)addr)();
@@ -500,6 +501,7 @@ long kh_raw_syscall1(long nr, long a0)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         return ((kh_wrap_raw_t)addr)(&regs);
     }
@@ -515,6 +517,7 @@ long kh_raw_syscall2(long nr, long a0, long a1)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         regs.regs[1] = a1;
         return ((kh_wrap_raw_t)addr)(&regs);
@@ -531,6 +534,7 @@ long kh_raw_syscall3(long nr, long a0, long a1, long a2)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         regs.regs[1] = a1;
         regs.regs[2] = a2;
@@ -548,6 +552,7 @@ long kh_raw_syscall4(long nr, long a0, long a1, long a2, long a3)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         regs.regs[1] = a1;
         regs.regs[2] = a2;
@@ -566,6 +571,7 @@ long kh_raw_syscall5(long nr, long a0, long a1, long a2, long a3, long a4)
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         regs.regs[1] = a1;
         regs.regs[2] = a2;
@@ -586,6 +592,7 @@ long kh_raw_syscall6(long nr, long a0, long a1, long a2, long a3,
         KH_PT_REGS regs;
         kh_zero_regs(&regs);
         KH_SYS_NR_FIELD(regs, nr);
+        regs.syscallno = (int32_t)nr;   /* match KP raw_syscallN */
         regs.regs[0] = a0;
         regs.regs[1] = a1;
         regs.regs[2] = a2;
