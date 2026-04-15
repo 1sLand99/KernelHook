@@ -125,6 +125,109 @@ void *fp_get_origin_func(void *hook_args);
 
 类型安全的便捷封装，与 `hook_wrapN` 用法类似。
 
+## 系统调用 Hook
+
+头文件：`<syscall.h>`
+
+基于 `hook_wrap` / `fp_hook_wrap` 的高层 API，按系统调用号定位入口。自动检测 ARM64 `pt_regs` 包装器 ABI（内核 ≥ 4.17），定位到 `__arm64_sys_<name>`。
+
+**设计说明**：GKI ≥ 5.10 内核的 `sys_call_table` 是 `__ro_after_init`，并且 kCFI 校验通过它的间接调用 —— 双重封锁。`kh_hook_syscalln` 特意总是走 inline hook 直接 hook `__arm64_sys_<name>`。`kh_sys_call_table` 只作诊断/发现用途保留。
+
+### `kh_syscall_init`
+
+```c
+int kh_syscall_init(void);
+```
+
+通过 kallsyms 解析 `sys_call_table`（诊断用）并检测包装器 ABI。在子系统初始化阶段调用。成功返回 0。
+
+### `kh_hook_syscalln`
+
+```c
+hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after, void *udata);
+```
+
+在系统调用号 `nr` 上安装 hook。`narg` 是目标系统调用的逻辑参数数（例如 `__NR_execve` 为 3）。在包装器内核上物理回调仍然收到 `fargs->arg0` 中的 `pt_regs *`；用 `kh_syscall_argn_p` 访问第 N 个系统调用参数即可屏蔽 ABI 差异。
+
+### `kh_unhook_syscalln`
+
+```c
+void kh_unhook_syscalln(int nr, void *before, void *after);
+```
+
+对称移除。**必须**在模块退出时调用，避免 inline-hook 跳板指向已释放的模块 text。
+
+### `kh_syscall_argn_p`
+
+```c
+#define kh_syscall_argn_p(args, N) /* ... */
+```
+
+宏。返回指向第 N 个系统调用参数的 `void *`（包装器 ABI 下指向 `pt_regs->regs[N]`，直调 ABI 下指向 `&args->argN`）。可写 —— 在此改写参数在内核继续 syscall 入口处理之前生效。
+
+### `kh_raw_syscall0` ... `kh_raw_syscall6`
+
+```c
+long kh_raw_syscall0(long nr);
+long kh_raw_syscall1(long nr, long a0);
+/* ... 直到 kh_raw_syscall6 ... */
+```
+
+从内核上下文发起系统调用。处理包装器 ABI（合成伪 `pt_regs`）。用于模块内部触发已挂载的 syscall hook 做测试 / 探测。
+
+### 全局变量
+
+```c
+extern uintptr_t *kh_sys_call_table;    /* kallsyms 解析，诊断用 */
+extern int        kh_has_syscall_wrapper; /* 内核 ≥ 4.17 含 pt_regs 包装时为 1 */
+```
+
+## 用户指针辅助
+
+头文件：`<uaccess.h>`
+
+面向 syscall hook 的最小工具集，读取 / 改写 userspace 字符串（比如 `execve` 的 filename）。使用前需调用 `kh_uaccess_init()`。
+
+### `kh_uaccess_init`
+
+```c
+int kh_uaccess_init(void);
+```
+
+通过 kallsyms 解析 `strncpy_from_user` / `copy_to_user`，并扫描 `init_task` 探测 `task_struct.cred` 偏移。成功返回 0。探测失败时 `kh_current_uid()` 返回 0（安全默认值）。
+
+### `kh_strncpy_from_user`
+
+```c
+long kh_strncpy_from_user(char *dest, const void __user *src, long count);
+```
+
+从 userspace 拷贝以 NUL 结尾的字符串。成功时返回拷贝字节数（含终止符），错误时 <0。`dest` 成功时总是 NUL 终止。
+
+### `kh_copy_to_user`
+
+```c
+int kh_copy_to_user(void __user *to, const void *from, int n);
+```
+
+从内核向用户态拷贝 `n` 字节。返回未拷贝的字节数（内核惯例：0 = 完全成功）。
+
+### `kh_copy_to_user_stack`
+
+```c
+void __user *kh_copy_to_user_stack(const void *data, int len);
+```
+
+把 `data`（长 `len` 字节）写入当前任务的用户栈 `SP - aligned(len)` 位置，返回对应的用户指针。调用方必须运行在 `current` 具有有效用户 mm 的进程上下文（syscall hook 满足）。是改写 `execve` 类 syscall 参数的关键原语。
+
+### `kh_current_uid`
+
+```c
+uid_t kh_current_uid(void);
+```
+
+通过探测到的 `task_struct` 偏移读取 `current->cred->uid`。探测失败时返回 0（安全默认 —— 调用方把"未知"当作非特权对待仍然正确）。
+
 ## 符号解析
 
 头文件：`<symbol.h>`

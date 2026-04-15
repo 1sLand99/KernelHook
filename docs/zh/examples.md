@@ -10,6 +10,12 @@
 | [hook_wrap_args](../../examples/hook_wrap_args/) | 查看参数、覆盖返回值 | `hook_wrap4`、`fargs->ret` |
 | [ksyms_lookup](../../examples/ksyms_lookup/) | 运行时内核符号解析 | `ksyms_lookup` |
 
+**主打 demo（在测试套件里，不在 `examples/`）：**
+
+| Demo | 描述 | 文档 |
+|------|------|------|
+| **kh_root** | 通过 3 个 syscall hook 实现提权 —— 任何调 `/system/bin/kh_root` 的进程都获得 uid=0 | [kh-root-demo.md](kh-root-demo.md) |
+
 ## hello_hook
 
 Hook `do_sys_openat2`（旧内核上为 `do_sys_open`），记录每次 `open()` 系统调用的文件名指针。

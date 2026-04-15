@@ -125,6 +125,109 @@ Get the original function pointer from within an FP hook callback.
 
 Type-safe convenience wrappers, analogous to `hook_wrapN`.
 
+## Syscall Hooks
+
+Header: `<syscall.h>`
+
+Higher-level API over `hook_wrap` / `fp_hook_wrap` that targets Linux syscall entry points by syscall number. Automatically detects the ARM64 `pt_regs` syscall-wrapper ABI (kernel ≥ 4.17) and routes to the correct entry (`__arm64_sys_<name>`).
+
+**Design note:** on GKI ≥ 5.10 kernels the `sys_call_table` is `__ro_after_init` AND kCFI validates indirect calls through it, so writing to a table slot is doubly blocked. `kh_hook_syscalln` deliberately always uses an inline hook on `__arm64_sys_<name>` instead. `kh_sys_call_table` is exported only for discovery / diagnostic use.
+
+### `kh_syscall_init`
+
+```c
+int kh_syscall_init(void);
+```
+
+Resolve `sys_call_table` (for discovery) and detect wrapper ABI. Called from subsystem init. Returns 0 on success.
+
+### `kh_hook_syscalln`
+
+```c
+hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after, void *udata);
+```
+
+Install a hook on syscall number `nr`. `narg` is the logical argument count of the target syscall (e.g. `__NR_execve` has 3 args). On wrapper kernels the physical callback still receives a `pt_regs *` in `fargs->arg0`; use `kh_syscall_argn_p` to reach the Nth syscall arg regardless of ABI.
+
+### `kh_unhook_syscalln`
+
+```c
+void kh_unhook_syscalln(int nr, void *before, void *after);
+```
+
+Symmetric removal. Call from module exit to avoid inline-hook trampolines pointing into freed module text.
+
+### `kh_syscall_argn_p`
+
+```c
+#define kh_syscall_argn_p(args, N) /* ... */
+```
+
+Macro. Returns `void *` pointing to syscall arg N inside `pt_regs->regs[N]` (wrapper ABI) or `&args->argN` (direct ABI). Writable — rewriting the arg here takes effect before the kernel's syscall entry continues.
+
+### `kh_raw_syscall0` ... `kh_raw_syscall6`
+
+```c
+long kh_raw_syscall0(long nr);
+long kh_raw_syscall1(long nr, long a0);
+/* ... up to kh_raw_syscall6 ... */
+```
+
+Invoke a syscall from kernel context. Handles wrapper ABI (synthesizes a fake `pt_regs`). Useful for triggering hooked syscalls from within the module for test / probe purposes.
+
+### Globals
+
+```c
+extern uintptr_t *kh_sys_call_table;    /* kallsyms-resolved, diagnostic only */
+extern int        kh_has_syscall_wrapper; /* 1 on kernels ≥ 4.17 with pt_regs wrapper */
+```
+
+## User Pointer Helpers
+
+Header: `<uaccess.h>`
+
+Minimal wrappers for syscall hooks that need to read or rewrite user-space strings (e.g., filenames passed to `execve`). Required to be initialized via `kh_uaccess_init()` before use.
+
+### `kh_uaccess_init`
+
+```c
+int kh_uaccess_init(void);
+```
+
+Resolve `strncpy_from_user` / `copy_to_user` via kallsyms and probe `task_struct.cred` offset by scanning `init_task`. Returns 0 on success. `kh_current_uid()` returns 0 if probing failed (safe default).
+
+### `kh_strncpy_from_user`
+
+```c
+long kh_strncpy_from_user(char *dest, const void __user *src, long count);
+```
+
+Copy NUL-terminated string from user-space. Returns bytes copied including terminator, or <0 on error. `dest` is always NUL-terminated on success.
+
+### `kh_copy_to_user`
+
+```c
+int kh_copy_to_user(void __user *to, const void *from, int n);
+```
+
+Copy `n` bytes from kernel to user. Returns bytes NOT copied (kernel convention: 0 = full success).
+
+### `kh_copy_to_user_stack`
+
+```c
+void __user *kh_copy_to_user_stack(const void *data, int len);
+```
+
+Write `data` (len bytes) onto current task's user stack at `SP - aligned(len)`. Returns the resulting user pointer. Caller must run in a process context where `current` has a valid user mm (syscall hooks satisfy this). Key primitive for rewriting `execve`-class syscall arguments.
+
+### `kh_current_uid`
+
+```c
+uid_t kh_current_uid(void);
+```
+
+Read `current->cred->uid` via probed `task_struct` offsets. Returns 0 if probe failed (safe default — callers treating "unknown" as non-privileged stay correct).
+
 ## Symbol Resolution
 
 Header: `<symbol.h>`

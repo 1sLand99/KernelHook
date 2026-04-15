@@ -14,9 +14,13 @@ ARM64 function hooking framework for Linux kernels.
 - **Inline hook** -- replace any kernel function, call original via backup pointer
 - **Hook chain** -- multiple before/after callbacks on one function, priority-ordered
 - **Function pointer hook** -- hook ops table callbacks with chain support
+- **Syscall-level hook** -- `kh_hook_syscalln(nr, ...)` over `__arm64_sys_<name>`, handles pt_regs wrapper ABI; [user-pointer helpers](docs/en/api-reference.md#user-pointer-helpers) (`kh_strncpy_from_user`, `kh_copy_to_user_stack`) for rewriting syscall arguments
+- **Alias-page write path** -- primary text-patch mechanism via vmalloc alias + `aarch64_insn_patch_text_nosync` (KernelPatch-style), bypasses `__ro_after_init` + kCFI; PTE-direct fallback
+- **RCU-safe dispatch** -- transit_body snapshots chain state onto stack before origin call; validated under 27.8M syscalls × 67K add/remove races in 3s
 - **Symbol resolution** -- `ksyms_lookup` for runtime symbol lookup
 - **Three build modes** -- Freestanding (no kernel headers), SDK (shared kernelhook.ko), Kbuild (standard)
 - **Adaptive loader** -- `kmod_loader` patches .ko binaries for cross-kernel loading
+- **Featured demo** -- [`kh_root`](docs/en/kh-root-demo.md): full privilege-escalation via 3 syscall hooks (~350 LOC)
 
 ## Quick Start
 
@@ -44,14 +48,17 @@ adb shell dmesg | grep hello_hook
 
 | Component | Description |
 |-----------|-------------|
-| `src/arch/arm64/inline.c` | Instruction relocation engine + code patching |
-| `src/arch/arm64/transit.c` | Transit stub + callback dispatch |
-| `src/arch/arm64/pgtable.c` | Page table walking + PTE modification |
-| `src/hook.c` | Hook chain API (hook/unhook/hook_wrap) |
+| `src/arch/arm64/inline.c` | Instruction relocation + alias-page & PTE-direct write paths |
+| `src/arch/arm64/transit.c` | Transit stub + RCU-snapshot callback dispatch |
+| `src/arch/arm64/pgtable.c` | Page table walking + TLB flush (vaale1is) |
+| `src/platform/syscall.c` | Syscall-level hook infrastructure (`kh_hook_syscalln`, `kh_raw_syscallN`) |
+| `src/uaccess.c` | User pointer helpers (strncpy_from_user / copy_to_user / stack) |
+| `src/hook.c` | Hook chain API (hook/unhook/hook_wrap/fp_hook_wrap) |
 | `src/memory.c` | Bitmap allocator for ROX/RW memory pools |
 | `kmod/` | SDK, linker scripts, shim headers |
 | `tools/kmod_loader/` | Adaptive module loader |
 | `examples/` | hello_hook, fp_hook, hook_chain, hook_wrap_args, ksyms_lookup |
+| `tests/kmod/test_phase6_kh_root.c` | Featured kh_root demo (see [docs](docs/en/kh-root-demo.md)) |
 
 ## Kernel Compatibility
 
@@ -75,7 +82,8 @@ The `kmod_loader` auto-detects the correct layout by introspecting vendor `.ko` 
 
 - [Getting Started](docs/en/getting-started.md)
 - [Build Modes](docs/en/build-modes.md)
-- [API Reference](docs/en/api-reference.md)
+- [API Reference](docs/en/api-reference.md) — includes syscall hooks + user-pointer helpers
+- [kh_root Demo](docs/en/kh-root-demo.md) — featured privilege-escalation demo
 - [kmod_loader](docs/en/kmod-loader.md)
 - [AVD Testing](docs/en/avd-testing.md)
 - [Examples](docs/en/examples.md)

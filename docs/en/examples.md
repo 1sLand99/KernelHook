@@ -10,6 +10,12 @@
 | [hook_wrap_args](../../examples/hook_wrap_args/) | Inspect args, override return value | `hook_wrap4`, `fargs->ret` |
 | [ksyms_lookup](../../examples/ksyms_lookup/) | Runtime kernel symbol resolution | `ksyms_lookup` |
 
+**Featured demo (in test suite, not `examples/`):**
+
+| Demo | Description | Docs |
+|------|-------------|------|
+| **kh_root** | Privilege escalation via 3 syscall hooks — any caller of `/system/bin/kh_root` gets uid=0 | [kh-root-demo.md](kh-root-demo.md) |
+
 ## hello_hook
 
 Hooks `do_sys_openat2` (or `do_sys_open` on older kernels) and logs the filename pointer for every `open()` syscall.
