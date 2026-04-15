@@ -67,26 +67,26 @@ assert_symbol() {
 assert_section exporter.ko __ksymtab
 assert_section exporter.ko __ksymtab_strings
 assert_section exporter.ko __kcrctab
-assert_symbol  exporter.ko __ksymtab_hook_wrap
-assert_symbol  exporter.ko __crc_hook_wrap
-assert_symbol  exporter.ko hook_wrap
+assert_symbol  exporter.ko __ksymtab_kh_hook_wrap
+assert_symbol  exporter.ko __crc_kh_hook_wrap
+assert_symbol  exporter.ko kh_hook_wrap
 
 # Importer assertions
 assert_section importer.ko __versions
 assert_symbol  importer.ko ksyms_lookup
-assert_symbol  importer.ko hook_wrap
+assert_symbol  importer.ko kh_hook_wrap
 
-# Importer __versions must reference hook_wrap.
+# Importer __versions must reference kh_hook_wrap.
 # Extract raw bytes of the __versions section and grep for the symbol name.
 if "$OBJDUMP" -s -j __versions importer.ko 2>/dev/null \
         | awk '/Contents of section __versions/ {in_sec=1; next}
                in_sec && /^ [0-9a-f]/ {for(i=2;i<=5;i++) printf "%s", $i; print ""}' \
         | xxd -r -p 2>/dev/null | LC_ALL=C tr -c '[:print:]' '\n' \
-        | grep -q "^hook_wrap$"; then
-    echo "PASS importer.ko __versions references hook_wrap"
+        | grep -q "^kh_hook_wrap$"; then
+    echo "PASS importer.ko __versions references kh_hook_wrap"
     pass=$((pass+1))
 else
-    echo "FAIL importer.ko __versions does not reference hook_wrap"
+    echo "FAIL importer.ko __versions does not reference kh_hook_wrap"
     fail=$((fail+1))
 fi
 
