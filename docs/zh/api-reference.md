@@ -2,6 +2,23 @@
 
 头文件：`<hook.h>`、`<symbol.h>`
 
+## 使用方式
+
+KernelHook 公共 API 有三种使用方式：
+
+1. **SDK（推荐）** —— 在目标设备上加载 `kernelhook.ko`，然后加载你自己的
+   消费者 `.ko`（通过 `KH_DECLARE_VERSIONS()` 引用 API 符号）。内核通过
+   `kernelhook.ko` 导出的 ksymtab/kcrctab 解析这些符号。
+   *本仓库所有示例的默认方式。*
+2. **Freestanding 回退** —— 将核心库直接链接进你的 `.ko`。当目标机器没有
+   `kernelhook.ko` 时使用（headerless 或受限内核）。如果
+   [`docs/zh/freestanding.md`](freestanding.md) 存在可参考该文档；
+   否则参考 `examples/<name>/Makefile.freestanding`。
+3. **Kbuild 独立构建** —— 基于完整内核源码的 out-of-tree 构建。见
+   [`examples/kbuild_hello/`](../../examples/kbuild_hello/)。
+
+三种模式的符号可用性完全一致；只是链接路径不同。
+
 ## 内联 Hook
 
 ### `hook`

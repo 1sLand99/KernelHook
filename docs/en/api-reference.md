@@ -2,6 +2,24 @@
 
 Header: `<hook.h>`, `<symbol.h>`
 
+## Consumption
+
+The KernelHook public API is consumed in one of three ways:
+
+1. **SDK (recommended)** — load `kernelhook.ko` on the target device,
+   then load your consumer `.ko` (which references API symbols via
+   `KH_DECLARE_VERSIONS()`). The kernel resolves them through the
+   ksymtab/kcrctab that `kernelhook.ko` exports.
+   *Default for all examples in this repo.*
+2. **Freestanding fallback** — link the core library directly into your
+   `.ko`. Used when the target has no `kernelhook.ko` (headerless or
+   locked-down kernels). See [`docs/en/freestanding.md`](freestanding.md)
+   if it exists; otherwise reference `examples/<name>/Makefile.freestanding`.
+3. **Kbuild standalone** — full kernel-source out-of-tree build. See
+   [`examples/kbuild_hello/`](../../examples/kbuild_hello/).
+
+Symbol availability is identical across modes; only the link path differs.
+
 ## Inline Hook
 
 ### `hook`
