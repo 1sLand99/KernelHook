@@ -17,6 +17,7 @@
 
 #include <types.h>
 #include <hook.h>
+#include <kernelhook/module.h>
 #include <symbol.h>
 
 #endif
