@@ -12,8 +12,14 @@
  *     (kh_has_syscall_wrapper).
  *   - Per-syscall entry resolution via a name table + ksyms probe
  *     (kh_syscalln_name_addr / kh_syscalln_addr).
- *   - `kh_hook_syscalln` / `kh_unhook_syscalln`: prefer fp-hook on the
- *     sys_call_table slot, fall back to inline hook on the entry.
+ *   - `kh_hook_syscalln` / `kh_unhook_syscalln`: always inline-hook
+ *     __arm64_sys_<name> (via kh_syscalln_name_addr). The sys_call_table
+ *     fp-hook path is deliberately NOT used — on GKI ≥ 5.10 kernels
+ *     `sys_call_table` is __ro_after_init, and even after clearing RO,
+ *     kCFI in invoke_syscall() rejects the fp-hook trampoline (type
+ *     hash mismatch). kh_sys_call_table is resolved only for discovery/
+ *     diagnostic purposes (callers may find syscall implementation
+ *     addresses through it).
  *   - `kh_raw_syscallN`: in-kernel syscall invocation (wrapper-aware).
  */
 
@@ -597,15 +603,9 @@ __attribute__((no_sanitize("kcfi")))
 hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after,
                             void *udata)
 {
+    /* Always use inline hook on __arm64_sys_<name>. See file header
+     * comment for why sys_call_table fp-hook is deliberately avoided. */
     int phys_narg = kh_has_syscall_wrapper ? 1 : narg;
-
-    if (kh_sys_call_table) {
-        if (nr < 0 || nr >= KH_SYSCALL_NAME_TABLE_SIZE)
-            return HOOK_BAD_ADDRESS;
-        uintptr_t fp_addr = (uintptr_t)(kh_sys_call_table + nr);
-        return fp_hook_wrap(fp_addr, phys_narg, before, after, udata, 0);
-    }
-
     uintptr_t addr = kh_syscalln_name_addr(nr);
     if (!addr)
         return HOOK_BAD_ADDRESS;
@@ -615,14 +615,6 @@ hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after,
 __attribute__((no_sanitize("kcfi")))
 void kh_unhook_syscalln(int nr, void *before, void *after)
 {
-    if (kh_sys_call_table) {
-        if (nr < 0 || nr >= KH_SYSCALL_NAME_TABLE_SIZE)
-            return;
-        uintptr_t fp_addr = (uintptr_t)(kh_sys_call_table + nr);
-        fp_hook_unwrap(fp_addr, before, after);
-        return;
-    }
-
     uintptr_t addr = kh_syscalln_name_addr(nr);
     if (addr)
         hook_unwrap((void *)addr, before, after);
@@ -642,9 +634,11 @@ int kh_syscall_init(void)
             (unsigned long long)(uintptr_t)kh_sys_call_table,
             kh_has_syscall_wrapper);
 
-    if (!kh_sys_call_table) {
-        pr_warn("syscall_init: sys_call_table not resolved — "
-                "kh_hook_syscalln will fall back to inline hooks");
-    }
+    /* sys_call_table absence is harmless — kh_hook_syscalln uses inline
+     * hooks on __arm64_sys_<name> via kh_syscalln_name_addr regardless.
+     * The kh_sys_call_table global is kept only for diagnostic /
+     * discovery use by callers that want the raw syscall entry table. */
+    if (!kh_sys_call_table)
+        pr_info("syscall_init: sys_call_table not resolved (non-fatal)");
     return 0;
 }
