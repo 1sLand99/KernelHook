@@ -4,10 +4,10 @@
 
 | Example | Description | Key API |
 |---------|-------------|---------|
-| [hello_hook](../../examples/hello_hook/) | Hook `do_sys_openat2`, log filename | `hook_wrap4`, `hook_unwrap` |
-| [fp_hook](../../examples/fp_hook/) | Hook function pointer in struct | `fp_hook`, `fp_unhook` |
-| [hook_chain](../../examples/hook_chain/) | Multiple callbacks with priority | `hook_wrap` with priority |
-| [hook_wrap_args](../../examples/hook_wrap_args/) | Inspect args, override return value | `hook_wrap4`, `fargs->ret` |
+| [hello_hook](../../examples/hello_hook/) | Hook `do_sys_openat2`, log filename | `kh_hook_wrap4`, `kh_hook_unwrap` |
+| [kh_fp_hook](../../examples/kh_fp_hook/) | Hook function pointer in struct | `kh_fp_hook`, `kh_fp_unhook` |
+| [hook_chain](../../examples/hook_chain/) | Multiple callbacks with priority | `kh_hook_wrap` with priority |
+| [hook_wrap_args](../../examples/hook_wrap_args/) | Inspect args, override return value | `kh_hook_wrap4`, `fargs->ret` |
 | [ksyms_lookup](../../examples/ksyms_lookup/) | Runtime kernel symbol resolution | `ksyms_lookup` |
 
 **Featured demo (in test suite, not `examples/`):**
@@ -22,7 +22,7 @@
 |-----------------|-------------------------------|-------|
 | hello_hook      | `make module`                 | SDK   |
 | hook_chain      | `make module`                 | SDK   |
-| fp_hook         | `make module`                 | SDK   |
+| kh_fp_hook         | `make module`                 | SDK   |
 | hook_wrap_args  | `make module`                 | SDK   |
 | ksyms_lookup    | `make module`                 | SDK   |
 | kbuild_hello    | `make -C /path/to/kernel M=…` | kbuild |
@@ -32,7 +32,7 @@
 Hooks `do_sys_openat2` (or `do_sys_open` on older kernels) and logs the filename pointer for every `open()` syscall.
 
 ```c
-static void open_before(hook_fargs4_t *fargs, void *udata)
+static void open_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     const char *filename = (const char *)fargs->arg1;
     pr_info("hello_hook: open called, filename ptr=%llx",
@@ -40,10 +40,10 @@ static void open_before(hook_fargs4_t *fargs, void *udata)
 }
 
 /* In init: */
-hook_err_t err = hook_wrap4(target, open_before, NULL, NULL);
+kh_hook_err_t err = kh_hook_wrap4(target, open_before, NULL, NULL);
 
 /* In exit: */
-hook_unwrap(hooked_func, open_before, NULL);
+kh_hook_unwrap(hooked_func, open_before, NULL);
 ```
 
 **Expected dmesg:**
@@ -52,26 +52,26 @@ hello_hook: hooked do_sys_open* at ffffffc0xxxxxxxx
 hello_hook: open called, filename ptr=7fxxxxxxxx
 ```
 
-## fp_hook
+## kh_fp_hook
 
-Hooks a function pointer in a struct. Demonstrates `fp_hook` / `fp_unhook` with a backup pointer for calling the original.
+Hooks a function pointer in a struct. Demonstrates `kh_fp_hook` / `kh_fp_unhook` with a backup pointer for calling the original.
 
 ```c
 struct demo_ops { int (*callback)(int x, int y); };
 
-fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
+kh_fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
 /* Now ops.callback(3, 4) calls replacement_callback */
 
-fp_unhook((uintptr_t)&ops.callback, backup_func);
+kh_fp_unhook((uintptr_t)&ops.callback, backup_func);
 /* ops.callback is restored to original_callback */
 ```
 
 **Expected dmesg:**
 ```
-fp_hook: before hook: ops.callback(3,4) = 7
-fp_hook: replacement called with x=3 y=4
-fp_hook: original returned 7, we return 12
-fp_hook: after hook: ops.callback(3,4) = 12
+kh_fp_hook: before kh_hook: ops.callback(3,4) = 7
+kh_fp_hook: replacement called with x=3 y=4
+kh_fp_hook: original returned 7, we return 12
+kh_fp_hook: after kh_hook: ops.callback(3,4) = 12
 ```
 
 ## hook_chain
@@ -79,9 +79,9 @@ fp_hook: after hook: ops.callback(3,4) = 12
 Registers three before-callbacks on the same function with different priorities (0, 50, 100). Demonstrates that priority controls execution order, not registration order.
 
 ```c
-hook_wrap(target, 4, (void *)before_medium, NULL, NULL, 50);
-hook_wrap(target, 4, (void *)before_low,    (void *)after_cb, NULL, 100);
-hook_wrap(target, 4, (void *)before_high,   NULL, NULL, 0);
+kh_hook_wrap(target, 4, (void *)before_medium, NULL, NULL, 50);
+kh_hook_wrap(target, 4, (void *)before_low,    (void *)after_cb, NULL, 100);
+kh_hook_wrap(target, 4, (void *)before_high,   NULL, NULL, 0);
 /* Execution order: high(0) -> medium(50) -> low(100) -> original -> after */
 ```
 
@@ -98,13 +98,13 @@ hook_chain: after callback, ret=...
 Hooks `do_sys_openat2` with both before and after callbacks. The before callback inspects all arguments; the after callback reads and overrides the return value.
 
 ```c
-static void openat2_before(hook_fargs4_t *fargs, void *udata)
+static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     pr_info("BEFORE arg0(dfd)=%lld arg1(filename)=%llx",
           (long long)fargs->arg0, (unsigned long long)fargs->arg1);
 }
 
-static void openat2_after(hook_fargs4_t *fargs, void *udata)
+static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
     pr_info("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
     fargs->ret = 0;
@@ -119,7 +119,7 @@ hook_wrap_args: AFTER original ret=..., overriding with 0
 
 ## ksyms_lookup
 
-Demonstrates `ksyms_lookup()` for runtime kernel symbol resolution. Does not require `hook_mem_init` or `pgtable_init`.
+Demonstrates `ksyms_lookup()` for runtime kernel symbol resolution. Does not require `kh_mem_init` or `pgtable_init`.
 
 ```c
 uint64_t addr = ksyms_lookup("vfs_read");

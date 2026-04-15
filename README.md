@@ -11,10 +11,10 @@ ARM64 function hooking framework for Linux kernels.
 
 ## Features
 
-- **Inline hook** -- replace any kernel function, call original via backup pointer
+- **Inline kh_hook** -- replace any kernel function, call original via backup pointer
 - **Hook chain** -- multiple before/after callbacks on one function, priority-ordered
-- **Function pointer hook** -- hook ops table callbacks with chain support
-- **Syscall-level hook** -- `kh_hook_syscalln(nr, ...)` over `__arm64_sys_<name>`, handles pt_regs wrapper ABI; [user-pointer helpers](docs/en/api-reference.md#user-pointer-helpers) (`kh_strncpy_from_user`, `kh_copy_to_user_stack`) for rewriting syscall arguments
+- **Function pointer kh_hook** -- kh_hook ops table callbacks with chain support
+- **Syscall-level kh_hook** -- `kh_hook_syscalln(nr, ...)` over `__arm64_sys_<name>`, handles pt_regs wrapper ABI; [user-pointer helpers](docs/en/api-reference.md#user-pointer-helpers) (`kh_strncpy_from_user`, `kh_copy_to_user_stack`) for rewriting syscall arguments
 - **Alias-page write path** -- primary text-patch mechanism via vmalloc alias + `aarch64_insn_patch_text_nosync` (KernelPatch-style), bypasses `__ro_after_init` + kCFI; PTE-direct fallback
 - **RCU-safe dispatch** -- transit_body snapshots chain state onto stack before origin call; validated under 27.8M syscalls × 67K add/remove races in 3s
 - **Symbol resolution** -- `ksyms_lookup` for runtime symbol lookup
@@ -51,9 +51,9 @@ adb shell su -c 'dmesg | tail -20'
 | `src/arch/arm64/inline.c` | Instruction relocation + alias-page & PTE-direct write paths |
 | `src/arch/arm64/transit.c` | Transit stub + RCU-snapshot callback dispatch |
 | `src/arch/arm64/pgtable.c` | Page table walking + TLB flush (vaale1is) |
-| `src/platform/syscall.c` | Syscall-level hook infrastructure (`kh_hook_syscalln`, `kh_raw_syscallN`) |
+| `src/platform/syscall.c` | Syscall-level kh_hook infrastructure (`kh_hook_syscalln`, `kh_raw_syscallN`) |
 | `src/uaccess.c` | User pointer helpers (strncpy_from_user / copy_to_user / stack) |
-| `src/hook.c` | Hook chain API (hook/unhook/hook_wrap/fp_hook_wrap) |
+| `src/kh_hook.c` | Hook chain API (kh_hook/kh_unhook/kh_hook_wrap/kh_fp_hook_wrap) |
 | `src/memory.c` | Bitmap allocator for ROX/RW memory pools |
 | `kmod/` | SDK, linker scripts, shim headers |
 | `tools/kmod_loader/` | Adaptive module loader |

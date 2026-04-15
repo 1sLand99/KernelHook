@@ -15,7 +15,7 @@ KernelHook 为内核模块提供三种构建模式，根据实际需求选择。
 
 ## 模式 A -- Freestanding
 
-无需内核头文件。使用 `shim.h` 作为最小化的内核头文件替代。核心 hook 库直接编译进你的 `.ko` 中。
+无需内核头文件。使用 `shim.h` 作为最小化的内核头文件替代。核心 kh_hook 库直接编译进你的 `.ko` 中。
 
 ### 构建
 
@@ -40,7 +40,7 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 ```c
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -69,7 +69,7 @@ static int __init my_hook_init(void)
     extern void kh_write_insts_init(void);
     kh_write_insts_init();                   /* 代码修补 */
 
-    /* ... 安装 hook ... */
+    /* ... 安装 kh_hook ... */
     return 0;
 }
 ```
@@ -107,7 +107,7 @@ include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
 ### 源码 include
 
 ```c
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #include <kernelhook/kh_symvers.h>   /* 自动生成，提供 KH_DECLARE_VERSIONS() */
 ```
@@ -119,7 +119,7 @@ include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
 
 ```c
 MODULE_VERSIONS();       /* 内核符号 (module_layout / _printk / memcpy / memset) */
-KH_DECLARE_VERSIONS();   /* KernelHook 导出符号 (hook_wrap / ksyms_lookup / ...) */
+KH_DECLARE_VERSIONS();   /* KernelHook 导出符号 (kh_hook_wrap / ksyms_lookup / ...) */
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 ```
@@ -137,7 +137,7 @@ CRC 按契约 4（Contract 4）冻结，`kernelhook.ko` 升级不会破坏已编
 static int __init my_hook_init(void)
 {
     void *target = (void *)ksyms_lookup("do_sys_openat2");
-    hook_err_t err = hook_wrap4(target, my_before, my_after, NULL);
+    kh_hook_err_t err = kh_hook_wrap4(target, my_before, my_after, NULL);
     /* ... */
     return 0;
 }

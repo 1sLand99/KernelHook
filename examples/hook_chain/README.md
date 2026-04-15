@@ -6,8 +6,8 @@ Register multiple before/after callbacks on `do_sys_openat2` with different prio
 
 ## API
 
-- `hook_wrap` with `priority` parameter -- lower number = higher priority = runs first
-- `hook_unwrap` -- remove each callback pair individually
+- `kh_hook_wrap` with `priority` parameter -- lower number = higher priority = runs first
+- `kh_hook_unwrap` -- remove each callback pair individually
 
 ## Build (SDK mode — default)
 

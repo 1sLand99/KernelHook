@@ -1,6 +1,6 @@
 # API Reference
 
-Header: `<hook.h>`, `<symbol.h>`
+Header: `<kh_hook.h>`, `<symbol.h>`
 
 ## Consumption
 
@@ -22,10 +22,10 @@ Symbol availability is identical across modes; only the link path differs.
 
 ## Inline Hook
 
-### `hook`
+### `kh_hook`
 
 ```c
-hook_err_t hook(void *func, void *replace, void **backup);
+kh_hook_err_t kh_hook(void *func, void *replace, void **backup);
 ```
 
 Replace `func` with `replace`. The original entry point (relocated instructions) is stored in `*backup` for calling the original function.
@@ -36,22 +36,22 @@ Replace `func` with `replace`. The original entry point (relocated instructions)
 
 Returns `HOOK_NO_ERR` on success.
 
-### `unhook`
+### `kh_unhook`
 
 ```c
-void unhook(void *func);
+void kh_unhook(void *func);
 ```
 
-Remove a raw inline hook installed by `hook()`. Restores the original instructions at `func`.
+Remove a raw inline kh_hook installed by `kh_hook()`. Restores the original instructions at `func`.
 
 ## Hook Chain (Wrap API)
 
 The wrap API supports multiple before/after callbacks on the same function, ordered by priority. Lower priority number = higher priority = runs first.
 
-### `hook_wrap`
+### `kh_hook_wrap`
 
 ```c
-hook_err_t hook_wrap(void *func, int32_t argno, void *before, void *after,
+kh_hook_err_t kh_hook_wrap(void *func, int32_t argno, void *before, void *after,
                      void *udata, int32_t priority);
 ```
 
@@ -64,26 +64,26 @@ Register a before/after callback pair on `func`.
 - `udata` -- user data passed to callbacks
 - `priority` -- execution order (lower = first, 0 = highest)
 
-Multiple calls to `hook_wrap` on the same `func` add callbacks to the chain (up to `HOOK_CHAIN_NUM` = 8).
+Multiple calls to `kh_hook_wrap` on the same `func` add callbacks to the chain (up to `HOOK_CHAIN_NUM` = 8).
 
-### `hook_wrap0` ... `hook_wrap12`
+### `kh_hook_wrap0` ... `kh_hook_wrap12`
 
 ```c
-static inline hook_err_t hook_wrap4(void *func,
-    hook_chain4_callback before,
-    hook_chain4_callback after,
+static inline kh_hook_err_t kh_hook_wrap4(void *func,
+    kh_hook_chain4_callback before,
+    kh_hook_chain4_callback after,
     void *udata);
 ```
 
 Type-safe convenience wrappers. Priority defaults to 0. The number suffix determines the `hook_fargsN_t` type used in callbacks.
 
-### `hook_unwrap`
+### `kh_hook_unwrap`
 
 ```c
-void hook_unwrap(void *func, void *before, void *after);
+void kh_hook_unwrap(void *func, void *before, void *after);
 ```
 
-Remove a specific before/after callback pair from the chain. If the chain becomes empty, the hook is fully removed.
+Remove a specific before/after callback pair from the chain. If the chain becomes empty, the kh_hook is fully removed.
 
 ### `wrap_get_origin_func`
 
@@ -97,39 +97,39 @@ Get the relocated original function pointer from within a callback. Cast `hook_a
 
 Hook a function pointer stored at a memory address (e.g., in a `struct` ops table).
 
-### `fp_hook`
+### `kh_fp_hook`
 
 ```c
-void fp_hook(uintptr_t fp_addr, void *replace, void **backup);
+void kh_fp_hook(uintptr_t fp_addr, void *replace, void **backup);
 ```
 
 Replace the function pointer at `fp_addr` with `replace`. Original pointer saved to `*backup`.
 
-### `fp_unhook`
+### `kh_fp_unhook`
 
 ```c
-void fp_unhook(uintptr_t fp_addr, void *backup);
+void kh_fp_unhook(uintptr_t fp_addr, void *backup);
 ```
 
 Restore the original function pointer at `fp_addr`.
 
-### `fp_hook_wrap`
+### `kh_fp_hook_wrap`
 
 ```c
-hook_err_t fp_hook_wrap(uintptr_t fp_addr, int32_t argno,
+kh_hook_err_t kh_fp_hook_wrap(uintptr_t fp_addr, int32_t argno,
                         void *before, void *after,
                         void *udata, int32_t priority);
 ```
 
-Like `hook_wrap` but for function pointers. Supports up to `FP_HOOK_CHAIN_NUM` = 16 callbacks.
+Like `kh_hook_wrap` but for function pointers. Supports up to `FP_HOOK_CHAIN_NUM` = 16 callbacks.
 
-### `fp_hook_unwrap`
+### `kh_fp_hook_unwrap`
 
 ```c
-void fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after);
+void kh_fp_hook_unwrap(uintptr_t fp_addr, void *before, void *after);
 ```
 
-Remove a callback pair from a function pointer hook chain.
+Remove a callback pair from a function pointer kh_hook chain.
 
 ### `fp_get_origin_func`
 
@@ -137,9 +137,9 @@ Remove a callback pair from a function pointer hook chain.
 void *fp_get_origin_func(void *hook_args);
 ```
 
-Get the original function pointer from within an FP hook callback.
+Get the original function pointer from within an FP kh_hook callback.
 
-### `fp_hook_wrap0` ... `fp_hook_wrap12`
+### `kh_fp_hook_wrap0` ... `kh_fp_hook_wrap12`
 
 Type-safe convenience wrappers, analogous to `hook_wrapN`.
 
@@ -147,9 +147,9 @@ Type-safe convenience wrappers, analogous to `hook_wrapN`.
 
 Header: `<syscall.h>`
 
-Higher-level API over `hook_wrap` / `fp_hook_wrap` that targets Linux syscall entry points by syscall number. Automatically detects the ARM64 `pt_regs` syscall-wrapper ABI (kernel ≥ 4.17) and routes to the correct entry (`__arm64_sys_<name>`).
+Higher-level API over `kh_hook_wrap` / `kh_fp_hook_wrap` that targets Linux syscall entry points by syscall number. Automatically detects the ARM64 `pt_regs` syscall-wrapper ABI (kernel ≥ 4.17) and routes to the correct entry (`__arm64_sys_<name>`).
 
-**Design note:** on GKI ≥ 5.10 kernels the `sys_call_table` is `__ro_after_init` AND kCFI validates indirect calls through it, so writing to a table slot is doubly blocked. `kh_hook_syscalln` deliberately always uses an inline hook on `__arm64_sys_<name>` instead. `kh_sys_call_table` is exported only for discovery / diagnostic use.
+**Design note:** on GKI ≥ 5.10 kernels the `sys_call_table` is `__ro_after_init` AND kCFI validates indirect calls through it, so writing to a table slot is doubly blocked. `kh_hook_syscalln` deliberately always uses an inline kh_hook on `__arm64_sys_<name>` instead. `kh_sys_call_table` is exported only for discovery / diagnostic use.
 
 ### `kh_syscall_init`
 
@@ -162,10 +162,10 @@ Resolve `sys_call_table` (for discovery) and detect wrapper ABI. Called from sub
 ### `kh_hook_syscalln`
 
 ```c
-hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after, void *udata);
+kh_hook_err_t kh_hook_syscalln(int nr, int narg, void *before, void *after, void *udata);
 ```
 
-Install a hook on syscall number `nr`. `narg` is the logical argument count of the target syscall (e.g. `__NR_execve` has 3 args). On wrapper kernels the physical callback still receives a `pt_regs *` in `fargs->arg0`; use `kh_syscall_argn_p` to reach the Nth syscall arg regardless of ABI.
+Install a kh_hook on syscall number `nr`. `narg` is the logical argument count of the target syscall (e.g. `__NR_execve` has 3 args). On wrapper kernels the physical callback still receives a `pt_regs *` in `fargs->arg0`; use `kh_syscall_argn_p` to reach the Nth syscall arg regardless of ABI.
 
 ### `kh_unhook_syscalln`
 
@@ -173,7 +173,7 @@ Install a hook on syscall number `nr`. `narg` is the logical argument count of t
 void kh_unhook_syscalln(int nr, void *before, void *after);
 ```
 
-Symmetric removal. Call from module exit to avoid inline-hook trampolines pointing into freed module text.
+Symmetric removal. Call from module exit to avoid inline-kh_hook trampolines pointing into freed module text.
 
 ### `kh_syscall_argn_p`
 
@@ -278,21 +278,21 @@ Callback argument structs. Common fields:
 |-------|------|-------------|
 | `chain` | `void *` | Internal -- pointer to chain state |
 | `skip_origin` | `int` | Set to 1 in `before` to skip original function |
-| `local` | `hook_local_t *` | Per-item local storage (4 x uint64_t) |
+| `local` | `kh_hook_local_t *` | Per-item local storage (4 x uint64_t) |
 | `ret` | `uint64_t` | Return value (read in `after`, write to override) |
 | `arg0`...`argN` | `uint64_t` | Function arguments (read/write) |
 
-Variants: `hook_fargs0_t` (no args) through `hook_fargs12_t` (12 args).
+Variants: `kh_hook_fargs0_t` (no args) through `kh_hook_fargs12_t` (12 args).
 
-- `hook_fargs1_t` through `hook_fargs3_t` are aliases for `hook_fargs4_t`
-- `hook_fargs5_t` through `hook_fargs7_t` are aliases for `hook_fargs8_t`
-- `hook_fargs9_t` through `hook_fargs11_t` are aliases for `hook_fargs12_t`
+- `kh_hook_fargs1_t` through `kh_hook_fargs3_t` are aliases for `kh_hook_fargs4_t`
+- `kh_hook_fargs5_t` through `kh_hook_fargs7_t` are aliases for `kh_hook_fargs8_t`
+- `kh_hook_fargs9_t` through `kh_hook_fargs11_t` are aliases for `kh_hook_fargs12_t`
 
-### `hook_local_t`
+### `kh_hook_local_t`
 
-Per-callback local storage, accessible as `fargs->local->data0` through `data3` (or `data[0..3]`). Each callback in the chain gets its own independent `hook_local_t`.
+Per-callback local storage, accessible as `fargs->local->data0` through `data3` (or `data[0..3]`). Each callback in the chain gets its own independent `kh_hook_local_t`.
 
-### `hook_err_t`
+### `kh_hook_err_t`
 
 | Value | Name | Description |
 |-------|------|-------------|
@@ -313,7 +313,7 @@ typedef void (*hook_chainN_callback)(hook_fargsN_t *fargs, void *udata);
 Where N is 0-12. Example for 4-argument function:
 
 ```c
-void my_before(hook_fargs4_t *fargs, void *udata)
+void my_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     uint64_t arg0 = fargs->arg0;       /* read argument */
     fargs->arg1 = 0;                   /* modify argument */
@@ -322,7 +322,7 @@ void my_before(hook_fargs4_t *fargs, void *udata)
     fargs->local->data0 = arg0;        /* save to local storage */
 }
 
-void my_after(hook_fargs4_t *fargs, void *udata)
+void my_after(kh_hook_fargs4_t *fargs, void *udata)
 {
     uint64_t saved = fargs->local->data0;  /* read from local storage */
     fargs->ret = 0;                        /* override return value */

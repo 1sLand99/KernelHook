@@ -40,7 +40,7 @@ include $(KERNELHOOK_DIR)/mk/kmod.mk
 ```c
 #include "../../kmod/shim/shim.h"
 #include <types.h>
-#include <hook.h>
+#include <kh_hook.h>
 #include <symbol.h>
 #include <memory.h>
 #include <arch/arm64/pgtable.h>
@@ -107,7 +107,7 @@ include $(KERNELHOOK_DIR)/mk/kmod_sdk.mk
 ### Source Includes
 
 ```c
-#include <kernelhook/hook.h>
+#include <kernelhook/kh_hook.h>
 #include <kernelhook/types.h>
 #include <kernelhook/kh_symvers.h>   /* auto-generated, provides KH_DECLARE_VERSIONS() */
 ```
@@ -120,7 +120,7 @@ symbols:
 
 ```c
 MODULE_VERSIONS();       /* kernel symbols (module_layout / _printk / memcpy / memset) */
-KH_DECLARE_VERSIONS();   /* KernelHook exports (hook_wrap / ksyms_lookup / ...) */
+KH_DECLARE_VERSIONS();   /* KernelHook exports (kh_hook_wrap / ksyms_lookup / ...) */
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 ```
@@ -140,7 +140,7 @@ No subsystem init needed -- `kernelhook.ko` handles it:
 static int __init my_hook_init(void)
 {
     void *target = (void *)ksyms_lookup("do_sys_openat2");
-    hook_err_t err = hook_wrap4(target, my_before, my_after, NULL);
+    kh_hook_err_t err = kh_hook_wrap4(target, my_before, my_after, NULL);
     /* ... */
     return 0;
 }

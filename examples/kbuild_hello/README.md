@@ -7,7 +7,7 @@
 > All other examples have switched to **SDK** as their default `make`;
 > this one stays kbuild-only because that is the demonstration value.
 > If you want SDK or freestanding builds, see any of the
-> `hello_hook` / `hook_chain` / `fp_hook` siblings.
+> `hello_hook` / `hook_chain` / `kh_fp_hook` siblings.
 
 [中文](#中文) | [English](#english)
 

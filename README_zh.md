@@ -1,19 +1,19 @@
 # KernelHook
 
-面向 Linux 内核的 ARM64 函数 hook 框架。
+面向 Linux 内核的 ARM64 函数 kh_hook 框架。
 
 ## 功能特性
 
-- **内联 hook** -- 替换任意内核函数，通过备份指针调用原函数
+- **内联 kh_hook** -- 替换任意内核函数，通过备份指针调用原函数
 - **Hook 链** -- 同一函数上注册多个 before/after 回调，按优先级排序执行
-- **函数指针 hook** -- hook ops 表中的回调函数，支持链式调用
-- **系统调用级 hook** -- `kh_hook_syscalln(nr, ...)` 通过 `__arm64_sys_<name>` 操作，处理 pt_regs 包装器 ABI；[用户指针辅助](docs/zh/api-reference.md#用户指针辅助)（`kh_strncpy_from_user`、`kh_copy_to_user_stack`）支持改写系统调用参数
+- **函数指针 kh_hook** -- kh_hook ops 表中的回调函数，支持链式调用
+- **系统调用级 kh_hook** -- `kh_hook_syscalln(nr, ...)` 通过 `__arm64_sys_<name>` 操作，处理 pt_regs 包装器 ABI；[用户指针辅助](docs/zh/api-reference.md#用户指针辅助)（`kh_strncpy_from_user`、`kh_copy_to_user_stack`）支持改写系统调用参数
 - **Alias-page 写入通道** -- 主力 text-patch 机制（KernelPatch 风格）：vmalloc alias page + `aarch64_insn_patch_text_nosync`，绕过 `__ro_after_init` + kCFI；PTE 直改作为 fallback
 - **RCU 安全调度** -- transit_body 在进入原函数前把链状态 snapshot 到栈；3 秒内 2780 万次 syscall × 67000 次 add/remove 并发压测零 Oops
 - **符号解析** -- `ksyms_lookup` 运行时查找内核符号
 - **三种构建模式** -- SDK（默认，共享 `kernelhook.ko`）、Freestanding（无需内核头文件，回退方案）、Kbuild（仅演示）
 - **自适应加载器** -- `kmod_loader` 修补 .ko 二进制文件，实现跨内核版本加载
-- **主打 demo** -- [`kh_root`](docs/zh/kh-root-demo.md)：通过 3 个 syscall hook 实现完整提权（~350 LOC）
+- **主打 demo** -- [`kh_root`](docs/zh/kh-root-demo.md)：通过 3 个 syscall kh_hook 实现完整提权（~350 LOC）
 
 ### 快速开始（SDK 模式）
 
@@ -43,9 +43,9 @@ adb shell su -c 'dmesg | tail -20'
 | `src/arch/arm64/inline.c` | 指令重定位 + alias-page 和 PTE 直改两条写入路径 |
 | `src/arch/arm64/transit.c` | 中转桩 + RCU-snapshot 回调分发 |
 | `src/arch/arm64/pgtable.c` | 页表遍历 + TLB 刷新（vaale1is） |
-| `src/platform/syscall.c` | 系统调用级 hook 基础设施（`kh_hook_syscalln`、`kh_raw_syscallN`） |
+| `src/platform/syscall.c` | 系统调用级 kh_hook 基础设施（`kh_hook_syscalln`、`kh_raw_syscallN`） |
 | `src/uaccess.c` | 用户指针辅助（strncpy_from_user / copy_to_user / stack） |
-| `src/hook.c` | Hook 链 API（hook/unhook/hook_wrap/fp_hook_wrap） |
+| `src/kh_hook.c` | Hook 链 API（kh_hook/kh_unhook/kh_hook_wrap/kh_fp_hook_wrap） |
 | `src/memory.c` | ROX/RW 内存池的位图分配器 |
 | `kmod/` | SDK、链接脚本、shim 头文件 |
 | `tools/kmod_loader/` | 自适应模块加载器 |
@@ -74,7 +74,7 @@ adb shell su -c 'dmesg | tail -20'
 
 - [快速上手](docs/zh/getting-started.md)
 - [构建模式](docs/zh/build-modes.md)
-- [API 参考](docs/zh/api-reference.md) —— 包含系统调用 hook + 用户指针辅助
+- [API 参考](docs/zh/api-reference.md) —— 包含系统调用 kh_hook + 用户指针辅助
 - [kh_root Demo](docs/zh/kh-root-demo.md) —— 主打提权 demo
 - [kmod_loader](docs/zh/kmod-loader.md)
 - [AVD 测试](docs/zh/avd-testing.md)

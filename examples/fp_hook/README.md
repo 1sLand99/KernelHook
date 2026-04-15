@@ -1,39 +1,39 @@
-# fp_hook
+# kh_fp_hook
 
-Hook a function pointer in a struct, call original via backup, then unhook.
+Hook a function pointer in a struct, call original via backup, then kh_unhook.
 
 Hook 结构体中的函数指针，通过备份指针调用原函数，最后恢复。
 
 ## API
 
-- `fp_hook` -- replace function pointer at a memory address
-- `fp_unhook` -- restore original function pointer
+- `kh_fp_hook` -- replace function pointer at a memory address
+- `kh_fp_unhook` -- restore original function pointer
 
 ## Build (SDK mode — default)
 
 Requires `kernelhook.ko` to be loaded on the target device first.
 
 ```sh
-make module                            # produces fp_hook.ko
+make module                            # produces kh_fp_hook.ko
 ```
 
 ## Load + Run
 
 ```sh
 adb push ../../kmod/kernelhook.ko /data/local/tmp/
-adb push fp_hook.ko               /data/local/tmp/
+adb push kh_fp_hook.ko               /data/local/tmp/
 adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko'
-adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/fp_hook.ko'
+adb shell su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_fp_hook.ko'
 adb shell su -c 'dmesg | tail -20'
 ```
 
 ## Expected dmesg / 预期输出
 
 ```
-fp_hook: before hook: ops.callback(3,4) = 7
-fp_hook: replacement called with x=3 y=4
-fp_hook: original returned 7, we return 12
-fp_hook: after hook: ops.callback(3,4) = 12
+kh_fp_hook: before kh_hook: ops.callback(3,4) = 7
+kh_fp_hook: replacement called with x=3 y=4
+kh_fp_hook: original returned 7, we return 12
+kh_fp_hook: after kh_hook: ops.callback(3,4) = 12
 ```
 
 ## Other modes

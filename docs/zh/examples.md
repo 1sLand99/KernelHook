@@ -4,17 +4,17 @@
 
 | 示例 | 说明 | 核心 API |
 |------|------|----------|
-| [hello_hook](../../examples/hello_hook/) | Hook `do_sys_openat2`，记录文件名 | `hook_wrap4`、`hook_unwrap` |
-| [fp_hook](../../examples/fp_hook/) | Hook 结构体中的函数指针 | `fp_hook`、`fp_unhook` |
-| [hook_chain](../../examples/hook_chain/) | 多回调按优先级排序 | 带优先级的 `hook_wrap` |
-| [hook_wrap_args](../../examples/hook_wrap_args/) | 查看参数、覆盖返回值 | `hook_wrap4`、`fargs->ret` |
+| [hello_hook](../../examples/hello_hook/) | Hook `do_sys_openat2`，记录文件名 | `kh_hook_wrap4`、`kh_hook_unwrap` |
+| [kh_fp_hook](../../examples/kh_fp_hook/) | Hook 结构体中的函数指针 | `kh_fp_hook`、`kh_fp_unhook` |
+| [hook_chain](../../examples/hook_chain/) | 多回调按优先级排序 | 带优先级的 `kh_hook_wrap` |
+| [hook_wrap_args](../../examples/hook_wrap_args/) | 查看参数、覆盖返回值 | `kh_hook_wrap4`、`fargs->ret` |
 | [ksyms_lookup](../../examples/ksyms_lookup/) | 运行时内核符号解析 | `ksyms_lookup` |
 
 **主打 demo（在测试套件里，不在 `examples/`）：**
 
 | Demo | 描述 | 文档 |
 |------|------|------|
-| **kh_root** | 通过 3 个 syscall hook 实现提权 —— 任何调 `/system/bin/kh_root` 的进程都获得 uid=0 | [kh-root-demo.md](kh-root-demo.md) |
+| **kh_root** | 通过 3 个 syscall kh_hook 实现提权 —— 任何调 `/system/bin/kh_root` 的进程都获得 uid=0 | [kh-root-demo.md](kh-root-demo.md) |
 
 ## 构建方式
 
@@ -22,7 +22,7 @@
 |-----------------|-------------------------------|--------|
 | hello_hook      | `make module`                 | SDK    |
 | hook_chain      | `make module`                 | SDK    |
-| fp_hook         | `make module`                 | SDK    |
+| kh_fp_hook         | `make module`                 | SDK    |
 | hook_wrap_args  | `make module`                 | SDK    |
 | ksyms_lookup    | `make module`                 | SDK    |
 | kbuild_hello    | `make -C /path/to/kernel M=…` | kbuild |
@@ -32,7 +32,7 @@
 Hook `do_sys_openat2`（旧内核上为 `do_sys_open`），记录每次 `open()` 系统调用的文件名指针。
 
 ```c
-static void open_before(hook_fargs4_t *fargs, void *udata)
+static void open_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     const char *filename = (const char *)fargs->arg1;
     pr_info("hello_hook: open called, filename ptr=%llx",
@@ -40,10 +40,10 @@ static void open_before(hook_fargs4_t *fargs, void *udata)
 }
 
 /* 初始化时: */
-hook_err_t err = hook_wrap4(target, open_before, NULL, NULL);
+kh_hook_err_t err = kh_hook_wrap4(target, open_before, NULL, NULL);
 
 /* 退出时: */
-hook_unwrap(hooked_func, open_before, NULL);
+kh_hook_unwrap(hooked_func, open_before, NULL);
 ```
 
 **预期 dmesg 输出：**
@@ -52,26 +52,26 @@ hello_hook: hooked do_sys_open* at ffffffc0xxxxxxxx
 hello_hook: open called, filename ptr=7fxxxxxxxx
 ```
 
-## fp_hook
+## kh_fp_hook
 
-Hook 结构体中的函数指针。演示 `fp_hook` / `fp_unhook` 的用法，以及通过备份指针调用原始函数。
+Hook 结构体中的函数指针。演示 `kh_fp_hook` / `kh_fp_unhook` 的用法，以及通过备份指针调用原始函数。
 
 ```c
 struct demo_ops { int (*callback)(int x, int y); };
 
-fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
+kh_fp_hook((uintptr_t)&ops.callback, replacement_callback, &backup_func);
 /* 此时 ops.callback(3, 4) 会调用 replacement_callback */
 
-fp_unhook((uintptr_t)&ops.callback, backup_func);
+kh_fp_unhook((uintptr_t)&ops.callback, backup_func);
 /* ops.callback 恢复为 original_callback */
 ```
 
 **预期 dmesg 输出：**
 ```
-fp_hook: before hook: ops.callback(3,4) = 7
-fp_hook: replacement called with x=3 y=4
-fp_hook: original returned 7, we return 12
-fp_hook: after hook: ops.callback(3,4) = 12
+kh_fp_hook: before kh_hook: ops.callback(3,4) = 7
+kh_fp_hook: replacement called with x=3 y=4
+kh_fp_hook: original returned 7, we return 12
+kh_fp_hook: after kh_hook: ops.callback(3,4) = 12
 ```
 
 ## hook_chain
@@ -79,9 +79,9 @@ fp_hook: after hook: ops.callback(3,4) = 12
 在同一函数上注册三个不同优先级（0、50、100）的 before 回调。展示优先级决定执行顺序，而非注册顺序。
 
 ```c
-hook_wrap(target, 4, (void *)before_medium, NULL, NULL, 50);
-hook_wrap(target, 4, (void *)before_low,    (void *)after_cb, NULL, 100);
-hook_wrap(target, 4, (void *)before_high,   NULL, NULL, 0);
+kh_hook_wrap(target, 4, (void *)before_medium, NULL, NULL, 50);
+kh_hook_wrap(target, 4, (void *)before_low,    (void *)after_cb, NULL, 100);
+kh_hook_wrap(target, 4, (void *)before_high,   NULL, NULL, 0);
 /* 执行顺序: high(0) -> medium(50) -> low(100) -> 原函数 -> after */
 ```
 
@@ -95,16 +95,16 @@ hook_chain: after callback, ret=...
 
 ## hook_wrap_args
 
-用 before 和 after 两个回调 hook `do_sys_openat2`。before 回调检查所有参数，after 回调读取并覆盖返回值。
+用 before 和 after 两个回调 kh_hook `do_sys_openat2`。before 回调检查所有参数，after 回调读取并覆盖返回值。
 
 ```c
-static void openat2_before(hook_fargs4_t *fargs, void *udata)
+static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 {
     pr_info("BEFORE arg0(dfd)=%lld arg1(filename)=%llx",
           (long long)fargs->arg0, (unsigned long long)fargs->arg1);
 }
 
-static void openat2_after(hook_fargs4_t *fargs, void *udata)
+static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
     pr_info("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
     fargs->ret = 0;
@@ -119,7 +119,7 @@ hook_wrap_args: AFTER original ret=..., overriding with 0
 
 ## ksyms_lookup
 
-演示 `ksyms_lookup()` 的运行时内核符号解析功能。无需 `hook_mem_init` 或 `pgtable_init`。
+演示 `ksyms_lookup()` 的运行时内核符号解析功能。无需 `kh_mem_init` 或 `pgtable_init`。
 
 ```c
 uint64_t addr = ksyms_lookup("vfs_read");
