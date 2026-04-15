@@ -218,7 +218,7 @@ case "$KH_SUBCMD" in
         NM="${KH_CROSS_COMPILE}nm"
         [ -x "$NM" ] || NM="${KH_NDK_BIN}/llvm-nm"
         if (cd "$ROOT/kmod" && make module >/tmp/sdkc_core.log 2>&1) \
-           && (cd "$ROOT/examples/hello_hook" && make -f Makefile.sdk module >/tmp/sdkc_hello.log 2>&1) \
+           && (cd "$ROOT/examples/hello_hook" && make module >/tmp/sdkc_hello.log 2>&1) \
            && "$NM" -u "$ROOT/examples/hello_hook/hello_hook.ko" 2>/dev/null \
                 | awk '{print $NF}' | sort -u > /tmp/sdkc_undef.txt \
            && awk '/^[a-zA-Z_]/ {print $1}' "$ROOT/kmod/exports.manifest" | sort -u > /tmp/sdkc_man.txt \
