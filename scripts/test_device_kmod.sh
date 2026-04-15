@@ -8,8 +8,17 @@
 # required — production builds reject it.
 #
 # Usage:
-#   ./scripts/test_device_kmod.sh                  # first connected non-emulator
-#   ./scripts/test_device_kmod.sh <adb-serial>     # target a specific device
+#   ./scripts/test_device_kmod.sh                               # sdk mode, first connected non-emulator
+#   ./scripts/test_device_kmod.sh <adb-serial>                  # sdk mode, explicit device
+#   ./scripts/test_device_kmod.sh --mode=freestanding           # legacy kh_test.ko Phase 6 + Ring 3 sweep
+#   ./scripts/test_device_kmod.sh --mode=sdk <adb-serial>       # explicit sdk mode + explicit device
+#
+# Modes:
+#   sdk (default): build kernelhook.ko + examples/hello_hook/hello_hook.ko,
+#                  two-step kmod_loader insmod, verify hello_hook dmesg marker,
+#                  reverse-order rmmod.
+#   freestanding:  build tests/kmod/kh_test.ko, single-load, run the Phase 6
+#                  kh_root elevation test and the Ring 3 export_link_test sweep.
 #
 # Prereqs on the device:
 #   - Connected via USB, `adb devices` shows it as "device"
@@ -20,6 +29,25 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Flag parser: --mode={sdk,freestanding} (default sdk). Bare arg is the adb serial.
+# Default (sdk) builds + loads kernelhook.ko AND examples/hello_hook/hello_hook.ko
+# (the SDK consumer reference under Phase B / 方案 C). Freestanding mode falls back
+# to the legacy single-kh_test.ko path, which also runs the Phase 6 / Ring 3 sweep.
+KH_MODE="sdk"
+KH_SERIAL=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --mode=*) KH_MODE="${1#--mode=}"; shift ;;
+        --) shift; break ;;
+        -*) echo "unknown flag $1" >&2; exit 2 ;;
+        *)  KH_SERIAL="$1"; shift ;;
+    esac
+done
+case "$KH_MODE" in
+    sdk|freestanding) ;;
+    *) echo "invalid --mode=$KH_MODE (expected sdk|freestanding)" >&2; exit 2 ;;
+esac
 
 # shellcheck source=lib/detect_toolchain.sh
 . "$ROOT/scripts/lib/detect_toolchain.sh" || {
@@ -38,7 +66,7 @@ esac
 RED='\033[31m'; GREEN='\033[32m'; YELLOW='\033[33m'; BOLD='\033[1m'; RESET='\033[0m'
 
 # Pick device serial: explicit arg > first non-emulator `adb devices`.
-SERIAL="${1:-}"
+SERIAL="${KH_SERIAL:-}"
 if [ -z "$SERIAL" ]; then
     SERIAL=$(adb devices 2>/dev/null \
         | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ {print $1; exit}')
@@ -49,6 +77,7 @@ if [ -z "$SERIAL" ]; then
 fi
 ADB="adb -s $SERIAL"
 printf "${BOLD}KernelHook kmod Device Test${RESET}\n"
+printf "Mode: %s\n" "$KH_MODE"
 printf "Device serial: %s\n" "$SERIAL"
 printf "Toolchain: %s\n\n" "$KH_TOOLCHAIN_DESC"
 
@@ -100,20 +129,51 @@ if [ "$KMAJOR" -lt 4 ] || { [ "$KMAJOR" -eq 4 ] && [ "$KMINOR" -lt 4 ]; }; then
     exit 2
 fi
 
-# Build kh_test.ko for this exact kernel version.
-printf "  Building kh_test.ko for %s...\n" "$UNAME"
-cd "$ROOT/tests/kmod"
-make clean >/dev/null 2>&1 || true
-if ! make freestanding \
-    KERNELRELEASE="$UNAME" \
-    CC="$KH_CC" \
-    LD="$KH_LD" \
-    CROSS_COMPILE="$KH_CROSS_COMPILE" \
-    CONFIG_KH_CHAIN_RCU=1 \
-    >/tmp/kh_test_build.log 2>&1; then
-    printf "  ${RED}FAIL${RESET} build failed — see /tmp/kh_test_build.log\n"
-    tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
-    exit 1
+# Build the target kernel module(s) for this exact kernel version.
+# SDK mode: kmod/kernelhook.ko + examples/hello_hook/hello_hook.ko (两步加载).
+# Freestanding mode: tests/kmod/kh_test.ko (legacy single .ko, Phase 6 + Ring 3).
+: > /tmp/kh_test_build.log
+if [ "$KH_MODE" = "sdk" ]; then
+    printf "  Building kernelhook.ko + hello_hook.ko (SDK mode) for %s...\n" "$UNAME"
+    if ! ( cd "$ROOT/kmod" && \
+           make clean >/dev/null 2>&1; \
+           make module \
+               KERNELRELEASE="$UNAME" \
+               CC="$KH_CC" \
+               LD="$KH_LD" \
+               CROSS_COMPILE="$KH_CROSS_COMPILE" \
+               >>/tmp/kh_test_build.log 2>&1 ); then
+        printf "  ${RED}FAIL${RESET} kernelhook.ko build failed — see /tmp/kh_test_build.log\n"
+        tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
+        exit 1
+    fi
+    if ! ( cd "$ROOT/examples/hello_hook" && \
+           make -f Makefile.sdk clean >/dev/null 2>&1; \
+           KERNELRELEASE="$UNAME" \
+           CC="$KH_CC" \
+           LD="$KH_LD" \
+           CROSS_COMPILE="$KH_CROSS_COMPILE" \
+           make -f Makefile.sdk module \
+               >>/tmp/kh_test_build.log 2>&1 ); then
+        printf "  ${RED}FAIL${RESET} hello_hook.ko (SDK) build failed — see /tmp/kh_test_build.log\n"
+        tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
+        exit 1
+    fi
+else
+    printf "  Building kh_test.ko (freestanding) for %s...\n" "$UNAME"
+    cd "$ROOT/tests/kmod"
+    make clean >/dev/null 2>&1 || true
+    if ! make freestanding \
+        KERNELRELEASE="$UNAME" \
+        CC="$KH_CC" \
+        LD="$KH_LD" \
+        CROSS_COMPILE="$KH_CROSS_COMPILE" \
+        CONFIG_KH_CHAIN_RCU=1 \
+        >/tmp/kh_test_build.log 2>&1; then
+        printf "  ${RED}FAIL${RESET} build failed — see /tmp/kh_test_build.log\n"
+        tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
+        exit 1
+    fi
 fi
 
 # Bypass kptr_restrict so we can read kallsyms_lookup_name from /proc/kallsyms.
@@ -140,12 +200,23 @@ else
 fi
 
 # Push files. /data/local/tmp is world-writable; chmod happens there.
-$ADB push "$ROOT/tests/kmod/kh_test.ko" /data/local/tmp/kh_test.ko >/dev/null
+if [ "$KH_MODE" = "sdk" ]; then
+    $ADB push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null
+    $ADB push "$ROOT/examples/hello_hook/hello_hook.ko" /data/local/tmp/hello_hook.ko >/dev/null
+else
+    $ADB push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null
+fi
 $ADB push "$LOADER" /data/local/tmp/kmod_loader >/dev/null
 $ADB shell 'chmod +x /data/local/tmp/kmod_loader' >/dev/null
 
-# Unload any stale kh_test from a previous run (ignore failure).
-dsu "rmmod kh_test 2>/dev/null; true" >/dev/null || true
+# Unload any stale modules from a previous run (ignore failure). In SDK mode
+# the consumer (hello_hook) must come off first because it holds a refcount on
+# kernelhook via the ksymtab imports.
+if [ "$KH_MODE" = "sdk" ]; then
+    dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+else
+    dsu "rmmod kh_test 2>/dev/null; true" >/dev/null || true
+fi
 dsu "dmesg -c" >/dev/null 2>&1 || true
 
 # Live kmsg capture for post-mortem if module init crashes the kernel.
@@ -156,8 +227,35 @@ KMSG_PID=$!
 sleep 1
 
 # Load. Host-side 60s timeout handles old BusyBox lacking `timeout`.
-LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-    $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+# SDK mode does a two-step load (kernelhook.ko first, then hello_hook.ko);
+# freestanding mode loads the single kh_test.ko as before.
+if [ "$KH_MODE" = "sdk" ]; then
+    LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
+        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+    if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
+        sleep 1
+        kill "$KMSG_PID" 2>/dev/null || true
+        wait "$KMSG_PID" 2>/dev/null || true
+        printf "  ${RED}FAIL${RESET} kernelhook.ko load failed\n"
+        echo "$LOAD_OUTPUT" | sed 's/^/       /'
+        exit 1
+    fi
+    LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
+        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+    if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
+        sleep 1
+        kill "$KMSG_PID" 2>/dev/null || true
+        wait "$KMSG_PID" 2>/dev/null || true
+        printf "  ${RED}FAIL${RESET} hello_hook.ko load failed\n"
+        echo "$LOAD_OUTPUT" | sed 's/^/       /'
+        # Best-effort cleanup: peel kernelhook back off so we don't leave it loaded.
+        dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+        exit 1
+    fi
+else
+    LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
+        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+fi
 
 sleep 1
 kill "$KMSG_PID" 2>/dev/null || true
@@ -173,6 +271,30 @@ if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
     printf "  ${RED}FAIL${RESET} module load failed\n"
     echo "$LOAD_OUTPUT" | sed 's/^/       /'
     exit 1
+fi
+
+# ---- SDK mode: runtime-verify the hello_hook consumer, unload in reverse order, done.
+# Phase 6 / Ring 3 are freestanding-mode concerns (kh_test.ko not loaded here).
+if [ "$KH_MODE" = "sdk" ]; then
+    sleep 2
+    SDK_DMESG=$(dsu "dmesg" 2>/dev/null)
+    if echo "$SDK_DMESG" | grep -q "hello_hook: hooked do_sys_open"; then
+        HOOK_LINE=$(echo "$SDK_DMESG" | grep "hello_hook: hooked do_sys_open" | tail -1)
+        printf "  ${GREEN}PASS${RESET} hello_hook active: %s\n" "$HOOK_LINE"
+    else
+        printf "  ${RED}FAIL${RESET} hello_hook marker not found in dmesg\n"
+        echo "$SDK_DMESG" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
+        dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+        exit 1
+    fi
+    # Step 4 SDK unload: reverse order — consumer first (refcount holder),
+    # then the SDK base module.
+    dsu "rmmod hello_hook 2>/dev/null; true" >/dev/null || true
+    dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+
+    printf "\n${GREEN}All device tests passed.${RESET}\n"
+    printf "=== Summary: %d PASS, %d FAIL ===\n" 1 0
+    exit 0
 fi
 
 sleep 3
