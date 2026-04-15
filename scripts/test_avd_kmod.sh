@@ -191,9 +191,26 @@ test_avd() {
         return
     fi
 
+    # Per-AVD effective mode. SDK mode is the default but kernelhook.ko
+    # is built via kernel kbuild which emits reloc types + .plt sections
+    # that pre-5.10 goldfish AVD kernels (Pixel_28 / Pixel_29 / Pixel_30)
+    # refuse to load with "unsupported RELA relocation: 275" or "Exec
+    # format error". Auto-downgrade those older AVDs to freestanding mode,
+    # which builds kh_test.ko via NDK clang + our own linker script and
+    # loads cleanly on 4.4..5.4. Newer AVDs (>=5.10) keep SDK mode.
+    # The downgrade is emitted as a note so the operator knows why the
+    # mode silently changed.
+    local effective_mode="$KH_MODE"
+    if [ "$effective_mode" = "sdk" ]; then
+        if [ "$kmajor" -lt 5 ] || ([ "$kmajor" -eq 5 ] && [ "$kminor" -lt 10 ]); then
+            printf "  ${KH_YELLOW}NOTE${KH_RESET} $avd: kernel %s predates stable GKI kbuild reloc set; downgrading to freestanding mode\n" "$uname"
+            effective_mode="freestanding"
+        fi
+    fi
+
     # SDK mode: artifacts were built once before the loop; freestanding mode
     # rebuilds kh_test.ko per-AVD because it's ifdef'd against kernel internals.
-    if [ "$KH_MODE" = "freestanding" ]; then
+    if [ "$effective_mode" = "freestanding" ]; then
         printf "  Building kh_test.ko...\n"
         cd "$ROOT/tests/kmod"
         make clean >/dev/null 2>&1 || true
@@ -236,7 +253,7 @@ test_avd() {
     fi
 
     # Push files
-    if [ "$KH_MODE" = "sdk" ]; then
+    if [ "$effective_mode" = "sdk" ]; then
         adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null 2>&1 || true
         adb -s emulator-5554 push "$ROOT/examples/hello_hook/hello_hook.ko" /data/local/tmp/hello_hook.ko >/dev/null 2>&1 || true
     else
@@ -248,7 +265,7 @@ test_avd() {
     # Unload any stale modules from a previous run. In SDK mode the consumer
     # (hello_hook) must come off first because it holds a refcount on
     # kernelhook via the ksymtab imports.
-    if [ "$KH_MODE" = "sdk" ]; then
+    if [ "$effective_mode" = "sdk" ]; then
         adb -s emulator-5554 shell "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
     else
         adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
@@ -267,7 +284,7 @@ test_avd() {
 
     local load_output=""
     local load_rc=1
-    if [ "$KH_MODE" = "sdk" ]; then
+    if [ "$effective_mode" = "sdk" ]; then
         # Step 1: insmod kernelhook.ko (the SDK base). Host-side 60s timeout
         # since Android 'timeout' may not exist on old AVDs.
         load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
@@ -306,7 +323,7 @@ test_avd() {
         RESULTS+=("FAIL|$avd|load_failed|$sdk|$uname")
         FAIL_COUNT=$((FAIL_COUNT + 1))
         # SDK mode: best-effort peel kernelhook back off so it's not left loaded.
-        if [ "$KH_MODE" = "sdk" ]; then
+        if [ "$effective_mode" = "sdk" ]; then
             adb -s emulator-5554 shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
         fi
         kill_emulator
@@ -314,7 +331,7 @@ test_avd() {
     fi
 
     # ---- SDK mode: runtime-verify the hello_hook consumer marker, unload reverse.
-    if [ "$KH_MODE" = "sdk" ]; then
+    if [ "$effective_mode" = "sdk" ]; then
         sleep 2
         # Marker is emitted at hello_hook_init() time — i.e. during the insmod
         # call above. The live /dev/kmsg capture ($live_dmesg) caught it at
