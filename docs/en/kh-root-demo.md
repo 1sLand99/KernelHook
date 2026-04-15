@@ -1,6 +1,6 @@
 # kh_root — Privilege Escalation Demo
 
-Featured end-to-end demo integrated into the main test suite (`tests/kmod/test_phase6_kh_root.c`). Demonstrates that a fully functional `su`-style root shell can be built on top of KernelHook's syscall hook API with ~350 lines of C, no kstorage, no SELinux scontext manipulation, no 32-bit compat.
+Featured end-to-end demo integrated into the main test suite (`tests/kmod/demo_kh_root.c`). Demonstrates that a fully functional `su`-style root shell can be built on top of KernelHook's syscall hook API with ~350 lines of C, no kstorage, no SELinux scontext manipulation, no 32-bit compat.
 
 > ⚠️ **Demo only.** `kh_root` elevates **any caller** that invokes `/system/bin/kh_root` to uid=0 — there is no allowlist. Install only on a device you own and control.
 
@@ -40,7 +40,7 @@ adb shell 'test -e /system/bin/kh_root && echo yes'  # → yes
 
 ## Loading the module (freestanding mode)
 
-The kh_root demo lives inside `kh_test.ko`'s Phase 6 test harness, which
+The kh_root demo lives inside `kh_test.ko`'s kh_root demo test harness, which
 is a self-contained freestanding kernel module (it does not consume the
 SDK). Load it directly:
 

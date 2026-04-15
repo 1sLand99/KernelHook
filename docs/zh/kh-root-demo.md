@@ -1,6 +1,6 @@
 # kh_root —— 提权 Demo
 
-集成在主测试套件里的端到端 demo（`tests/kmod/test_phase6_kh_root.c`）。用 ~350 行 C 代码在 KernelHook 的 syscall hook API 之上实现一个可用的 `su` 式 root shell，不含 kstorage、不动 SELinux scontext、无 32 位 compat。
+集成在主测试套件里的端到端 demo（`tests/kmod/demo_kh_root.c`）。用 ~350 行 C 代码在 KernelHook 的 syscall hook API 之上实现一个可用的 `su` 式 root shell，不含 kstorage、不动 SELinux scontext、无 32 位 compat。
 
 > ⚠️ **Demo only。** `kh_root` 会让**任何调用者**调用 `/system/bin/kh_root` 就提权到 uid=0 —— 没有白名单。仅在你拥有并控制的设备上使用。
 
@@ -40,7 +40,7 @@ adb shell 'test -e /system/bin/kh_root && echo yes'  # → yes
 
 ## 加载模块（freestanding 模式）
 
-kh_root demo 位于 `kh_test.ko` 的 Phase 6 测试套件内，这是一个自包含的
+kh_root demo 位于 `kh_test.ko` 的 kh_root demo 测试套件内，这是一个自包含的
 freestanding 内核模块（不消费 SDK）。直接加载即可：
 
 ```sh

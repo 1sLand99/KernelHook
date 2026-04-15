@@ -58,7 +58,7 @@ adb shell su -c 'dmesg | tail -20'
 | `kmod/` | SDK, linker scripts, shim headers |
 | `tools/kmod_loader/` | Adaptive module loader |
 | `examples/` | hello_hook, fp_hook, hook_chain, hook_wrap_args, ksyms_lookup |
-| `tests/kmod/test_phase6_kh_root.c` | Featured kh_root demo (see [docs](docs/en/kh-root-demo.md)) |
+| `tests/kmod/demo_kh_root.c` | Featured kh_root demo (see [docs](docs/en/kh-root-demo.md)) |
 
 ## Kernel Compatibility
 

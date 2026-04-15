@@ -50,7 +50,7 @@ adb shell su -c 'dmesg | tail -20'
 | `kmod/` | SDK、链接脚本、shim 头文件 |
 | `tools/kmod_loader/` | 自适应模块加载器 |
 | `examples/` | hello_hook、fp_hook、hook_chain、hook_wrap_args、ksyms_lookup |
-| `tests/kmod/test_phase6_kh_root.c` | 主打 kh_root demo（见[文档](docs/zh/kh-root-demo.md)） |
+| `tests/kmod/demo_kh_root.c` | 主打 kh_root demo（见[文档](docs/zh/kh-root-demo.md)） |
 
 ## 内核兼容性
 
