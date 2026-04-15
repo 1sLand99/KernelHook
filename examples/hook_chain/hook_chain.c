@@ -80,11 +80,12 @@ static void after_callback(hook_fargs4_t *fargs, void *udata)
 
 static int __init hook_chain_init(void)
 {
-	int rc;
 	void *target;
 	hook_err_t err;
 
 #if !defined(KH_SDK_MODE)
+	int rc;
+
 	rc = kmod_compat_init(kallsyms_addr);
 	if (rc) {
 		pr_err("hook_chain: compat init failed (%d)\n", rc);

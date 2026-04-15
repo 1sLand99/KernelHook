@@ -82,11 +82,12 @@ static void openat2_after(hook_fargs4_t *fargs, void *udata)
 
 static int __init hook_wrap_args_init(void)
 {
-	int rc;
 	void *target;
 	hook_err_t err;
 
 #if !defined(KH_SDK_MODE)
+	int rc;
+
 	rc = kmod_compat_init(kallsyms_addr);
 	if (rc) {
 		pr_err("hook_wrap_args: compat init failed (%d)\n", rc);
