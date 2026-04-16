@@ -2,6 +2,10 @@
 /*
  * Freestanding shim wrappers for genuinely-kernel functions.
  *
+ * Mode C (kbuild) gets these functions directly from the real kernel
+ * headers + kernel symbol table; this file is a no-op in that mode
+ * (guarded by KMOD_FREESTANDING).
+ *
  * Pattern: each wrapper looks up its target kernel function once via
  * ksyms_lookup(), caches the address in a static function-pointer slot,
  * and thereafter calls through the cached pointer. This is the rule
@@ -25,6 +29,12 @@
  */
 
 #include <types.h>
+
+#ifndef KMOD_FREESTANDING
+/* Mode C (kbuild) path: kernel provides these symbols directly.
+ * This compilation unit emits no symbols. */
+#else
+
 #include <linux/types.h>   /* umode_t, etc. */
 #include <linux/kernel.h>  /* add_taint, kstrtol declarations */
 #include <linux/uaccess.h> /* copy_to/from_user declarations */
@@ -194,3 +204,5 @@ int snprintf(char *buf, unsigned long size, const char *fmt, ...)
     va_end(ap);
     return r;
 }
+
+#endif /* KMOD_FREESTANDING */

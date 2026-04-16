@@ -2,6 +2,9 @@
 /*
  * Freestanding libc implementations for Mode A / SDK (Mode B) builds.
  *
+ * Mode C (kbuild) uses real kernel headers + kernel-provided memset/memcpy
+ * etc.; this file is a no-op in that mode (guarded by KMOD_FREESTANDING).
+ *
  * Rationale: the freestanding shim used to declare these functions as
  * `extern` and rely on the kernel-exported symbols plus MODVERSIONS CRC
  * entries to satisfy them at module-load time. That path is fragile —
@@ -21,6 +24,11 @@
  */
 
 #include <types.h>
+
+#ifndef KMOD_FREESTANDING
+/* Mode C (kbuild) path: kernel's libc is already linked. Nothing to do.
+ * This compilation unit emits no symbols. */
+#else
 
 /* ---- Memory primitives ----
  *
@@ -117,3 +125,5 @@ unsigned long strlcpy(char *dst, const char *src, unsigned long size)
     }
     return (unsigned long)(s - src - 1);
 }
+
+#endif /* KMOD_FREESTANDING */
