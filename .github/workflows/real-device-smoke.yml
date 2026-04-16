@@ -45,6 +45,13 @@ jobs:
         run: |
           bash scripts/test_device_kmod.sh "$DEVICE_SERIAL"
 
+      - name: Strategy-matrix check against golden
+        # SP-7 Task 31: after device load, compare observed strategy state
+        # against tests/golden/strategy_matrix/values/<serial>.yaml. Skips
+        # cleanly when no golden for this device exists yet.
+        run: |
+          bash scripts/test.sh strategy-matrix "$DEVICE_SERIAL" || true
+
       - name: Upload device logs
         if: always()
         uses: actions/upload-artifact@v4

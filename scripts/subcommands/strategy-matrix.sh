@@ -135,6 +135,14 @@ case "$MODE" in
                 _sm_dev=$(basename "$_sm_f" .yaml)
                 kh_section_start "strategy-matrix check $_sm_dev"
                 _set_adb_args "$_sm_dev" _sm_adb
+                # Skip cleanly if no adb device corresponds to this golden
+                # (CI paths run strategy-matrix after avd shutdown).
+                if ! adb "${_sm_adb[@]}" get-state >/dev/null 2>&1; then
+                    printf "  SKIP: no adb device for '%s'\n" "$_sm_dev"
+                    kh_section_end "strategy-matrix check $_sm_dev" SKIP
+                    _sm_skip=$((_sm_skip+1))
+                    continue
+                fi
                 if strategy_matrix_check "$_sm_dev" "${_sm_adb[@]}" 2>&1; then
                     kh_section_end "strategy-matrix check $_sm_dev" PASS
                     _sm_pass=$((_sm_pass+1))
