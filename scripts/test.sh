@@ -19,6 +19,7 @@ KH_SUBCOMMANDS=(
     "sdk-consumer|SDK ABI link verification"
     "kbuild-verify|Static .ko validation"
     "lint|Grep-based legacy-symbol regression gate"
+    "strategy-matrix|Strategy registry golden check / dump / accept"
     "all|Every subcommand whose env is available"
 )
 
@@ -35,6 +36,7 @@ Subcommands:
   device [serial]          kmod tests on physical USB device (with kh_root demo)
   sdk-consumer             SDK ABI link verification (Ring 3 + hello_hook.ko consumer)
   kbuild-verify <ko> <kv>  Static .ko validation
+  strategy-matrix [opts]   Strategy registry golden check / dump / accept (see --help)
   all                      Every subcommand whose environment is available
 
 Global options:
@@ -251,6 +253,10 @@ case "$KH_SUBCMD" in
     lint)
         "$ROOT/scripts/lint_exports.sh"
         ;;
+    strategy-matrix)
+        exec "$ROOT/scripts/subcommands/strategy-matrix.sh" \
+             "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"
+        ;;
     kbuild-verify)
         if [ "${#KH_SUBCMD_ARGS[@]}" -lt 2 ]; then
             printf "usage: scripts/test.sh kbuild-verify <ko-path> <expected-kver>\n" >&2
@@ -300,6 +306,10 @@ case "$KH_SUBCMD" in
         # is present. Running unconditionally ensures 'all' covers the hermetic
         # link check even on device-less CI hosts.
         if "$0" sdk-consumer; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
+
+        # strategy-matrix check: compare all existing goldens.  If no goldens
+        # exist yet (before Task 29) it exits 0 with an informational message.
+        if "$0" strategy-matrix; then total_pass=$((total_pass+1)); else total_fail=$((total_fail+1)); fi
 
         kh_banner "==== Aggregate ===="
         kh_summary_line "$total_pass" "$total_fail"
