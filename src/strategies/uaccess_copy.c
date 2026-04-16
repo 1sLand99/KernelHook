@@ -88,4 +88,70 @@ KH_STRATEGY_DECLARE(copy_to_user, copy_to_user_sym,    1, strat_to_sym_copy_to_u
 KH_STRATEGY_DECLARE(copy_to_user, __arch_copy_to_user, 2, strat_to_arch_copy_to_user, sizeof(copy_to_user_fn));
 KH_STRATEGY_DECLARE(copy_to_user, inline_ldtr_sttr,    3, strat_to_inline_sttr,       sizeof(copy_to_user_fn));
 
+/* ========================================================================
+ * SP-7 Capability: copy_from_user (Task 15)
+ *
+ * Symmetric to copy_to_user. Same 4-strategy shape with naming variants:
+ *   prio 0: _copy_from_user
+ *   prio 1: copy_from_user
+ *   prio 2: __arch_copy_from_user
+ *   prio 3: inline_ldtr (our own ldtr impl, gated on register_ex_table)
+ * ======================================================================== */
+
+typedef unsigned long (*copy_from_user_fn)(void *to, const void __user *from, unsigned long n);
+
+static int strat_from_copy_from_user(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+    uint64_t a = ksyms_lookup("_copy_from_user");
+    if (!a) return KH_STRAT_ENODATA;
+    *(copy_from_user_fn *)out = (copy_from_user_fn)(uintptr_t)a;
+    return 0;
+}
+
+static int strat_from_sym_copy_from_user(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+    uint64_t a = ksyms_lookup("copy_from_user");
+    if (!a) return KH_STRAT_ENODATA;
+    *(copy_from_user_fn *)out = (copy_from_user_fn)(uintptr_t)a;
+    return 0;
+}
+
+static int strat_from_arch_copy_from_user(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+    uint64_t a = ksyms_lookup("__arch_copy_from_user");
+    if (!a) return KH_STRAT_ENODATA;
+    *(copy_from_user_fn *)out = (copy_from_user_fn)(uintptr_t)a;
+    return 0;
+}
+
+/* Stub inline copy_from_user. Task 16 will replace the body with a real
+ * ldtr-based implementation + ex_table fixups. Returns `n` to signal
+ * total failure (0 bytes copied). */
+unsigned long kh_inline_copy_from_user(void *to, const void __user *from, unsigned long n)
+{
+    (void)to; (void)from;
+    return n;
+}
+
+static int strat_from_inline_ldtr(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+
+    /* Gate on register_ex_table being resolvable (Task 16). */
+    uint64_t dummy = 0;
+    int rc = kh_strategy_resolve("register_ex_table", &dummy, sizeof(dummy));
+    if (rc) return rc;
+
+    *(copy_from_user_fn *)out = kh_inline_copy_from_user;
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(copy_from_user, _copy_from_user,       0, strat_from_copy_from_user,      sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, copy_from_user_sym,    1, strat_from_sym_copy_from_user,  sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, __arch_copy_from_user, 2, strat_from_arch_copy_from_user, sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, inline_ldtr,           3, strat_from_inline_ldtr,         sizeof(copy_from_user_fn));
+
 #endif /* !__USERSPACE__ */

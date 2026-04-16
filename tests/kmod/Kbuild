@@ -21,6 +21,7 @@ kh_test-y := test_main.o test_hook_kernel.o demo_kh_root.o \
     test_resolver_memstart_addr.o \
     test_resolver_cred.o \
     test_resolver_stack.o \
+    test_resolver_copy_user.o \
     ../../src/hook.o \
     ../../src/memory.o \
     ../../src/symbol.o \
