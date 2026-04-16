@@ -5,10 +5,9 @@
 
 #include <types.h>
 
-#ifndef __USERSPACE__
-#include <kh_log.h>
-#endif
-
+/* Maximum length of a strategy or capability name string in CSV-parsed
+ * module parameters (e.g. kh_disable="cap:name,..."). Reserved for
+ * Task 6's parse helpers; unused at this point. */
 #define KH_STRATEGY_NAME_MAX 32
 
 typedef int (*kh_strategy_fn_t)(void *out, size_t out_size);
@@ -24,7 +23,7 @@ struct kh_strategy {
 
 #define KH_STRATEGY_DECLARE(cap, nm, prio, fn, outsize)                \
     static struct kh_strategy __kh_strat_##cap##_##nm                  \
-    __attribute__((used, section(".kh_strategies"))) = {               \
+    __used __section(".kh_strategies") = {                             \
         .capability = #cap,                                            \
         .name = #nm,                                                   \
         .priority = (prio),                                            \
@@ -37,7 +36,12 @@ struct kh_strategy {
 int  kh_strategy_init(void);
 int  kh_strategy_resolve(const char *capability, void *out, size_t out_size);
 void kh_strategy_set_enabled(const char *cap, const char *name, bool enabled);
-void kh_strategy_force(const char *cap, const char *name);   /* NULL -> clear */
+/* `cap` and `name` must point to string literals or otherwise live
+ * for the module's lifetime — the registry stores the pointer, does
+ * not copy. Pass NULL as name to clear a prior force. */
+void kh_strategy_force(const char *cap, const char *name);
+/* `cap` and `name` storage lifetime same as kh_strategy_force. `count`
+ * is the number of upcoming resolve attempts to inject a failure on. */
 void kh_strategy_inject_fail(const char *cap, const char *name, int count);
 int  kh_strategy_run_consistency_check(void);                /* 0 = all caps agree */
 void kh_strategy_dump(void);                                 /* dmesg all slots */

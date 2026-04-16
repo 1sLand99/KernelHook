@@ -17,6 +17,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #elif defined(__KERNEL__) && !defined(KMOD_FREESTANDING)
 /*
@@ -51,6 +52,16 @@ typedef __SIZE_TYPE__ size_t;
 
 #ifndef NULL
 #define NULL ((void *)0)
+#endif
+
+/* bool: provided by kbuild via <linux/types.h>; by stdbool.h in userspace.
+ * Freestanding has neither, so define here. _Bool is a C99 keyword; the
+ * bool / true / false names are defined by <stdbool.h> in C99, but we have
+ * no libc. */
+#ifndef __cplusplus
+typedef _Bool bool;
+#define true  1
+#define false 0
 #endif
 
 #endif /* __USERSPACE__ */

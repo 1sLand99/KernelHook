@@ -58,6 +58,10 @@ SECTIONS
         *(.data .data.*)
     }
 
+    /* Link-time strategy registry — iterated via __start___kh_strategies /
+       __stop___kh_strategies at module init by src/kh_strategy.c (Task 3).
+       KEEP prevents --gc-sections from dropping otherwise-unreferenced
+       strategy entries that are only found via the anchor symbols. */
     .kh_strategies : ALIGN(8) {
         __start___kh_strategies = .;
         KEEP(*(.kh_strategies))
