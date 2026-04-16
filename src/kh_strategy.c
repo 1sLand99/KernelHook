@@ -450,6 +450,9 @@ static ssize_t disable_write(struct file *f, const char __user *u,
     if (copy_from_user(buf, u, len))
         return -EFAULT;
     buf[len] = '\0';
+    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[--len] = '\0';
     char *colon = strchr(buf, ':');
     if (!colon)
         return -EINVAL;
@@ -468,6 +471,9 @@ static ssize_t enable_write(struct file *f, const char __user *u,
     if (copy_from_user(buf, u, len))
         return -EFAULT;
     buf[len] = '\0';
+    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[--len] = '\0';
     char *colon = strchr(buf, ':');
     if (!colon)
         return -EINVAL;
@@ -486,6 +492,9 @@ static ssize_t force_write(struct file *f, const char __user *u,
     if (copy_from_user(buf, u, len))
         return -EFAULT;
     buf[len] = '\0';
+    /* Strip trailing newline from `echo "..." > /debug/file` invocations. */
+    if (len > 0 && buf[len - 1] == '\n')
+        buf[--len] = '\0';
     char *colon = strchr(buf, ':');
     if (!colon)
         return -EINVAL;

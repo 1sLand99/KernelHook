@@ -23,11 +23,16 @@ struct dentry;
  * function pointer from the right offset.  Unused callbacks are void * (NULL
  * at static init time) — the kernel treats NULL as "not implemented".
  *
- * Layout is stable across GKI 4.4–6.12 arm64 (LP64, 8 bytes per pointer).
+ * Layout: only the early fields (owner/llseek/read/write/.../release)
+ * are guaranteed stable across the GKI 5.10..6.12 range we target via
+ * SDK mode (test_avd_kmod.sh auto-downgrades to freestanding kh_test.ko
+ * for older kernels). Late fields (uring_cmd, splice_eof) vary by version
+ * but are NULL in our static-init structs, so a slightly-wrong offset
+ * for those is harmless — the kernel reads NULL and skips the callback.
  * Fields: owner, llseek, read, write, read_iter, write_iter, iopoll,
  *   iterate_shared, poll, unlocked_ioctl, compat_ioctl, mmap,
  *   mmap_supported_flags, open, flush, release, fsync, fasync,
- *   lock, sendpage, get_unmapped_area, check_flags, setfl, flock,
+ *   lock, sendpage, get_unmapped_area, check_flags, flock,
  *   splice_write, splice_read, splice_eof, fallocate, show_fdinfo,
  *   copy_file_range, remap_file_range, fadvise, uring_cmd,
  *   uring_cmd_iopoll.
@@ -60,7 +65,6 @@ struct file_operations {
 	void     *sendpage;
 	void     *get_unmapped_area;
 	void     *check_flags;
-	void     *setfl;
 	void     *flock;
 	void     *splice_write;
 	void     *splice_read;
