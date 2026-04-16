@@ -945,15 +945,16 @@ static int patch_crcs_via_resolver(uint8_t *mod, const Ehdr *eh,
 
 /* ---- Kbuild .ko detection ----
  *
- * Freestanding .ko files have sentinel CRC values (0xDEADBE01..04) in the
- * __versions section. Real kbuild .ko files have CRCs from Module.symvers.
- * We detect kbuild mode by the absence of any sentinel value.
+ * Freestanding .ko files have sentinel CRC values (0xDEADBE00..FFu sentinel
+ * namespace) in the __versions section. Real kbuild .ko files have CRCs from
+ * Module.symvers. We detect kbuild mode by the absence of any sentinel value.
  */
 static int is_kbuild_ko(const uint8_t *mod, const Ehdr *eh)
 {
-    /* Freestanding .ko files have sentinel CRCs (0xDEADBE01..04) in __versions
-     * AND a __modver_module_layout symbol. Kbuild .ko files have either an
-     * empty __versions section (KBUILD_MODPOST_WARN=1) or real CRCs. */
+    /* Freestanding .ko files have sentinel CRCs (0xDEADBE00..FFu sentinel
+     * namespace) in __versions AND a __modver_module_layout symbol. Kbuild
+     * .ko files have either an empty __versions section (KBUILD_MODPOST_WARN=1)
+     * or real CRCs. */
     Shdr *ver = elf_find_section(mod, eh, "__versions");
 
     /* If __versions is absent or empty, check for freestanding sentinel symbol */
@@ -982,8 +983,11 @@ static int is_kbuild_ko(const uint8_t *mod, const Ehdr *eh)
     while (p + 8 <= end) {
         uint32_t crc;
         memcpy(&crc, p, 4);
-        if (crc == 0xDEADBE01u || crc == 0xDEADBE02u ||
-            crc == 0xDEADBE03u || crc == 0xDEADBE04u)
+        /* Freestanding sentinel CRCs all live in 0xDEADBE00..0xDEADBEFFu.
+         * The loader will rewrite these at load time per crc_fallback_chain.
+         * Range check (not equality) so future MODVERSIONS additions don't
+         * silently break detection. */
+        if ((crc & 0xFFFFFF00u) == 0xDEADBE00u)
             return 0; /* sentinel CRC — freestanding */
         p += 64;
     }

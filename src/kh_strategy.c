@@ -355,7 +355,7 @@ void kh_strategy_apply_force_list(const char *csv)
         char *colon = strchr(p, ':');
         if (colon) {
             *colon = '\0';
-            /* "none" is the sentinel for clearing a prior force. */
+            /* Empty name after colon (e.g. "cap:" with nothing) clears a prior force — maps to NULL. */
             const char *name = (*(colon + 1) == '\0') ? NULL : colon + 1;
             kh_strategy_force(p, name);
         }
