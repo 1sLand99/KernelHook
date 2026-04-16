@@ -74,7 +74,39 @@ int kh_pgtable_init(void)
     pr_info("pgtable: page_size=%llu page_shift=%llu",
           (unsigned long long)page_size, (unsigned long long)page_shift);
 
-    /* Resolve flush functions via ksyms */
+    /* Detect page-table levels + PAGE_OFFSET from TCR_EL1.T1SZ BEFORE any
+     * ksyms lookups. PAGE_OFFSET is the kernel VA lower bound; we need it
+     * to validate resolved symbol addresses below. Computing it from
+     * hardware registers (no ksyms) keeps this ordering safe.
+     *
+     * T1SZ = 64 - VA_BITS. VA_BITS determines pgtable levels:
+     *   39-bit VA, 4K  (T1SZ=25) → 3 levels, PAGE_OFFSET=0xFFFFFF8000000000
+     *   47-bit VA, 16K (T1SZ=17) → 4 levels, PAGE_OFFSET=0xFFFF800000000000
+     *   48-bit VA, 4K  (T1SZ=16) → 4 levels, PAGE_OFFSET=0xFFFF000000000000
+     *   52-bit VA, 4K  (T1SZ=12) → 4 levels + FEAT_LPA2 */
+    {
+        uint64_t tcr;
+        asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
+        uint64_t t1sz = (tcr >> 16) & 0x3f;
+        uint64_t va_bits = 64 - t1sz;
+        /* levels = ceil((va_bits - page_shift) / (page_shift - 3)) */
+        uint64_t pxd_bits = page_shift - 3; /* bits per level: 9 for 4KB */
+        page_level = (va_bits - page_shift + pxd_bits - 1) / pxd_bits;
+        /* PAGE_OFFSET = sign-extension of bit (VA_BITS - 1) */
+        page_offset = ~((1ULL << va_bits) - 1);
+        pr_info("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
+              (unsigned long long)tcr, (unsigned long long)t1sz,
+              (unsigned long long)va_bits, (unsigned long long)page_level,
+              (unsigned long long)page_offset);
+    }
+
+    /* Resolve flush functions via ksyms. These pointers are DIAGNOSTIC-only
+     * — all TLB/icache/dcache maintenance in this module uses inline asm
+     * (kh_flush_tlb_kernel_page's `tlbi vaale1is`, `ic ivau` loops in
+     * inline.c, `dc civac` loops in pgtable_entry/pgtable_phys_kernel).
+     * Newer GKI kernels (e.g. android16 6.12.58) do not export these via
+     * kallsyms, but we never call the resolved pointers, so keep the
+     * lookups non-fatal. They remain for `dmesg` diagnostics. */
     flush_tlb_kernel_page = (flush_tlb_kernel_page_func_t)(uintptr_t)ksyms_lookup("flush_tlb_kernel_page");
     flush_tlb_kernel_range = (flush_tlb_kernel_range_func_t)(uintptr_t)ksyms_lookup("flush_tlb_kernel_range");
     flush_icache_all = (flush_icache_all_func_t)(uintptr_t)ksyms_lookup("flush_icache_all");
@@ -89,11 +121,6 @@ int kh_pgtable_init(void)
           (unsigned long long)(uintptr_t)flush_icache_all,
           (unsigned long long)(uintptr_t)flush_icache_range,
           (unsigned long long)(uintptr_t)__flush_dcache_area);
-
-    if (!flush_tlb_kernel_page || !__flush_dcache_area) {
-        pr_err("pgtable: failed to resolve required flush symbols");
-        return -1;
-    }
 
     /* Resolve kimage_voffset - kernel exports this as a variable */
     uint64_t *voffset_ptr = (uint64_t *)(uintptr_t)ksyms_lookup("kimage_voffset");
@@ -132,35 +159,17 @@ int kh_pgtable_init(void)
         return -1;
     }
 
-    /* Validate kernel_pgd is in kernel VA range.
-     * Kernel VA starts at 0xffffff8000000000 for 39-bit VA,
-     * 0xffff000000000000 for 48-bit VA. Use the lower bound. */
-    if (kernel_pgd < 0xffffff8000000000ULL) {
-        pr_err("pgtable: kernel_pgd=%llx looks invalid (not in kernel VA range)",
-              (unsigned long long)kernel_pgd);
-        return -1;
-    }
-
-    /* Detect page table levels from TCR_EL1.T1SZ.
-     * T1SZ = 64 - VA_BITS. VA_BITS determines pgtable levels:
-     *   39-bit VA (T1SZ=25) → 3 levels (PGD/PMD/PTE)
-     *   48-bit VA (T1SZ=16) → 4 levels (PGD/PUD/PMD/PTE)
-     *   52-bit VA (T1SZ=12) → 4 levels + FEAT_LPA2 */
-    {
-        uint64_t tcr;
-        asm volatile("mrs %0, tcr_el1" : "=r"(tcr));
-        uint64_t t1sz = (tcr >> 16) & 0x3f;
-        uint64_t va_bits = 64 - t1sz;
-        /* levels = ceil((va_bits - page_shift) / (page_shift - 3)) */
-        uint64_t pxd_bits = page_shift - 3; /* bits per level: 9 for 4KB */
-        page_level = (va_bits - page_shift + pxd_bits - 1) / pxd_bits;
-        /* PAGE_OFFSET = sign-extension of bit (VA_BITS - 1)
-         * For 39-bit: 0xFFFFFF8000000000, for 48-bit: 0xFFFF000000000000 */
-        page_offset = ~((1ULL << va_bits) - 1);
-        pr_info("pgtable: TCR_EL1=%llx T1SZ=%llu VA_BITS=%llu page_level=%llu PAGE_OFFSET=%llx",
-              (unsigned long long)tcr, (unsigned long long)t1sz,
-              (unsigned long long)va_bits, (unsigned long long)page_level,
+    /* Validate kernel_pgd is in kernel VA range. Use the PAGE_OFFSET we
+     * computed from TCR_EL1 above so this works across all ARM64 VA_BITS
+     * (39/47/48/52) and page sizes (4K/16K/64K). A hardcoded 39-bit
+     * lower bound (0xffffff8000000000) previously rejected valid pgd
+     * addresses on 16K/4-level kernels — e.g. GKI android16 6.12.58 on
+     * Pixel_37 AVD where swapper_pg_dir sits at 0xffffc00082054000. */
+    if (kernel_pgd < page_offset) {
+        pr_err("pgtable: kernel_pgd=%llx below PAGE_OFFSET=%llx (not in kernel VA range)",
+              (unsigned long long)kernel_pgd,
               (unsigned long long)page_offset);
+        return -1;
     }
 
     pr_info("pgtable: init ok, pgd=0x%llx (%s) voffset=0x%llx page_shift=%llu levels=%llu",
