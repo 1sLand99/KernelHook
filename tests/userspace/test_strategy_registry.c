@@ -12,15 +12,6 @@
  *
  * RED test: intentionally fails at link time because kh_strategy_init()
  * and kh_strategy_resolve() are not yet implemented (Task 3).
- *
- * NOTE: KH_STRATEGY_DECLARE uses the ELF section name ".kh_strategies"
- * (set in include/kh_strategy.h, Task 1).  Mach-O (macOS host) rejects
- * single-component section names; the macro is therefore guarded with
- * #ifndef __APPLE__ here so that compilation succeeds on both platforms.
- * The link-time undefined-symbol error for kh_strategy_init /
- * kh_strategy_resolve is produced on both platforms regardless, because
- * the API calls below are unconditional.  The root cause (ELF-only section
- * name in KH_STRATEGY_DECLARE) is a Task 1 defect tracked as a concern.
  */
 
 #include "test_framework.h"
@@ -29,8 +20,6 @@
 static uint64_t g_stub_value;
 static int g_stub_calls;
 
-static int stub_resolve_fixed(void *out, size_t sz)
-    __attribute__((unused));
 static int stub_resolve_fixed(void *out, size_t sz)
 {
     g_stub_calls++;
@@ -41,8 +30,6 @@ static int stub_resolve_fixed(void *out, size_t sz)
 }
 
 static int stub_resolve_fail(void *out, size_t sz)
-    __attribute__((unused));
-static int stub_resolve_fail(void *out, size_t sz)
 {
     (void)out;
     (void)sz;
@@ -50,16 +37,8 @@ static int stub_resolve_fail(void *out, size_t sz)
     return -2;
 }
 
-/*
- * KH_STRATEGY_DECLARE emits structs into ".kh_strategies" (ELF-only section
- * name).  Wrap in #ifndef __APPLE__ so the macOS host compiler does not
- * reject the section attribute; the link-error RED signal comes from the
- * kh_strategy_init / kh_strategy_resolve calls below on all platforms.
- */
-#ifndef __APPLE__
 KH_STRATEGY_DECLARE(test_cap_a, stub_hi, 0, stub_resolve_fixed, sizeof(uint64_t));
 KH_STRATEGY_DECLARE(test_cap_a, stub_lo, 1, stub_resolve_fail, sizeof(uint64_t));
-#endif
 
 TEST(priority_ordering)
 {
