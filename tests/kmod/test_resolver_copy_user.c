@@ -34,22 +34,17 @@ extern void *memset(void *s, int c, unsigned long n);
  * Part A (resolution): verify copy_to_user and copy_from_user capabilities
  *   resolve to non-NULL function pointers.
  *
- * Part B (behavioral, inline path): when kh_force has forced the inline
- *   path (copy_to_user:inline_ldtr_sttr and copy_from_user:inline_ldtr),
- *   call the inline functions directly with a vmalloc buffer cast to
- *   __user and verify bytes are transferred correctly.
- *
- *   Rationale: in __init context, current is the insmod process running
- *   at EL1. vmalloc pages are EL1-accessible kernel memory. With PAN
- *   disabled (msr pan, #0), sttrb/ldtrb at EL1 with a kernel VA work
- *   correctly — unprivileged instructions at EL1 behave like EL0 with
- *   respect to PAN but still use EL1 page table mappings, so they can
- *   access any kernel-mapped VA. The test verifies the byte-copy loop
- *   and the zero-on-success return value.
- *
- *   If register_ex_table fails (i.e., probe_extable returns ENODATA),
- *   the inline strategies are not reachable via the registry, and the
- *   direct-call behavioral test is also skipped.
+ * Part B (fault-path verification): when register_ex_table succeeded, pass
+ *   a deliberately-invalid __user pointer (0xdeadbeef) to the inline functions.
+ *   The sttrb/ldtrb at that address generates a permission fault; if the
+ *   __ex_table was correctly registered with EX_TYPE_UACCESS_ERR_ZERO, the
+ *   kernel fault handler jumps to our fixup label, which restores PAN and
+ *   returns `rem` (non-zero = bytes not copied). This validates end-to-end:
+ *   ex_table section emission, linker script inclusion, kernel module-loader
+ *   pickup, EX_TYPE dispatch, fixup PC computation, and PAN restore. It does
+ *   NOT attempt a happy-path copy because ldtr/sttr at EL1 apply EL0
+ *   permission checks, and vmalloc pages (PAGE_KERNEL, no PTE_USER) are not
+ *   accessible via these instructions — that would always fault regardless.
  * ======================================================================== */
 int test_resolver_copy_user(void) {
     typedef unsigned long (*to_t)(void __user *, const void *, unsigned long);
@@ -69,79 +64,60 @@ int test_resolver_copy_user(void) {
     KH_TEST_ASSERT("copy_user", ffu != (from_t)0,
                    "copy_from_user resolved to NULL fn pointer");
 
-    /* ---- Part B: behavioral test for inline path ----
+    /* ---- Part B: fault-path test for inline path ----
      *
-     * Check whether register_ex_table succeeded. If it did, the inline
-     * strategies are usable and we call them directly (not through the
-     * registry, to isolate the asm from resolver caching). */
+     * Check whether register_ex_table succeeded. If it did, the ex_table
+     * entries are registered and we can validate them by triggering a
+     * controlled fault on a deliberately-invalid user pointer. */
     {
         int extable_result = -1;
         int erc = kh_strategy_resolve("register_ex_table",
                                       &extable_result, sizeof(extable_result));
         if (erc != 0) {
-            pr_info("[test_resolver_copy_user] inline behavioral test SKIPPED"
+            pr_info("[test_resolver_copy_user] inline fault-path test SKIPPED"
                     " (register_ex_table rc=%d)\n", erc);
             goto part_b_done;
         }
 
 #define KH_COPY_TEST_SIZE 64
-        /* Allocate two kernel buffers. Cast to __user for the inline
-         * functions — PAN is cleared inside the asm so EL1 kernel VAs
-         * are accessible via sttrb/ldtrb. This is safe in __init context
-         * (single-threaded, no concurrent TLBI). */
-        unsigned char *src_buf = (unsigned char *)vmalloc(KH_COPY_TEST_SIZE);
-        unsigned char *dst_buf = (unsigned char *)vmalloc(KH_COPY_TEST_SIZE);
-
-        if (!src_buf || !dst_buf) {
-            pr_warn("[test_resolver_copy_user] vmalloc failed, skipping"
-                    " inline behavioral test\n");
-            if (src_buf) vfree(src_buf);
-            if (dst_buf) vfree(dst_buf);
-            goto part_b_done;
-        }
-
-        /* Fill src with a recognizable pattern. Zero dst. */
+        /* Kernel-side scratch buffer for copy_from_user destination. */
+        unsigned char *kernel_dst = (unsigned char *)vmalloc(KH_COPY_TEST_SIZE);
+        unsigned char  kernel_src[KH_COPY_TEST_SIZE];
         for (int i = 0; i < KH_COPY_TEST_SIZE; i++)
-            src_buf[i] = (unsigned char)(i ^ 0xA5u);
-        memset(dst_buf, 0, KH_COPY_TEST_SIZE);
+            kernel_src[i] = (unsigned char)(i ^ 0xA5u);
 
-        /* Test kh_inline_copy_to_user: kernel src -> "user" dst.
-         * rem == 0 means all bytes were stored. */
+        /* Deliberately-bogus user pointer: low-mem address that is not
+         * mapped in the insmod process. sttrb/ldtrb on this VA will fault
+         * at EL1 under EL0 permission checks. If EX_TYPE_UACCESS_ERR_ZERO
+         * is correctly registered, the fault handler jumps to our fixup
+         * label and returns cleanly with rem > 0. */
+        void __user *bad_user = (void __user *)(uintptr_t)0xdeadbeefUL;
+
+        /* Test kh_inline_copy_to_user: fault on sttrb, fixup returns rem > 0. */
         unsigned long rem_to = kh_inline_copy_to_user(
-            (void __user *)dst_buf, src_buf, KH_COPY_TEST_SIZE);
+            bad_user, kernel_src, KH_COPY_TEST_SIZE);
 
         KH_TEST_ASSERT("copy_user",
-                       rem_to == 0,
-                       "inline_copy_to_user: non-zero bytes not copied");
-        KH_TEST_ASSERT("copy_user",
-                       memcmp(src_buf, dst_buf, KH_COPY_TEST_SIZE) == 0,
-                       "inline_copy_to_user: dest does not match src");
+                       rem_to > 0,
+                       "inline_copy_to_user: fixup did not return rem>0 on bad ptr");
 
-        pr_info("[test_resolver_copy_user] inline_copy_to_user: rem=%lu"
-                " pattern_ok=%d\n",
-                rem_to,
-                (memcmp(src_buf, dst_buf, KH_COPY_TEST_SIZE) == 0));
+        pr_info("[test_resolver_copy_user] inline_copy_to_user fault-path:"
+                " rem=%lu (expected >0, fixup fired OK)\n", rem_to);
 
-        /* Test kh_inline_copy_from_user: "user" src -> kernel dst. */
-        memset(dst_buf, 0, KH_COPY_TEST_SIZE);
-
+        /* Test kh_inline_copy_from_user: fault on ldtrb, fixup returns rem > 0. */
         unsigned long rem_from = kh_inline_copy_from_user(
-            dst_buf, (const void __user *)src_buf, KH_COPY_TEST_SIZE);
+            kernel_dst ? (void *)kernel_dst : (void *)kernel_src,
+            (const void __user *)bad_user, KH_COPY_TEST_SIZE);
 
         KH_TEST_ASSERT("copy_user",
-                       rem_from == 0,
-                       "inline_copy_from_user: non-zero bytes not copied");
-        KH_TEST_ASSERT("copy_user",
-                       memcmp(src_buf, dst_buf, KH_COPY_TEST_SIZE) == 0,
-                       "inline_copy_from_user: dest does not match src");
+                       rem_from > 0,
+                       "inline_copy_from_user: fixup did not return rem>0 on bad ptr");
 
-        pr_info("[test_resolver_copy_user] inline_copy_from_user: rem=%lu"
-                " pattern_ok=%d\n",
-                rem_from,
-                (memcmp(src_buf, dst_buf, KH_COPY_TEST_SIZE) == 0));
+        pr_info("[test_resolver_copy_user] inline_copy_from_user fault-path:"
+                " rem=%lu (expected >0, fixup fired OK)\n", rem_from);
 
-        vfree(src_buf);
-        vfree(dst_buf);
+        if (kernel_dst)
+            vfree(kernel_dst);
 #undef KH_COPY_TEST_SIZE
     }
 part_b_done:

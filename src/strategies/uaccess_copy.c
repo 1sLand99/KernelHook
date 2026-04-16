@@ -28,7 +28,8 @@
  *   Use ARMv8.1+ `msr pan, #0` to disable Privileged Access Never, then
  *   sttrb/ldtrb for unprivileged EL0 stores/loads at EL1, then `msr pan, #1`
  *   to restore PAN. Each fault site has a corresponding __ex_table entry
- *   (EX_TYPE_FIXUP=1) that restores PAN and returns remaining byte count.
+ *   (EX_TYPE_UACCESS_ERR_ZERO=2) that restores PAN and returns remaining
+ *   byte count.
  *
  *   The kernel module loader automatically reads the __ex_table ELF section
  *   from the .ko and registers entries into THIS_MODULE->extable at insmod
@@ -98,9 +99,13 @@ static int strat_to_arch_copy_to_user(void *out, size_t sz)
  * Copies byte-by-byte using sttrb. Restores PAN with `msr pan, #1` on
  * both success and fault-fixup paths.
  *
- * Exception table (EX_TYPE_FIXUP=1): a fault on the sttrb instruction
- * causes the kernel's exception handler to jump to kh_sttr_fixup, which
- * restores PAN and falls through to the return path with rem = remaining.
+ * Exception table (EX_TYPE_UACCESS_ERR_ZERO=2): a fault on the sttrb
+ * instruction causes the kernel's exception handler to jump to kh_sttr_fixup
+ * (via get_ex_fixup() which computes regs->pc = &ex->fixup + ex->fixup),
+ * which restores PAN and falls through to the return path with rem = remaining.
+ * The handler also writes -EFAULT to reg_err and 0 to reg_zero (both encoded
+ * in data=0, meaning X0); this is harmless because the fixup falls through to
+ * the C return sequence which overwrites X0 with rem.
  * The __ex_table entry is registered automatically at insmod time.
  *
  * Returns bytes NOT copied (0 on success, 1..n on fault).
@@ -143,20 +148,29 @@ unsigned long kh_inline_copy_to_user(void __user *to, const void *from, unsigned
         "    msr pan, #1\n"              /* restore PAN — fault fixup path */
         "3:\n"
         /* Exception table entry for the sttrb fault site.
-         * Linux 5.4+ format (12 bytes):
+         * arm64 Linux 5.15+ format (12 bytes):
          *   int  insn  = (faulting_pc   - &entry.insn)  — PC-relative
          *   int  fixup = (fixup_label   - &entry.fixup) — PC-relative
-         *   short type = 1 (EX_TYPE_FIXUP: just jump to fixup)
+         *   short type = 2 (EX_TYPE_UACCESS_ERR_ZERO: handler calls
+         *                   get_ex_fixup() which does regs->pc =
+         *                   &ex->fixup + ex->fixup, i.e. jumps to our
+         *                   fixup label; handler also zeroes registers
+         *                   encoded in data, but with data=0 that's X0
+         *                   which C code will overwrite with the return
+         *                   value)
          *   short data = 0
          *
          * At runtime: entry.insn + kh_sttr_insn_site - &entry.insn
          *           = kh_sttr_insn_site (the faulting PC).
          * search_exception_tables(kh_sttr_insn_site) returns non-NULL if
-         * the kernel module loader found and registered this section. */
+         * the kernel module loader found and registered this section.
+         * .align 2 matches kernel's __ASM_EXTABLE_RAW to ensure 4-byte
+         * alignment of the entry. */
         ".pushsection __ex_table, \"a\"\n"
+        "    .align 2\n"
         "    .long (kh_sttr_insn_site - .)\n"  /* PC-rel offset to fault insn */
         "    .long (kh_sttr_fixup - .)\n"       /* PC-rel offset to fixup */
-        "    .short 1\n"                         /* EX_TYPE_FIXUP */
+        "    .short 2\n"                         /* EX_TYPE_UACCESS_ERR_ZERO (arm64 5.15+) */
         "    .short 0\n"                         /* data */
         ".popsection\n"
         : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
@@ -270,12 +284,15 @@ unsigned long kh_inline_copy_from_user(void *to, const void __user *from, unsign
         "kh_ldtr_fixup:\n"
         "    msr pan, #1\n"              /* restore PAN — fault fixup path */
         "3:\n"
-        /* Exception table entry for the ldtrb fault site. Same 12-byte
-         * format as the sttrb entry above. */
+        /* Exception table entry for the ldtrb fault site. Same arm64 5.15+
+         * 12-byte format as the sttrb entry above: type=2
+         * (EX_TYPE_UACCESS_ERR_ZERO), data=0. .align 2 matches kernel's
+         * __ASM_EXTABLE_RAW to ensure 4-byte alignment. */
         ".pushsection __ex_table, \"a\"\n"
+        "    .align 2\n"
         "    .long (kh_ldtr_insn_site - .)\n"
         "    .long (kh_ldtr_fixup - .)\n"
-        "    .short 1\n"                  /* EX_TYPE_FIXUP */
+        "    .short 2\n"                  /* EX_TYPE_UACCESS_ERR_ZERO (arm64 5.15+) */
         "    .short 0\n"
         ".popsection\n"
         : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
