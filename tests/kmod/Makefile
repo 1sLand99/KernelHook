@@ -99,7 +99,8 @@ FS_TEST_SRCS := test_main.c test_hook_kernel.c demo_kh_root.c \
                 test_resolver_swapper_pg_dir.c \
                 test_resolver_kimage_voffset.c \
                 test_resolver_memstart_addr.c \
-                test_resolver_cred.c
+                test_resolver_cred.c \
+                test_resolver_stack.c
 FS_ASM_SRCS  := plt_stub.S
 FS_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                 $(KH_ROOT)/src/memory.c \

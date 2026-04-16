@@ -116,4 +116,104 @@ KH_STRATEGY_DECLARE(init_cred, kallsyms_init_cred, 0, strat_kallsyms_init_cred, 
 KH_STRATEGY_DECLARE(init_cred, current_task_walk,  1, strat_current_task_walk,  sizeof(uint64_t));
 KH_STRATEGY_DECLARE(init_cred, init_task_walk,     2, strat_init_task_walk,     sizeof(uint64_t));
 
+/* ========================================================================
+ * SP-7 Capability: init_thread_union (kernel stack base VA)
+ *
+ * Three strategies:
+ *   1. kallsyms_init_thread_union - direct lookup (standard export name)
+ *   2. kallsyms_init_stack         - alternate export name on some kernels
+ *   3. current_task_stack          - scan current task_struct for a
+ *                                    thread-size-aligned kernel-VA field
+ * ======================================================================== */
+
+static int strat_kallsyms_init_thread_union(void *out, size_t sz)
+{
+    if (sz != sizeof(uint64_t)) return -22;
+    uint64_t a = ksyms_lookup("init_thread_union");
+    if (!a) return KH_STRAT_ENODATA;
+    *(uint64_t *)out = a;
+    return 0;
+}
+
+static int strat_kallsyms_init_stack(void *out, size_t sz)
+{
+    if (sz != sizeof(uint64_t)) return -22;
+    uint64_t a = ksyms_lookup("init_stack");
+    if (!a) return KH_STRAT_ENODATA;
+    *(uint64_t *)out = a;
+    return 0;
+}
+
+/* Walk the first 0x200 bytes of a task_struct at 8-byte stride looking for
+ * a kernel-VA pointer that is aligned to a known thread size (8K/16K/32K).
+ * Returns 0 if no candidate found. Same sp_el0 caveat as
+ * strat_current_task_walk applies on pre-4.9 kernels. */
+static uint64_t find_stack_in_task(uint64_t task)
+{
+    for (unsigned long off = 0; off < 0x200; off += 8) {
+        uint64_t cand = *(uint64_t *)(task + off);
+        if (cand < 0xffff000000000000ULL) continue;
+        /* Thread sizes we accept: 8K (older ARM32-ish), 16K (most ARM64),
+         * 32K (some hardened builds). Try largest alignment first so we
+         * prefer the strongest match. */
+        for (uint64_t ts = 32768; ts >= 8192; ts >>= 1) {
+            if ((cand & (ts - 1)) == 0) return cand;
+        }
+    }
+    return 0;
+}
+
+/* See strat_current_task_walk in the init_cred section for the sp_el0
+ * semantics caveat on pre-4.9 kernels (CONFIG_THREAD_INFO_IN_TASK=n). */
+static int strat_current_task_stack(void *out, size_t sz)
+{
+    if (sz != sizeof(uint64_t)) return -22;
+    if (in_interrupt()) return -11;   /* -EAGAIN */
+    uint64_t task;
+    asm volatile("mrs %0, sp_el0" : "=r"(task));
+    uint64_t s = find_stack_in_task(task);
+    if (!s) return KH_STRAT_ENODATA;
+    *(uint64_t *)out = s;
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(init_thread_union, kallsyms_init_thread_union, 0, strat_kallsyms_init_thread_union, sizeof(uint64_t));
+KH_STRATEGY_DECLARE(init_thread_union, kallsyms_init_stack,        1, strat_kallsyms_init_stack,        sizeof(uint64_t));
+KH_STRATEGY_DECLARE(init_thread_union, current_task_stack,         2, strat_current_task_stack,         sizeof(uint64_t));
+
+/* ========================================================================
+ * SP-7 Capability: thread_size (kernel stack size)
+ *
+ * Two strategies:
+ *   1. probe_from_current_task - infer from stack alignment of current
+ *   2. const_default           - 16384 (most common ARM64 value)
+ * ======================================================================== */
+
+static int strat_probe_thread_size(void *out, size_t sz)
+{
+    if (sz != sizeof(uint64_t)) return -22;
+    /* Direct intra-file call instead of kh_strategy_resolve("init_thread_union",...)
+     * to avoid pulling the registry cache for a different capability into this
+     * probe. strat_current_task_stack handles its own in_interrupt guard. */
+    uint64_t stack = 0;
+    int rc = strat_current_task_stack(&stack, sizeof(stack));
+    if (rc) return rc;
+    /* Largest alignment wins (most specific). */
+    for (uint64_t ts = 32768; ts >= 8192; ts >>= 1) {
+        if ((stack & (ts - 1)) == 0) { *(uint64_t *)out = ts; return 0; }
+    }
+    return KH_STRAT_ENODATA;
+}
+
+static int strat_const_default_thread_size(void *out, size_t sz)
+{
+    if (sz != sizeof(uint64_t)) return -22;
+    *(uint64_t *)out = 16384;
+    pr_warn("[kh_strategy] thread_size using const default 16384\n");
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(thread_size, probe_from_current_task, 0, strat_probe_thread_size,         sizeof(uint64_t));
+KH_STRATEGY_DECLARE(thread_size, const_default,           1, strat_const_default_thread_size, sizeof(uint64_t));
+
 #endif /* !__USERSPACE__ */
