@@ -1937,6 +1937,41 @@ static int build_ctx_from_argv(int argc, char *argv[],
     return 0;
 }
 
+/* ---- DTB DRAM base PA parser ----
+ *
+ * Walk /proc/device-tree/memory@* /reg to find the lowest DRAM base PA.
+ * Returns 0 if no memory node found or filesystem unavailable.
+ *
+ * DTB reg property layout: 4 x uint32 = (base_hi, base_lo, size_hi, size_lo),
+ * 16 bytes total, big-endian. We only parse the first 8 bytes (base PA).
+ * Multiple memory nodes may exist; use the lowest base PA (that is the one
+ * memstart_addr points to).
+ */
+static uint64_t loader_parse_dtb_memstart(void)
+{
+    DIR *d = opendir("/proc/device-tree");
+    if (!d) return 0;
+    uint64_t lowest = (uint64_t)-1;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (strncmp(e->d_name, "memory@", 7) != 0) continue;
+        char p[256];
+        snprintf(p, sizeof(p), "/proc/device-tree/%s/reg", e->d_name);
+        int fd = open(p, O_RDONLY);
+        if (fd < 0) continue;
+        uint8_t buf[16];
+        if (read(fd, buf, sizeof(buf)) == 16) {
+            uint64_t base = 0;
+            int i;
+            for (i = 0; i < 8; i++) base = (base << 8) | buf[i];
+            if (base < lowest) lowest = base;
+        }
+        close(fd);
+    }
+    closedir(d);
+    return (lowest == (uint64_t)-1) ? 0 : lowest;
+}
+
 /* ---- Load / info shared implementation ----
  *
  * This function is the old main() body: parse argv, read the module,
@@ -1974,6 +2009,26 @@ static int do_load(int argc, char *argv[], int dry_run)
                             &force_probe, &cli_mod_size) != 0) {
         fprintf(stderr, "kmod_loader: argv parse failed\n");
         return 1;
+    }
+
+    /* Auto-inject iomem_memstart from DTB if user didn't override.
+     * memstart_addr capability's dtb_parse strategy reads this. */
+    if (strstr(params, "iomem_memstart=") == NULL) {
+        uint64_t dtb_ms = loader_parse_dtb_memstart();
+        if (dtb_ms) {
+            char extra[128];
+            int need_space = (params[0] != '\0');
+            snprintf(extra, sizeof(extra), "%siomem_memstart=0x%llx",
+                     need_space ? " " : "",
+                     (unsigned long long)dtb_ms);
+            if (strlen(params) + strlen(extra) + 1 < sizeof(params)) {
+                strcat(params, extra);
+                fprintf(stderr, "kmod_loader: DTB memstart=0x%llx injected\n",
+                        (unsigned long long)dtb_ms);
+            } else {
+                fprintf(stderr, "kmod_loader: DTB memstart found but params buffer full\n");
+            }
+        }
     }
 
     /* Trace buffer for resolver calls; dumped on verbose paths (future). */

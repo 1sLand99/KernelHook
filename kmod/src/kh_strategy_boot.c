@@ -77,6 +77,18 @@ module_param_named(iomem_textpa, kh_loader_injected_kimage_voffset, ulong, 0444)
 MODULE_PARM_DESC(iomem_textpa,
     "kimage_voffset value injected from loader (kernel_text_VA - kernel_text_PA)");
 
+/* Strategy capability "memstart_addr" / dtb_parse reads this global.
+ * Set via insmod iomem_memstart=<DTB-derived DRAM base PA>. Loader
+ * (tools/kmod_loader/kmod_loader.c) auto-injects this by walking
+ * /proc/device-tree/memory@*/reg. When loader did not or could not
+ * parse DTB, stays 0 and dtb_parse falls through. */
+/* ulong / uint64_t type equivalence: same LP64 ARM64 assumption as
+ * iomem_textpa above. */
+extern uint64_t kh_loader_injected_memstart;
+module_param_named(iomem_memstart, kh_loader_injected_memstart, ulong, 0444);
+MODULE_PARM_DESC(iomem_memstart,
+    "DRAM base PA (PHYS_OFFSET / memstart_addr) injected from DTB at load time");
+
 /*
  * kh_strategy_boot — called early in kernelhook_init(), after
  * kmod_compat_init() so kallsyms is available, before hook memory init.

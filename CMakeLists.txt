@@ -41,6 +41,7 @@ set(LIB_SOURCES
     src/kh_strategy.c
     src/strategies/swapper_pg_dir.c
     src/strategies/kimage_voffset.c
+    src/strategies/memstart_addr.c
 )
 
 add_library(kernelhook STATIC ${LIB_SOURCES})

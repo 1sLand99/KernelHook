@@ -541,6 +541,18 @@ static int __init kh_test_init(void)
             pr_err(KH_TEST_TAG "FAIL: test_resolver_kimage_voffset rc=%d\n", rrc);
         }
     }
+    {
+        extern int test_resolver_memstart_addr(void);
+        int rrc = test_resolver_memstart_addr();
+        tests_run++;
+        if (rrc == 0) {
+            tests_passed++;
+            pr_info(KH_TEST_TAG "PASS: test_resolver_memstart_addr\n");
+        } else {
+            tests_failed++;
+            pr_err(KH_TEST_TAG "FAIL: test_resolver_memstart_addr rc=%d\n", rrc);
+        }
+    }
 
 results:
 #endif
