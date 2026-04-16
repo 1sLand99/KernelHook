@@ -1972,6 +1972,80 @@ static uint64_t loader_parse_dtb_memstart(void)
     return (lowest == (uint64_t)-1) ? 0 : lowest;
 }
 
+/* ---- /proc/iomem parse for kernel text PA (SP-7 Task 28) ----
+ *
+ * kimage_voffset = kernel_image_VA - kernel_image_PA. We can derive the
+ * second half (PA) from /proc/iomem entries labeled "Kernel code" (or
+ * "Reserved" on locked-down kernels — match by known label first).
+ *
+ *   $ cat /proc/iomem
+ *   80000000-bfffffff : System RAM
+ *     80210000-80c0ffff : Kernel code
+ *     ...
+ *
+ * We parse lines of the form "HEXSTART-HEXEND : Kernel code" and return
+ * HEXSTART. When the kernel strips /proc/iomem labels (kptr_restrict=2),
+ * this returns 0 and the kimage_voffset strategy falls through to
+ * kallsyms or text_va_minus_pa. Caller must subtract the result from
+ * the kernel's _text VA to get kimage_voffset; but we expose only the
+ * raw PA here and let the kimage_voffset strategy do the subtraction.
+ *
+ * Note: we inject this as `iomem_textpa=...` but the kh_strategy_boot
+ * module_param for `iomem_textpa` is wired to
+ * kh_loader_injected_kimage_voffset (see kh_strategy_boot.c:76). The
+ * naming is slightly off — historically iomem_textpa was meant to carry
+ * a voffset directly. To preserve the existing wire protocol we compute
+ * kimage_voffset = _text_VA - text_PA HERE in the loader, by reading
+ * the _text symbol's VA from /proc/kallsyms (requires kptr_restrict=0),
+ * then subtracting the /proc/iomem PA. If either input is missing we
+ * return 0 and the strategy falls through.
+ */
+static uint64_t loader_parse_iomem_textpa(void)
+{
+    FILE *f = fopen("/proc/iomem", "r");
+    if (!f) return 0;
+    uint64_t pa = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        /* Look for " : Kernel code" suffix. */
+        char *label = strstr(line, ": Kernel code");
+        if (!label) continue;
+        /* Line may have leading whitespace: skip it. */
+        char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        /* Parse start of HEX range. */
+        uint64_t start = 0;
+        if (sscanf(p, "%llx-", (unsigned long long *)&start) == 1 && start) {
+            pa = start;
+            break;
+        }
+    }
+    fclose(f);
+    return pa;
+}
+
+static uint64_t loader_parse_text_va(void)
+{
+    FILE *f = fopen("/proc/kallsyms", "r");
+    if (!f) return 0;
+    uint64_t va = 0;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        /* Match exact symbol name "_text" — trailing space or newline. */
+        char *sp = strrchr(line, ' ');
+        if (!sp) continue;
+        /* skip trailing newline for comparison */
+        size_t l = strlen(sp + 1);
+        if (l > 0 && sp[l] == '\n') sp[l] = '\0';
+        if (strcmp(sp + 1, "_text") != 0) continue;
+        if (sscanf(line, "%llx", (unsigned long long *)&va) == 1 && va)
+            break;
+        va = 0;
+    }
+    fclose(f);
+    return va;
+}
+
 /* ---- Load / info shared implementation ----
  *
  * This function is the old main() body: parse argv, read the module,
@@ -2031,6 +2105,32 @@ static int do_load(int argc, char *argv[], int dry_run)
                  * than intended. The injection is a best-effort — if user already
                  * packed 4KB of params, our string may not make it in. That's a
                  * diagnostic warning, not a fatal error. */
+            }
+        }
+    }
+
+    /* Auto-inject iomem_textpa (SP-7 Task 28). iomem_textpa module_param is
+     * wired to kh_loader_injected_kimage_voffset in kh_strategy_boot.c, so we
+     * compute kimage_voffset = _text_VA - kernel_code_PA and inject that. */
+    if (strstr(params, "iomem_textpa=") == NULL) {
+        uint64_t text_pa = loader_parse_iomem_textpa();
+        uint64_t text_va = loader_parse_text_va();
+        if (text_pa && text_va && text_va > text_pa) {
+            uint64_t voff = text_va - text_pa;
+            char extra[128];
+            int need_space = (params[0] != '\0');
+            snprintf(extra, sizeof(extra), "%siomem_textpa=0x%llx",
+                     need_space ? " " : "",
+                     (unsigned long long)voff);
+            if (strlcat(params, extra, sizeof(params)) < sizeof(params)) {
+                fprintf(stderr,
+                        "kmod_loader: iomem kimage_voffset=0x%llx injected "
+                        "(_text VA=0x%llx PA=0x%llx)\n",
+                        (unsigned long long)voff,
+                        (unsigned long long)text_va,
+                        (unsigned long long)text_pa);
+            } else {
+                fprintf(stderr, "kmod_loader: iomem voffset found but params buffer full\n");
             }
         }
     }
