@@ -67,6 +67,11 @@ MODULE_PARM_DESC(kh_consistency_check,
 /* Strategy capability "kimage_voffset" / loader_inject reads this global.
  * Set via insmod iomem_textpa=<kernel kimage_voffset value>. When not
  * provided, stays 0 and the loader_inject strategy falls through. */
+/* uint64_t and unsigned long are both 64-bit on LP64 ARM64 (our only
+ * target), so the `ulong` module_param setter writes the full value
+ * correctly. A 32-bit host would need a different writer, but this
+ * project is ARM64-only (see CMakeLists.txt top-level architecture
+ * guard). */
 extern uint64_t kh_loader_injected_kimage_voffset;
 module_param_named(iomem_textpa, kh_loader_injected_kimage_voffset, ulong, 0444);
 MODULE_PARM_DESC(iomem_textpa,

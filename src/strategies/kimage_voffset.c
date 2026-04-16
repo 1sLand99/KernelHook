@@ -54,7 +54,7 @@ static int strat_text_va_minus_pa(void *out, size_t sz)
     if (rc) return rc;
 
     uint64_t pa = kh_walk_va_to_pa(pgd, text_va);
-    if (!pa) return -14;   /* -EFAULT: walk failed */
+    if (!pa) return KH_STRAT_ENODATA;   /* walk failed (invalid pgd) */
 
     *(uint64_t *)out = text_va - pa;
     return 0;
