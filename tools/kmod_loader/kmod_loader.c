@@ -159,13 +159,80 @@ int parse_kver(int *major, int *minor)
     return 0;
 }
 
+static const char *detect_vermagic_from_vendor_ko(void)
+{
+    static const char *ko_dirs[] = {
+        "/vendor_dlkm/lib/modules",
+        "/vendor/lib/modules",
+        "/system/lib/modules",
+        "/odm/lib/modules",
+        "/lib/modules",
+        NULL
+    };
+    for (int d = 0; ko_dirs[d]; d++) {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "ls %s/*.ko 2>/dev/null", ko_dirs[d]);
+        FILE *fp = popen(cmd, "r");
+        if (!fp) continue;
+        char path[256];
+        while (fgets(path, sizeof(path), fp)) {
+            path[strcspn(path, "\n")] = 0;
+            int fd = open(path, O_RDONLY);
+            if (fd < 0) continue;
+            struct stat st;
+            if (fstat(fd, &st) < 0 || st.st_size < (off_t)sizeof(Ehdr) ||
+                st.st_size > 4 * 1024 * 1024) {
+                close(fd);
+                continue;
+            }
+            uint8_t *buf = malloc(st.st_size);
+            if (!buf) { close(fd); continue; }
+            if (read(fd, buf, st.st_size) != st.st_size) {
+                free(buf); close(fd); continue;
+            }
+            close(fd);
+
+            Ehdr *eh = (Ehdr *)buf;
+            if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0) {
+                free(buf); continue;
+            }
+            Shdr *mi = elf_find_section(buf, eh, ".modinfo");
+            if (!mi) { free(buf); continue; }
+
+            const uint8_t *base = buf + mi->sh_offset;
+            const uint8_t *end  = base + mi->sh_size;
+            for (const uint8_t *p = base; p < end; ) {
+                if (strncmp((const char *)p, "vermagic=", 9) == 0) {
+                    const char *vm_str = (const char *)p + 9;
+                    static char detected[256];
+                    snprintf(detected, sizeof(detected), "%s", vm_str);
+                    free(buf);
+                    pclose(fp);
+                    fprintf(stderr, "kmod_loader: vermagic detected from %s\n", path);
+                    return detected;
+                }
+                p += strlen((const char *)p) + 1;
+            }
+            free(buf);
+        }
+        pclose(fp);
+    }
+    return NULL;
+}
+
 const char *get_vermagic(void)
 {
     static char vm[256];
     struct utsname u;
     if (uname(&u) < 0) return NULL;
 
-    /* Common GKI vermagic flags. TODO: detect from loaded modules. */
+    const char *detected = detect_vermagic_from_vendor_ko();
+    if (detected) {
+        snprintf(vm, sizeof(vm), "%s", detected);
+        return vm;
+    }
+
+    /* Fallback: common GKI flags */
     snprintf(vm, sizeof(vm), "%s SMP preempt mod_unload modversions aarch64", u.release);
     return vm;
 }
