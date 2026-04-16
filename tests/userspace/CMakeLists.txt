@@ -67,6 +67,8 @@ kh_add_test(test_android test_android.c)
 kh_add_test(test_mem_sizes test_mem_sizes.c)
 kh_add_test(test_page_isolation test_page_isolation.c)
 
+kh_add_test(test_strategy_registry test_strategy_registry.c)
+
 # --- Android: static linking so binaries run standalone ---
 if(ANDROID)
     foreach(_tgt
@@ -75,7 +77,7 @@ if(ANDROID)
         test_pac_strip test_interaction test_unit test_security
         test_linux_arm64 test_error_paths test_typed_wrappers
         test_fp_edge test_api_misuse test_android test_mem_sizes
-        test_page_isolation)
+        test_page_isolation test_strategy_registry)
         if(TARGET ${_tgt})
             target_link_options(${_tgt} PRIVATE -static)
         endif()
