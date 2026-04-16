@@ -226,8 +226,43 @@ void kh_strategy_inject_fail(const char *cap, const char *name, int count)
 
 int kh_strategy_run_consistency_check(void)
 {
-    /* Stub — Task 5 implements full cross-cap consistency validation. */
-    return 0;
+    int mismatches = 0;
+
+    for (int ci = 0; ci < g_cap_count; ci++) {
+        struct cap_slot *c = &g_caps[ci];
+        uint8_t first_buf[64];
+        size_t first_size = 0;
+        bool have_first = false;
+
+        for (int i = 0; i < c->num; i++) {
+            struct kh_strategy *s = c->by_prio[i];
+            if (!s->enabled)
+                continue;
+            /* Guard against stack overflow: skip strategies whose out_size
+             * exceeds the local buf capacity (matches cache-write guard). */
+            if (s->out_size > sizeof(first_buf)) {
+                pr_warn("[kh_strategy] consistency: %s:%s out_size %zu exceeds buf",
+                        c->name, s->name, s->out_size);
+                continue;
+            }
+            uint8_t buf[64];
+            int rc = s->resolve(buf, s->out_size);
+            if (rc != 0)
+                continue;
+            if (!have_first) {
+                memcpy(first_buf, buf, s->out_size);
+                first_size = s->out_size;
+                have_first = true;
+            } else if (first_size != s->out_size ||
+                       memcmp(first_buf, buf, s->out_size) != 0) {
+                pr_warn("[kh_strategy] consistency mismatch in %s: %s diverged",
+                        c->name, s->name);
+                mismatches++;
+                break;  /* one mismatch per cap */
+            }
+        }
+    }
+    return mismatches;
 }
 
 void kh_strategy_dump(void)
