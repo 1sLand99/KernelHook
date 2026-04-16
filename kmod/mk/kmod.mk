@@ -191,6 +191,15 @@ _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \
                  $(KERNELHOOK_DIR)/src/export.c \
                  $(KERNELHOOK_DIR)/src/kh_strategy_boot.c
 
+# Shim infrastructure sources: freestanding libc + ksyms wrappers for
+# kernel-exported functions. See memory/feedback_ksyms_over_extern.md.
+# These eliminate UND references to strcmp, memcpy, debugfs_*, copy_*,
+# add_taint, kstrtol, snprintf, vsnprintf — so kernelhook.ko only needs
+# a single __versions entry (module_layout) and no kmod_loader CRC
+# patching for kernel utility functions.
+_KH_SHIM_SRCS := $(KERNELHOOK_DIR)/shim/shim_libc.c \
+                 $(KERNELHOOK_DIR)/shim/shim_ksyms.c
+
 # PLT stub
 _KH_PLT_SRCS := $(KERNELHOOK_DIR)/plt/plt_stub.S
 
@@ -202,10 +211,11 @@ _KH_GEN_OBJS := $(KH_GEN_DIR)/kh_exports.kmod.o
 
 _KH_CORE_OBJS := $(patsubst $(KH_ROOT)/%.c,_kh_core/%.kmod.o,$(_KH_CORE_SRCS))
 _KH_KMOD_OBJS := $(patsubst $(KERNELHOOK_DIR)/%.c,_kh_kmod/%.kmod.o,$(_KH_KMOD_SRCS))
+_KH_SHIM_OBJS := $(patsubst $(KERNELHOOK_DIR)/%.c,_kh_kmod/%.kmod.o,$(_KH_SHIM_SRCS))
 _KH_PLT_OBJS  := $(patsubst $(KERNELHOOK_DIR)/%.S,_kh_kmod/%.kmod.o,$(_KH_PLT_SRCS))
 _KH_MOD_OBJS  := $(patsubst %.c,%.kmod.o,$(MODULE_SRCS))
 
-_KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_PLT_OBJS) $(_KH_GEN_OBJS)
+_KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_SHIM_OBJS) $(_KH_PLT_OBJS) $(_KH_GEN_OBJS)
 
 # ---------- Targets ----------
 

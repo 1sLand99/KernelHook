@@ -186,10 +186,15 @@ static const struct kernel_param_ops __kmod_param_ops_ulong = {
 #define ENOMEM 12
 #endif
 
-/* ---- memset / memcpy (compiler may lower __builtin_* to calls) ---- */
-extern void *memset(void *s, int c, unsigned long n);
-extern void *memcpy(void *dst, const void *src, unsigned long n);
-extern void *memmove(void *dst, const void *src, unsigned long n);
+/* ---- memset / memcpy / memmove ----
+ *
+ * Defined in kmod/shim/shim_libc.c (freestanding self-implementations).
+ * Declared here as plain prototypes so callers link to our definitions
+ * rather than treating them as extern-kernel references. See
+ * memory/feedback_ksyms_over_extern.md for the rule. */
+void *memset(void *s, int c, unsigned long n);
+void *memcpy(void *dst, const void *src, unsigned long n);
+void *memmove(void *dst, const void *src, unsigned long n);
 
 /* ---- __init / __exit section attributes ---- */
 #define __init __section(".init.text")
@@ -197,31 +202,26 @@ extern void *memmove(void *dst, const void *src, unsigned long n);
 
 /* ---- __versions (modversion CRC table) ----
  *
- * When CONFIG_MODVERSIONS=y the kernel checks CRCs for every imported
- * symbol against entries in the module's __versions section.  Missing
- * entries cause try_to_force_load() → -ENOEXEC (unless FORCE_LOAD=y).
+ * When CONFIG_MODVERSIONS=y the kernel checks CRCs for every IMPORTED
+ * (undefined) symbol against entries in the module's __versions section.
+ * If an imported symbol has no matching entry, try_to_force_load falls
+ * through and the kernel refuses to load the module.
  *
- * We must provide CRCs for:
- *   module_layout  — checked by check_modstruct_version()
- *   _printk        — called by pr_info/pr_err macros
- *   memcpy/memset  — compiler-generated calls from __builtin_*
+ * Since 2026-04-16 this project keeps the UND-symbol set minimal by:
+ *   1. Self-implementing pure-algorithm libc (memcpy, memset, memmove,
+ *      memcmp, strcmp, strncmp, strchr, strlcpy) in kmod/shim/shim_libc.c.
+ *   2. Wrapping every genuinely-kernel function (add_taint, copy_to_user,
+ *      copy_from_user, debugfs_*, kstrtol, snprintf, vprintk, etc.) in
+ *      a ksyms_lookup + static-cache shim in kmod/shim/shim_ksyms.c and
+ *      kmod/src/log.c.
  *
- * Extract CRCs from a vendor module:
- *   objcopy --dump-section __versions=/tmp/v vendor.ko
- *   python3 -c "import struct; d=open('/tmp/v','rb').read(); \
- *     [print(hex(struct.unpack('<I',d[i:i+4])[0]),d[i+8:i+64].split(b'\0')[0]) \
- *      for i in range(0,len(d),64)]"
- *
- * Plan 2 (runtime resolver + device database) makes these values
- * runtime-resolved. The .ko is built with placeholder sentinel values
- * (0xDEADBE01..04) which kmod_loader's resolver chain overwrites before
- * calling init_module. See tools/kmod_loader/resolver.{h,c} and
- * kmod/devices/ *.conf for the resolution path.
- *
- * The sentinels exist only so a mis-patched module fails LOUDLY with a
- * "disagrees about version" error instead of silently accepting random
- * garbage. The kernel's modversion check will reject these values and
- * surface the bug instead of misloading.
+ * The only remaining UND symbol that the kernel's module loader checks
+ * against __versions is `module_layout`: the kernel's
+ * check_modstruct_version() asserts that the module was compiled against
+ * a compatible struct module layout. That single entry stays as a
+ * sentinel (0xDEADBE01) to be patched at load time by kmod_loader from
+ * a reference vendor .ko. See memory/feedback_ksyms_over_extern.md for
+ * the full rationale.
  */
 
 struct modversion_info {
@@ -237,23 +237,7 @@ struct modversion_info {
         }
 
 #define MODULE_VERSIONS()                                                     \
-    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout");      \
-    _MODVER_ENTRY(__modver_printk,        0xDEADBE02u, "_printk");            \
-    _MODVER_ENTRY(__modver_memcpy,        0xDEADBE03u, "memcpy");             \
-    _MODVER_ENTRY(__modver_memset,        0xDEADBE04u, "memset");             \
-    _MODVER_ENTRY(__modver_strcmp,        0xDEADBE05u, "strcmp");             \
-    _MODVER_ENTRY(__modver_strncmp,       0xDEADBE06u, "strncmp");            \
-    _MODVER_ENTRY(__modver_strchr,        0xDEADBE07u, "strchr");             \
-    _MODVER_ENTRY(__modver_strlcpy,       0xDEADBE08u, "strlcpy");           \
-    _MODVER_ENTRY(__modver_kstrtol,       0xDEADBE09u, "kstrtol");           \
-    _MODVER_ENTRY(__modver_add_taint,     0xDEADBE0Au, "add_taint");         \
-    _MODVER_ENTRY(__modver_memcmp,                   0xDEADBE0Bu, "memcmp");               \
-    _MODVER_ENTRY(__modver_debugfs_create_dir,       0xDEADBE0Cu, "debugfs_create_dir");   \
-    _MODVER_ENTRY(__modver_debugfs_create_file,      0xDEADBE0Du, "debugfs_create_file");  \
-    _MODVER_ENTRY(__modver_copy_from_user,           0xDEADBE0Eu, "copy_from_user");       \
-    _MODVER_ENTRY(__modver_copy_to_user,             0xDEADBE0Fu, "copy_to_user");         \
-    _MODVER_ENTRY(__modver_debugfs_remove_recursive, 0xDEADBE10u, "debugfs_remove_recursive"); \
-    _MODVER_ENTRY(__modver_snprintf,                 0xDEADBE11u, "snprintf")
+    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING
