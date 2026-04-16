@@ -2,8 +2,9 @@
 /*
  * Copyright (C) 2026 bmax121.
  *
- * User-pointer helpers: kh_strncpy_from_user, kh_copy_to_user, and
- * credential-elevation primitives used by syscall hooks.
+ * User-pointer helpers: kh_strncpy_from_user, kh_copy_to_user,
+ * kh_copy_from_user, and credential-elevation primitives used by
+ * syscall hooks.
  *
  * Build modes: shared
  * Depends on: symbol.h (ksyms_lookup for strncpy_from_user, copy_to_user,
@@ -22,8 +23,10 @@
  *   - `stack` offset is probed the same way against init_thread_union
  *     when that symbol resolves; otherwise we fall back to the GKI-6.x
  *     constant 0x20.
- *   - pt_regs sizeof(=0x150) and THREAD_SIZE(=16384) are hardcoded to
- *     the arm64-LP64 values that have been stable since 5.10.
+ *   - pt_regs_size and thread_size are resolved via the SP-7 strategy
+ *     registry at init (kh_uaccess_init). Fallback defaults are the
+ *     arm64-LP64 values stable since 5.10 (stored in the static-init
+ *     expressions of the cached variables below).
  *
  * Kbuild mode uses the real kernel headers + direct calls.
  */
@@ -35,6 +38,7 @@
 
 #ifdef KMOD_FREESTANDING
 /* No kernel headers. Define the minimum. */
+#include <kh_strategy.h>
 
 /* Opaque forward decls — we only ever touch memory through probed
  * offsets, never via struct member access. */
@@ -42,9 +46,16 @@ struct task_struct;
 struct cred;
 struct pt_regs;
 
-/* ARM64 arch constants (stable on GKI 5.10+). */
-#define KH_THREAD_SIZE   16384UL
-#define KH_PT_REGS_SIZE  0x150UL  /* sizeof(struct pt_regs) on arm64 6.x */
+/* Runtime-resolved via SP-7 strategy registry in kh_uaccess_init.
+ * Defaults match pre-SP-7 arm64-LP64 values; overridden by resolve().
+ * The static initializer literals (16384 / 0x150) are acceptable as
+ * fallback defaults — they are NOT used directly in runtime expressions;
+ * runtime paths use KH_THREAD_SIZE / KH_PT_REGS_SIZE which expand to
+ * the cached variables. */
+static uint64_t kh_thread_size_cached  = 16384UL;
+static uint64_t kh_pt_regs_size_cached = 0x150UL;
+#define KH_THREAD_SIZE   kh_thread_size_cached
+#define KH_PT_REGS_SIZE  kh_pt_regs_size_cached
 
 /* sp_el0 holds `current` on modern ARM64 kernels. */
 __attribute__((always_inline))
@@ -78,9 +89,11 @@ static inline struct task_struct *kh_get_current(void)
 
 typedef long          (*kh_strncpy_from_user_fn_t)(char *, const void *, long);
 typedef unsigned long (*kh_copy_to_user_fn_t)(void *, const void *, unsigned long);
+typedef unsigned long (*kh_copy_from_user_fn_t)(void *, const void __user *, unsigned long);
 
 static kh_strncpy_from_user_fn_t kh_strncpy_from_user_fn = NULL;
 static kh_copy_to_user_fn_t      kh_copy_to_user_fn      = NULL;
+static kh_copy_from_user_fn_t    kh_copy_from_user_fn    = NULL;
 
 /* Offsets into task_struct / cred, probed at init. 0 = unresolved
  * (except cred_uid which is hardcoded to 4 on modern kernels). */
@@ -117,6 +130,14 @@ int kh_copy_to_user(void *to_user, const void *from, int n)
     if (!kh_copy_to_user_fn) return n;  /* signal "nothing copied" */
     if (!to_user || !from || n <= 0) return n;
     return (int)kh_copy_to_user_fn(to_user, from, (unsigned long)n);
+}
+
+__attribute__((no_sanitize("kcfi")))
+unsigned long kh_copy_from_user(void *dst, const void __user *src, unsigned long n)
+{
+    if (!kh_copy_from_user_fn) return n;  /* signal "nothing copied" */
+    if (!dst || !src || n == 0) return n;
+    return kh_copy_from_user_fn(dst, src, n);
 }
 
 /* Derive current task's pt_regs pointer via task->stack + THREAD_SIZE
@@ -233,23 +254,34 @@ __attribute__((no_sanitize("kcfi")))
 int kh_uaccess_init(void)
 {
 #ifdef KMOD_FREESTANDING
+    /* Resolve pt_regs_size + thread_size via registry (SP-7 Task 21).
+     * If either strategy chain fails, keep the default (pre-SP-7 hardcoded
+     * arm64 LP64 values stored in the static variable initializers). */
+    {
+        uint64_t v;
+        if (kh_strategy_resolve("pt_regs_size", &v, sizeof(v)) == 0 && v)
+            kh_pt_regs_size_cached = v;
+        if (kh_strategy_resolve("thread_size", &v, sizeof(v)) == 0 && v)
+            kh_thread_size_cached = v;
+        pr_info("uaccess: pt_regs_size=0x%llx thread_size=%llu (cached)\n",
+                (unsigned long long)kh_pt_regs_size_cached,
+                (unsigned long long)kh_thread_size_cached);
+    }
+
     kh_strncpy_from_user_fn = (kh_strncpy_from_user_fn_t)(uintptr_t)
         ksyms_lookup("strncpy_from_user");
 
-    /* Try in order: _copy_to_user, copy_to_user, __arch_copy_to_user.
-     * GKI 6.1 arm64 only exports __arch_copy_to_user — the arch-specific
-     * primitive that copy_to_user() eventually calls. Same ABI: returns
-     * bytes NOT copied. Skips access_ok() + KASAN checks, which is fine
-     * for us since we originate user pointers from pt_regs (already
-     * validated by entry path) or from current's own SP. */
-    kh_copy_to_user_fn = (kh_copy_to_user_fn_t)(uintptr_t)
-        ksyms_lookup("_copy_to_user");
-    if (!kh_copy_to_user_fn)
-        kh_copy_to_user_fn = (kh_copy_to_user_fn_t)(uintptr_t)
-            ksyms_lookup("copy_to_user");
-    if (!kh_copy_to_user_fn)
-        kh_copy_to_user_fn = (kh_copy_to_user_fn_t)(uintptr_t)
-            ksyms_lookup("__arch_copy_to_user");
+    /* Resolve copy_to_user via registry (SP-7 Task 21). The registry
+     * picks from 4 strategies: _copy_to_user, copy_to_user,
+     * __arch_copy_to_user, and the inline ldtr/sttr path (Task 14). */
+    if (kh_strategy_resolve("copy_to_user", &kh_copy_to_user_fn,
+                            sizeof(kh_copy_to_user_fn)) != 0)
+        kh_copy_to_user_fn = NULL;
+
+    /* Resolve copy_from_user via registry (SP-7 Task 21 / Task 15). */
+    if (kh_strategy_resolve("copy_from_user", &kh_copy_from_user_fn,
+                            sizeof(kh_copy_from_user_fn)) != 0)
+        kh_copy_from_user_fn = NULL;
 #else
     /* In kbuild, strncpy_from_user / copy_to_user may be macros that
      * expand to inlines with access_ok() checks. Take their addresses
@@ -259,9 +291,10 @@ int kh_uaccess_init(void)
     kh_copy_to_user_fn      = (kh_copy_to_user_fn_t)&_copy_to_user;
 #endif
 
-    pr_info("uaccess: strncpy_from_user=%llx copy_to_user=%llx\n",
+    pr_info("uaccess: strncpy_from_user=%llx copy_to_user=%llx copy_from_user=%llx\n",
             (unsigned long long)(uintptr_t)kh_strncpy_from_user_fn,
-            (unsigned long long)(uintptr_t)kh_copy_to_user_fn);
+            (unsigned long long)(uintptr_t)kh_copy_to_user_fn,
+            (unsigned long long)(uintptr_t)kh_copy_from_user_fn);
 
     if (!kh_strncpy_from_user_fn || !kh_copy_to_user_fn) {
         pr_warn("uaccess: required uaccess symbols missing\n");

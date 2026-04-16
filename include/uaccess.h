@@ -37,6 +37,14 @@ long kh_strncpy_from_user(char *dest, const void *src_user, long count);
  * returns number of bytes NOT copied (0 == full success). */
 int kh_copy_to_user(void *to_user, const void *from, int n);
 
+/* Copy `n` bytes from user `src` to kernel `dst`. Kernel semantics:
+ * returns number of bytes NOT copied (0 == full success).
+ * Returns n if copy_from_user could not be resolved (safe default). */
+#ifndef __user
+#define __user   /* sparse annotation: user-space address — no-op in C */
+#endif
+unsigned long kh_copy_from_user(void *dst, const void __user *src, unsigned long n);
+
 /* Write `len` bytes of `data` onto current task's user stack at
  * SP - aligned(len). Returns resulting __user pointer on success, or
  * a value where `(long)rc < 0` is true on failure. Caller must run
