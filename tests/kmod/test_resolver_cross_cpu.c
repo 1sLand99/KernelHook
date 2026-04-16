@@ -36,11 +36,11 @@ static int noop_stop_body(void *data)
  *   "CFI failure at multi_cpu_stop" — kernel panic. kh_diy_stop_machine is
  *   our own code compiled in the same module, so hashes match.
  *
- * __attribute__((no_sanitize("kcfi"))): this function makes an indirect call
- * through kh_diy_stop_machine (via an extern fn pointer path); annotate to
- * avoid a spurious kCFI trap on the call site.
+ * No no_sanitize("kcfi") needed here: the call to kh_diy_stop_machine is a
+ * direct call (same-module extern resolved to CALL26 at link time, not an
+ * indirect call through a fn pointer), and the fn(data) callback inside
+ * kh_diy_stop_machine is already covered by that function's annotation.
  */
-__attribute__((no_sanitize("kcfi")))
 int test_resolver_cross_cpu_stop(void)
 {
     /* Part A: resolution */
