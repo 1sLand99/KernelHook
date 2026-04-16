@@ -69,7 +69,11 @@ static int strat_loader_inject(void *out, size_t sz)
 }
 
 KH_STRATEGY_DECLARE(kimage_voffset, kallsyms,         0, strat_kallsyms,         sizeof(uint64_t));
-KH_STRATEGY_DECLARE(kimage_voffset, text_va_minus_pa, 1, strat_text_va_minus_pa, sizeof(uint64_t));
+/* text_va_minus_pa: walker-based derivation. Walks pgd for _text's PA,
+ * computes voffset = _text_va - _text_pa. May diverge from kallsyms's
+ * kimage_voffset global on kernels that compute the global from a different
+ * anchor (e.g. kimage_vaddr vs _text) — best-effort, not byte-equal guaranteed. */
+KH_STRATEGY_DECLARE_FALLBACK(kimage_voffset, text_va_minus_pa, 1, strat_text_va_minus_pa, sizeof(uint64_t));
 KH_STRATEGY_DECLARE(kimage_voffset, loader_inject,    2, strat_loader_inject,    sizeof(uint64_t));
 
 #endif /* !__USERSPACE__ */

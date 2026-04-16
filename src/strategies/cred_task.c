@@ -113,8 +113,12 @@ static int strat_init_task_walk(void *out, size_t sz)
 }
 
 KH_STRATEGY_DECLARE(init_cred, kallsyms_init_cred, 0, strat_kallsyms_init_cred, sizeof(uint64_t));
-KH_STRATEGY_DECLARE(init_cred, current_task_walk,  1, strat_current_task_walk,  sizeof(uint64_t));
-KH_STRATEGY_DECLARE(init_cred, init_task_walk,     2, strat_init_task_walk,     sizeof(uint64_t));
+/* current_task_walk: scans current's task_struct for a cred-like pointer.
+ * Best-effort — on GKI 6.6+ task_struct layouts the heuristic hits a false-
+ * positive before reaching the real cred offset. */
+KH_STRATEGY_DECLARE_FALLBACK(init_cred, current_task_walk,  1, strat_current_task_walk,  sizeof(uint64_t));
+/* init_task_walk: same pattern against init_task. Same heuristic limitation. */
+KH_STRATEGY_DECLARE_FALLBACK(init_cred, init_task_walk,     2, strat_init_task_walk,     sizeof(uint64_t));
 
 /* ========================================================================
  * SP-7 Capability: init_thread_union (kernel stack base VA)
