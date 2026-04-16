@@ -143,8 +143,10 @@ int kh_strategy_resolve(const char *capability, void *out, size_t out_size)
     if (!c)
         return KH_STRAT_ENODATA;
 
-    /* Cache hit — serve without re-running strategies. */
-    if (c->cached && out_size <= sizeof(c->cache_buf)) {
+    /* Cache hit — serve without re-running strategies.
+     * Require exact size match: if caller asks for a different size than what
+     * was cached, treat as miss to avoid silent partial reads. */
+    if (c->cached && out_size == c->cache_size && out_size <= sizeof(c->cache_buf)) {
         memcpy(out, c->cache_buf, c->cache_size);
         return 0;
     }
@@ -179,9 +181,13 @@ int kh_strategy_resolve(const char *capability, void *out, size_t out_size)
     }
 
     if (rc == 0) {
-        c->cached     = true;
-        c->cache_size = out_size;
-        memcpy(c->cache_buf, out, out_size);
+        /* Only cache when result fits in cache_buf; oversize results succeed
+         * but skip caching — next resolve re-runs strategies. */
+        if (out_size <= sizeof(c->cache_buf)) {
+            c->cached     = true;
+            c->cache_size = out_size;
+            memcpy(c->cache_buf, out, out_size);
+        }
     }
 
     c->in_flight = false;

@@ -18,4 +18,12 @@ extern void *memmove(void *dst, const void *src, unsigned long n);
 extern int   strcmp(const char *s1, const char *s2);
 extern int   strncmp(const char *s1, const char *s2, unsigned long n);
 
+/* TODO(freestanding-integration): when kh_strategy.c is added to
+ * kmod/mk/kmod.mk's _KH_CORE_SRCS (freestanding build), add
+ *   _MODVER_ENTRY(__modver_strcmp,  0xDEADBExxu, "strcmp")
+ *   _MODVER_ENTRY(__modver_strncmp, 0xDEADBExxu, "strncmp")
+ * to MODULE_VERSIONS() in kmod/shim/shim.h.  Without these entries the
+ * .ko links cleanly but fails to load on CONFIG_MODVERSIONS=y kernels with
+ * "disagrees about version of symbol strcmp/strncmp". */
+
 #endif /* _FAKE_LINUX_STRING_H */
