@@ -65,6 +65,25 @@ static int strat_kallsyms_init_cred(void *out, size_t sz)
     return 0;
 }
 
+/*
+ * sp_el0 caveat for pre-4.9 kernels (CONFIG_THREAD_INFO_IN_TASK=n,
+ * i.e. GKI 4.4): sp_el0 holds `struct thread_info *`, not
+ * `struct task_struct *`. On those kernels this strategy walks
+ * thread_info and almost always fails the walker's usage+uid
+ * heuristic, returning ENODATA so the registry falls through to
+ * init_task_walk (prio 2). In the unlikely case the heuristic
+ * accepts a false positive, the caller would cache a wrong cred
+ * pointer -- but in practice kallsyms_init_cred (prio 0) succeeds
+ * on GKI 4.4 kernels we've tested, so this path is rarely reached.
+ *
+ * From 4.9+ (CONFIG_THREAD_INFO_IN_TASK=y, Android 9 onward and
+ * every GKI target except the Pixel_28 AVD) sp_el0 holds the
+ * task pointer and this walk is semantically correct.
+ *
+ * No runtime version detection is attempted: Linux version
+ * sniffing is fragile across BSP backports. The priority ordering
+ * + strict walker criteria provide sufficient defense in depth.
+ */
 static int strat_current_task_walk(void *out, size_t sz)
 {
     if (sz != sizeof(uint64_t)) return -22;
