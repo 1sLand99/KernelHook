@@ -50,6 +50,15 @@ SECTIONS
         __stop___param = .;
     }
 
+    /* Link-time strategy registry — iterated via __start___kh_strategies /
+       __stop___kh_strategies at module init by src/kh_strategy.c. Mirrors
+       the equivalent section in kmod/lds/kmod.lds used by kernelhook.ko. */
+    .kh_strategies : ALIGN(8) {
+        __start___kh_strategies = .;
+        KEEP(*(.kh_strategies))
+        __stop___kh_strategies = .;
+    }
+
     .gnu.linkonce.this_module : {
         *(.kh.this_module)
     }

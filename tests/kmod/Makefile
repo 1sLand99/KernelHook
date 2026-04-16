@@ -147,6 +147,14 @@ src/%.fs.o: $(KH_ROOT)/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
+# Shim sources (kmod/shim/shim_libc.c, kmod/shim/shim_ksyms.c) — compile
+# into kmod/shim/*.fs.o mirroring their source path. Needed because the
+# FS_CORE_SRCS list includes $(KH_ROOT)/kmod/shim/*.c but the local
+# `src/%.fs.o` rule above only matches $(KH_ROOT)/src/%.c.
+kmod/%.fs.o: $(KH_ROOT)/kmod/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(FS_CFLAGS) -c $< -o $@
+
 %.fs.o: %.S
 	$(CC) $(FS_CFLAGS) -c $< -o $@
 
