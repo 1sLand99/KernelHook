@@ -219,7 +219,14 @@ struct modversion_info {
     _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout");      \
     _MODVER_ENTRY(__modver_printk,        0xDEADBE02u, "_printk");            \
     _MODVER_ENTRY(__modver_memcpy,        0xDEADBE03u, "memcpy");             \
-    _MODVER_ENTRY(__modver_memset,        0xDEADBE04u, "memset")
+    _MODVER_ENTRY(__modver_memset,        0xDEADBE04u, "memset");             \
+    _MODVER_ENTRY(__modver_strcmp,        0xDEADBE05u, "strcmp");             \
+    _MODVER_ENTRY(__modver_strncmp,       0xDEADBE06u, "strncmp");            \
+    _MODVER_ENTRY(__modver_strchr,        0xDEADBE07u, "strchr");             \
+    _MODVER_ENTRY(__modver_strlcpy,       0xDEADBE08u, "strlcpy");           \
+    _MODVER_ENTRY(__modver_kstrtol,       0xDEADBE09u, "kstrtol");           \
+    _MODVER_ENTRY(__modver_add_taint,     0xDEADBE0Au, "add_taint");         \
+    _MODVER_ENTRY(__modver_memcmp,        0xDEADBE0Bu, "memcmp")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING

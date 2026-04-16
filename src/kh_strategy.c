@@ -15,6 +15,7 @@
 #include <string.h>
 #include <stdio.h>
 #else
+#include <linux/string.h>
 #include <symbol.h>
 #endif
 
@@ -287,3 +288,116 @@ void kh_strategy_for_each(const char *cap,
     for (int i = 0; i < c->num; i++)
         fn(c->by_prio[i]->name, ctx);
 }
+
+/* ---- Kernel-only module-parameter CSV parsers ----
+ *
+ * These helpers are compiled only in kernel builds (freestanding and kbuild).
+ * Each parser decodes a comma-separated list of "capability:strategyname"
+ * tokens (or "capability:strategyname:count" for inject_fail) and calls the
+ * appropriate registry mutator.
+ *
+ * Called from kh_strategy_boot() immediately after kh_strategy_init().
+ * The `csv` pointer is the raw module_param string; it is never NULL-checked
+ * after entry (checked at top of each function).
+ */
+#ifndef __USERSPACE__
+/* linux/string.h is already included above for the kernel build path.
+ * linux/kernel.h provides kstrtol for the inject_fail parser. */
+#include <linux/kernel.h>
+
+/*
+ * kh_strategy_apply_disable_list — parse "cap:name,cap:name,..." and
+ * call kh_strategy_set_enabled(cap, name, false) for each token.
+ */
+void kh_strategy_apply_disable_list(const char *csv)
+{
+    if (!csv || !*csv)
+        return;
+
+    char buf[256];
+    strlcpy(buf, csv, sizeof(buf));
+
+    char *p = buf;
+    while (p && *p) {
+        char *comma = strchr(p, ',');
+        if (comma)
+            *comma = '\0';
+
+        char *colon = strchr(p, ':');
+        if (colon) {
+            *colon = '\0';
+            kh_strategy_set_enabled(p, colon + 1, false);
+        }
+
+        p = comma ? comma + 1 : NULL;
+    }
+}
+
+/*
+ * kh_strategy_apply_force_list — parse "cap:name,cap:name,..." and
+ * call kh_strategy_force(cap, name) for each token.
+ * Pass name "none" to clear a prior force (maps to NULL).
+ */
+void kh_strategy_apply_force_list(const char *csv)
+{
+    if (!csv || !*csv)
+        return;
+
+    char buf[256];
+    strlcpy(buf, csv, sizeof(buf));
+
+    char *p = buf;
+    while (p && *p) {
+        char *comma = strchr(p, ',');
+        if (comma)
+            *comma = '\0';
+
+        char *colon = strchr(p, ':');
+        if (colon) {
+            *colon = '\0';
+            /* "none" is the sentinel for clearing a prior force. */
+            const char *name = (*(colon + 1) == '\0') ? NULL : colon + 1;
+            kh_strategy_force(p, name);
+        }
+
+        p = comma ? comma + 1 : NULL;
+    }
+}
+
+/*
+ * kh_strategy_apply_inject_list — parse "cap:name:count,..." and
+ * call kh_strategy_inject_fail(cap, name, count) for each token.
+ * Format: capability:strategyname:decimal_count
+ * Tokens missing the second colon or with count=0 are silently ignored.
+ */
+void kh_strategy_apply_inject_list(const char *csv)
+{
+    if (!csv || !*csv)
+        return;
+
+    char buf[256];
+    strlcpy(buf, csv, sizeof(buf));
+
+    char *p = buf;
+    while (p && *p) {
+        char *comma = strchr(p, ',');
+        if (comma)
+            *comma = '\0';
+
+        /* Expect cap:name:count */
+        char *colon1 = strchr(p, ':');
+        if (colon1) {
+            *colon1 = '\0';
+            char *colon2 = strchr(colon1 + 1, ':');
+            if (colon2) {
+                *colon2 = '\0';
+                long count = 0;
+                if (kstrtol(colon2 + 1, 10, &count) == 0 && count > 0)
+                    kh_strategy_inject_fail(p, colon1 + 1, (int)count);
+            }
+        }
+
+        p = comma ? comma + 1 : NULL;
+    }
+}
+#endif /* __USERSPACE__ */

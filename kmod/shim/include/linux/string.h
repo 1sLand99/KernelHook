@@ -15,15 +15,11 @@
 extern void *memset(void *s, int c, unsigned long n);
 extern void *memcpy(void *dst, const void *src, unsigned long n);
 extern void *memmove(void *dst, const void *src, unsigned long n);
+extern int   memcmp(const void *s1, const void *s2, unsigned long n);
 extern int   strcmp(const char *s1, const char *s2);
 extern int   strncmp(const char *s1, const char *s2, unsigned long n);
-
-/* TODO(freestanding-integration): when kh_strategy.c is added to
- * kmod/mk/kmod.mk's _KH_CORE_SRCS (freestanding build), add
- *   _MODVER_ENTRY(__modver_strcmp,  0xDEADBExxu, "strcmp")
- *   _MODVER_ENTRY(__modver_strncmp, 0xDEADBExxu, "strncmp")
- * to MODULE_VERSIONS() in kmod/shim/shim.h.  Without these entries the
- * .ko links cleanly but fails to load on CONFIG_MODVERSIONS=y kernels with
- * "disagrees about version of symbol strcmp/strncmp". */
+extern char *strchr(const char *s, int c);
+/* strlcpy: copies at most size-1 bytes, NUL-terminates, returns src length. */
+extern unsigned long strlcpy(char *dest, const char *src, unsigned long size);
 
 #endif /* _FAKE_LINUX_STRING_H */

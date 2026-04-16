@@ -43,6 +43,7 @@ extern void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox);
 extern void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox);
 extern void kh_write_insts_init(void);
 extern void kh_write_insts_cleanup(void);
+extern int  kh_strategy_boot(void);
 
 static int kh_initialized = 0;
 
@@ -55,6 +56,16 @@ static int __init kernelhook_init(void)
     rc = kmod_compat_init(kallsyms_addr);
     if (rc) {
         pr_err("kernelhook: compat init failed (%d)\n", rc);
+        return rc;
+    }
+
+    /* Strategy registry: register link-time strategies, apply module params,
+     * run optional consistency check.  Must run before hook-mem init so any
+     * future strategy that resolves a capability (e.g. alias-page path) is
+     * available to kmod_hook_mem_init(). */
+    rc = kh_strategy_boot();
+    if (rc) {
+        pr_err("kernelhook: strategy boot failed (%d)\n", rc);
         return rc;
     }
 

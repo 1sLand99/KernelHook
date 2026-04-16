@@ -176,14 +176,16 @@ _KH_CORE_SRCS := $(KH_ROOT)/src/hook.c \
                  $(KH_ROOT)/src/arch/arm64/pgtable.c \
                  $(KH_ROOT)/src/platform/syscall.c \
                  $(KH_ROOT)/src/uaccess.c \
-                 $(KH_ROOT)/src/sync.c
+                 $(KH_ROOT)/src/sync.c \
+                 $(KH_ROOT)/src/kh_strategy.c
 
 # kmod SDK sources from $(KERNELHOOK_DIR)/src/
 _KH_KMOD_SRCS := $(KERNELHOOK_DIR)/src/mem_ops.c \
                  $(KERNELHOOK_DIR)/src/log.c \
                  $(KERNELHOOK_DIR)/src/transit_setup.c \
                  $(KERNELHOOK_DIR)/src/compat.c \
-                 $(KERNELHOOK_DIR)/src/export.c
+                 $(KERNELHOOK_DIR)/src/export.c \
+                 $(KERNELHOOK_DIR)/src/kh_strategy_boot.c
 
 # PLT stub
 _KH_PLT_SRCS := $(KERNELHOOK_DIR)/plt/plt_stub.S
