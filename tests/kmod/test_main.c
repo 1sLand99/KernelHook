@@ -278,8 +278,14 @@ static int kh_subsystem_init(void)
      * needed here. */
     {
         extern int kh_strategy_init(void);
+        extern void kh_strategy_debugfs_init(void);
         int srv = kh_strategy_init();
         if (srv) pr_warn(KH_TEST_TAG "kh_strategy_init returned %d\n", srv);
+        /* Mount /sys/kernel/debug/kernelhook/ so strategy-matrix tooling
+         * can dump the registry from userspace (SP-7 follow-up: lets
+         * Pixel_30..34 AVD scans work against freestanding kh_test.ko
+         * without having to rebuild in SDK mode). */
+        kh_strategy_debugfs_init();
     }
 
     /* 3. pgtable — not fatal: set_memory mode works without it */
