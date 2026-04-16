@@ -90,6 +90,21 @@ int kh_strategy_boot(void)
     kh_strategy_apply_force_list(kh_force);
     kh_strategy_apply_inject_list(kh_inject_fail);
 
+    /* debugfs interface: /sys/kernel/debug/kernelhook/
+     * Always init in freestanding mode (cross-compiled .ko targets kernels
+     * that have debugfs).  In kbuild mode, guard on CONFIG_DEBUG_FS. */
+#ifdef KMOD_FREESTANDING
+    {
+        extern void kh_strategy_debugfs_init(void);
+        kh_strategy_debugfs_init();
+    }
+#elif IS_ENABLED(CONFIG_DEBUG_FS)
+    {
+        extern void kh_strategy_debugfs_init(void);
+        kh_strategy_debugfs_init();
+    }
+#endif
+
     if (kh_consistency_check) {
         int mis = kh_strategy_run_consistency_check();
         if (mis > 0) {
@@ -114,7 +129,18 @@ int kh_strategy_boot(void)
  */
 int kh_strategy_boot(void)
 {
-    return kh_strategy_init();
+    int rc = kh_strategy_init();
+    if (rc)
+        return rc;
+
+#if IS_ENABLED(CONFIG_DEBUG_FS)
+    {
+        extern void kh_strategy_debugfs_init(void);
+        kh_strategy_debugfs_init();
+    }
+#endif
+
+    return 0;
 }
 
 #endif /* KMOD_FREESTANDING */

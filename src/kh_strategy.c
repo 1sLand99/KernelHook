@@ -289,7 +289,7 @@ void kh_strategy_for_each(const char *cap,
         fn(c->by_prio[i]->name, ctx);
 }
 
-/* ---- Kernel-only module-parameter CSV parsers ----
+/* ---- Kernel-only module-parameter CSV parsers and debugfs interface ----
  *
  * These helpers are compiled only in kernel builds (freestanding and kbuild).
  * Each parser decodes a comma-separated list of "capability:strategyname"
@@ -302,8 +302,15 @@ void kh_strategy_for_each(const char *cap,
  */
 #ifndef __USERSPACE__
 /* linux/string.h is already included above for the kernel build path.
- * linux/kernel.h provides kstrtol for the inject_fail parser. */
+ * linux/kernel.h provides kstrtol for the inject_fail parser.
+ * linux/debugfs.h provides debugfs_create_dir/_file/_remove_recursive,
+ *   IS_ERR_OR_NULL, DEFINE_SHOW_ATTRIBUTE, EINVAL, EFAULT.
+ * linux/seq_file.h provides seq_printf, single_open/release, seq_read/lseek.
+ * linux/uaccess.h provides copy_from_user and the __user annotation. */
 #include <linux/kernel.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/uaccess.h>
 
 /*
  * kh_strategy_apply_disable_list — parse "cap:name,cap:name,..." and
@@ -400,4 +407,115 @@ void kh_strategy_apply_inject_list(const char *csv)
         p = comma ? comma + 1 : NULL;
     }
 }
+
+/* ---- debugfs interface ----
+ *
+ * Mounted at /sys/kernel/debug/kernelhook/:
+ *   strategies  (0444 read)  — dumps all capabilities + strategies, one per line
+ *   disable     (0200 write) — "cap:name" disables a strategy
+ *   enable      (0200 write) — "cap:name" re-enables a strategy
+ *   force       (0200 write) — "cap:name" forces a strategy; "cap:" clears force
+ *
+ * Write handlers run from process context (sysfs write syscall) and return
+ * standard errno values on error, not kernel panic.
+ *
+ * kh_strategy_debugfs_cleanup() must be called from module_exit to avoid an
+ * Oops when a userspace process accesses the file after rmmod.
+ */
+
+static struct dentry *kh_debug_dir;
+
+static int strategies_show(struct seq_file *m, void *v)
+{
+    for (int ci = 0; ci < g_cap_count; ci++) {
+        struct cap_slot *c = &g_caps[ci];
+        for (int i = 0; i < c->num; i++) {
+            struct kh_strategy *s = c->by_prio[i];
+            seq_printf(m, "%-32s %-24s prio=%d enabled=%d winner=%s\n",
+                       c->name, s->name, s->priority, s->enabled,
+                       (c->last_winner && !strcmp(c->last_winner, s->name))
+                       ? "Y" : "");
+        }
+    }
+    return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(strategies);
+
+static ssize_t disable_write(struct file *f, const char __user *u,
+                             size_t len, loff_t *p)
+{
+    char buf[256];
+    if (len >= sizeof(buf))
+        return -EINVAL;
+    if (copy_from_user(buf, u, len))
+        return -EFAULT;
+    buf[len] = '\0';
+    char *colon = strchr(buf, ':');
+    if (!colon)
+        return -EINVAL;
+    *colon = '\0';
+    kh_strategy_set_enabled(buf, colon + 1, false);
+    return (ssize_t)len;
+}
+static const struct file_operations disable_fops = { .write = disable_write };
+
+static ssize_t enable_write(struct file *f, const char __user *u,
+                            size_t len, loff_t *p)
+{
+    char buf[256];
+    if (len >= sizeof(buf))
+        return -EINVAL;
+    if (copy_from_user(buf, u, len))
+        return -EFAULT;
+    buf[len] = '\0';
+    char *colon = strchr(buf, ':');
+    if (!colon)
+        return -EINVAL;
+    *colon = '\0';
+    kh_strategy_set_enabled(buf, colon + 1, true);
+    return (ssize_t)len;
+}
+static const struct file_operations enable_fops = { .write = enable_write };
+
+static ssize_t force_write(struct file *f, const char __user *u,
+                           size_t len, loff_t *p)
+{
+    char buf[256];
+    if (len >= sizeof(buf))
+        return -EINVAL;
+    if (copy_from_user(buf, u, len))
+        return -EFAULT;
+    buf[len] = '\0';
+    char *colon = strchr(buf, ':');
+    if (!colon)
+        return -EINVAL;
+    *colon = '\0';
+    /* Empty name after colon (e.g. "cap:") clears a prior force — maps to NULL. */
+    const char *name = (*(colon + 1) == '\0') ? NULL : colon + 1;
+    kh_strategy_force(buf, name);
+    return (ssize_t)len;
+}
+static const struct file_operations force_fops = { .write = force_write };
+
+void kh_strategy_debugfs_init(void)
+{
+    kh_debug_dir = debugfs_create_dir("kernelhook", NULL);
+    if (IS_ERR_OR_NULL(kh_debug_dir))
+        return;
+    debugfs_create_file("strategies", 0444, kh_debug_dir, NULL,
+                        &strategies_fops);
+    debugfs_create_file("disable",    0200, kh_debug_dir, NULL,
+                        &disable_fops);
+    debugfs_create_file("enable",     0200, kh_debug_dir, NULL,
+                        &enable_fops);
+    debugfs_create_file("force",      0200, kh_debug_dir, NULL,
+                        &force_fops);
+}
+
+void kh_strategy_debugfs_cleanup(void)
+{
+    debugfs_remove_recursive(kh_debug_dir);
+    kh_debug_dir = NULL;
+}
+
 #endif /* __USERSPACE__ */

@@ -120,6 +120,12 @@ static int __init kernelhook_init(void)
 static void __exit kernelhook_exit(void)
 {
     if (kh_initialized) {
+        /* Remove debugfs entries before tearing down the rest of the module.
+         * Failing to do so leaves dangling dentries pointing into freed module
+         * .text, causing an Oops on the next userspace access after rmmod. */
+        extern void kh_strategy_debugfs_cleanup(void);
+        kh_strategy_debugfs_cleanup();
+
         sync_cleanup();
         kh_write_insts_cleanup();
         kmod_hook_mem_cleanup();

@@ -226,7 +226,16 @@ struct modversion_info {
     _MODVER_ENTRY(__modver_strlcpy,       0xDEADBE08u, "strlcpy");           \
     _MODVER_ENTRY(__modver_kstrtol,       0xDEADBE09u, "kstrtol");           \
     _MODVER_ENTRY(__modver_add_taint,     0xDEADBE0Au, "add_taint");         \
-    _MODVER_ENTRY(__modver_memcmp,        0xDEADBE0Bu, "memcmp")
+    _MODVER_ENTRY(__modver_memcmp,                   0xDEADBE0Bu, "memcmp");               \
+    _MODVER_ENTRY(__modver_debugfs_create_dir,       0xDEADBE0Cu, "debugfs_create_dir");   \
+    _MODVER_ENTRY(__modver_debugfs_create_file,      0xDEADBE0Du, "debugfs_create_file");  \
+    _MODVER_ENTRY(__modver_seq_printf,               0xDEADBE0Eu, "seq_printf");           \
+    _MODVER_ENTRY(__modver_single_open,              0xDEADBE0Fu, "single_open");          \
+    _MODVER_ENTRY(__modver_single_release,           0xDEADBE10u, "single_release");       \
+    _MODVER_ENTRY(__modver_seq_read,                 0xDEADBE11u, "seq_read");             \
+    _MODVER_ENTRY(__modver_seq_lseek,                0xDEADBE12u, "seq_lseek");            \
+    _MODVER_ENTRY(__modver_copy_from_user,           0xDEADBE13u, "copy_from_user");       \
+    _MODVER_ENTRY(__modver_debugfs_remove_recursive, 0xDEADBE14u, "debugfs_remove_recursive")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING
