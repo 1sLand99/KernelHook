@@ -103,9 +103,13 @@ static int strat_to_arch_copy_to_user(void *out, size_t sz)
  * instruction causes the kernel's exception handler to jump to kh_sttr_fixup
  * (via get_ex_fixup() which computes regs->pc = &ex->fixup + ex->fixup),
  * which restores PAN and falls through to the return path with rem = remaining.
- * The handler also writes -EFAULT to reg_err and 0 to reg_zero (both encoded
- * in data=0, meaning X0); this is harmless because the fixup falls through to
- * the C return sequence which overwrites X0 with rem.
+ * The handler also writes -EFAULT to reg_err and 0 to reg_zero per the
+ * `data` field encoding (low 5 bits = reg_err, bits 9:5 = reg_zero). We
+ * encode BOTH regs = X9 (data = 9 | (9<<5) = 0x129) and list X9 in the
+ * asm clobber list so the register allocator never assigns X9 to `rem`,
+ * `to_a`, `frm_a`, or `scratch`. This makes the fixup robust against any
+ * GCC version/optimization choice — the handler's writes land on a
+ * scratch register that this function doesn't use.
  * The __ex_table entry is registered automatically at insmod time.
  *
  * Returns bytes NOT copied (0 on success, 1..n on fault).
@@ -151,14 +155,11 @@ unsigned long kh_inline_copy_to_user(void __user *to, const void *from, unsigned
          * arm64 Linux 5.15+ format (12 bytes):
          *   int  insn  = (faulting_pc   - &entry.insn)  — PC-relative
          *   int  fixup = (fixup_label   - &entry.fixup) — PC-relative
-         *   short type = 2 (EX_TYPE_UACCESS_ERR_ZERO: handler calls
-         *                   get_ex_fixup() which does regs->pc =
-         *                   &ex->fixup + ex->fixup, i.e. jumps to our
-         *                   fixup label; handler also zeroes registers
-         *                   encoded in data, but with data=0 that's X0
-         *                   which C code will overwrite with the return
-         *                   value)
-         *   short data = 0
+         *   short type = 2 (EX_TYPE_UACCESS_ERR_ZERO: handler sets
+         *                   reg_err = -EFAULT, reg_zero = 0, then pc =
+         *                   &ex->fixup + ex->fixup i.e. jumps to our fixup)
+         *   short data = 0x129 (reg_err = X9, reg_zero = X9 — handler
+         *                   clobbers X9 only; X9 is listed in clobber)
          *
          * At runtime: entry.insn + kh_sttr_insn_site - &entry.insn
          *           = kh_sttr_insn_site (the faulting PC).
@@ -171,11 +172,11 @@ unsigned long kh_inline_copy_to_user(void __user *to, const void *from, unsigned
         "    .long (kh_sttr_insn_site - .)\n"  /* PC-rel offset to fault insn */
         "    .long (kh_sttr_fixup - .)\n"       /* PC-rel offset to fixup */
         "    .short 2\n"                         /* EX_TYPE_UACCESS_ERR_ZERO (arm64 5.15+) */
-        "    .short 0\n"                         /* data */
+        "    .short 0x129\n"                     /* data: reg_err=X9, reg_zero=X9 */
         ".popsection\n"
         : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
         : /* no additional inputs — all operands are in-out */
-        : "memory"
+        : "memory", "x9"
     );
     (void)scratch;
     return rem;
@@ -286,18 +287,20 @@ unsigned long kh_inline_copy_from_user(void *to, const void __user *from, unsign
         "3:\n"
         /* Exception table entry for the ldtrb fault site. Same arm64 5.15+
          * 12-byte format as the sttrb entry above: type=2
-         * (EX_TYPE_UACCESS_ERR_ZERO), data=0. .align 2 matches kernel's
+         * (EX_TYPE_UACCESS_ERR_ZERO), data=0x129 (reg_err=X9, reg_zero=X9).
+         * X9 is listed in clobber so register allocator keeps rem / to_a /
+         * frm_a / scratch away from it. .align 2 matches kernel's
          * __ASM_EXTABLE_RAW to ensure 4-byte alignment. */
         ".pushsection __ex_table, \"a\"\n"
         "    .align 2\n"
         "    .long (kh_ldtr_insn_site - .)\n"
         "    .long (kh_ldtr_fixup - .)\n"
         "    .short 2\n"                  /* EX_TYPE_UACCESS_ERR_ZERO (arm64 5.15+) */
-        "    .short 0\n"
+        "    .short 0x129\n"              /* data: reg_err=X9, reg_zero=X9 */
         ".popsection\n"
         : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
         : /* no additional inputs */
-        : "memory"
+        : "memory", "x9"
     );
     (void)scratch;
     return rem;
