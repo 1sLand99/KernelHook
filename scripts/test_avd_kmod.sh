@@ -104,16 +104,12 @@ if [ "$KH_MODE" = "sdk" ]; then
         "${#CONSUMER_ARR[@]}" "${CONSUMER_ARR[*]}"
     : > /tmp/kh_avd_sdk_build.log
     # Build dual-layout so kmod_loader can auto-select prel32 vs abs64 per
-    # AVD kernel. The default kernelhook.ko (prel32) is kept for backward
-    # compatibility with scripts that load it directly.
+    # AVD kernel. module-dual produces kernelhook-{prel32,abs64}.ko AND
+    # leaves kernelhook.ko equal to kernelhook-prel32.ko (the default GKI
+    # 5.10+ layout), so a single target covers every consumer.
     if ! ( cd "$ROOT/kmod" && \
            { make clean >/dev/null 2>&1 || true; } && \
            make module-dual \
-               CC="$KH_CC" \
-               LD="$KH_LD" \
-               CROSS_COMPILE="$KH_CROSS_COMPILE" \
-               >>/tmp/kh_avd_sdk_build.log 2>&1 && \
-           make module \
                CC="$KH_CC" \
                LD="$KH_LD" \
                CROSS_COMPILE="$KH_CROSS_COMPILE" \

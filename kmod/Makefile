@@ -22,9 +22,12 @@ include mk/kmod.mk
 # a full ELF rewrite (section-size + reloc-count change).
 .PHONY: module-dual
 module-dual:
-	$(MAKE) module KH_KSYMTAB_LAYOUT=prel32
-	@mv kernelhook.ko kernelhook-prel32.ko
-	@rm -rf _kh_core _kh_kmod generated
+	@# Build abs64 first so the prel32 objects remain as the "current"
+	@# set of .kmod.o files; any subsequent `make module` (default prel32)
+	@# then picks up the fresh prel32 objects rather than stale abs64 ones.
 	$(MAKE) module KH_KSYMTAB_LAYOUT=abs64
 	@mv kernelhook.ko kernelhook-abs64.ko
+	@rm -rf _kh_core _kh_kmod generated
+	$(MAKE) module KH_KSYMTAB_LAYOUT=prel32
+	@cp kernelhook.ko kernelhook-prel32.ko
 	@echo "Built dual-layout: kernelhook-prel32.ko + kernelhook-abs64.ko"
