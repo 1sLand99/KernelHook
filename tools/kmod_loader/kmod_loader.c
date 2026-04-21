@@ -2214,10 +2214,49 @@ static int do_load(int argc, char *argv[], int dry_run)
     int trace_count = 0;
     (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
+    /* Dual-layout dispatch: kernelhook ships as
+     *   kernelhook-prel32.ko — CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y
+     *                          (arm64 GKI 5.10+ / upstream 5.5+ — 12B ksymtab entries)
+     *   kernelhook-abs64.ko  — pre-5.10 kernels (arm64 GKI 5.4 / AOSP 4.x — 24B entries)
+     *
+     * If the caller gave "…/kernelhook.ko" (no variant suffix), auto-pick by
+     * kernel version. If a variant path was passed explicitly, honour it.
+     * The ksymtab-layout prel32↔abs64 gap is a full ELF rewrite (section size
+     * + reloc count change), so we ship two .ko binaries here instead of
+     * patching at load time; the extable format (P2-S2) and kCFI hashes
+     * (Step 4.5) are patched in place because they preserve section/reloc
+     * cardinality. */
+    char variant_path[512];
+    const char *mod_path_open = argv[1];
+    {
+        size_t plen = strlen(argv[1]);
+        const char *bn = strrchr(argv[1], '/');
+        bn = bn ? bn + 1 : argv[1];
+        if (strcmp(bn, "kernelhook.ko") == 0) {
+            const char *variant = (ctx.kmajor > 5 || (ctx.kmajor == 5 && ctx.kminor >= 10))
+                                  ? "kernelhook-prel32.ko" : "kernelhook-abs64.ko";
+            size_t dirlen = bn - argv[1];
+            if (dirlen + strlen(variant) + 1 < sizeof(variant_path)) {
+                memcpy(variant_path, argv[1], dirlen);
+                strcpy(variant_path + dirlen, variant);
+                struct stat vst;
+                if (stat(variant_path, &vst) == 0) {
+                    fprintf(stderr, "kmod_loader: auto-select %s for kernel %d.%d\n",
+                            variant, ctx.kmajor, ctx.kminor);
+                    mod_path_open = variant_path;
+                } else {
+                    fprintf(stderr, "kmod_loader: %s not found; falling back to %s\n",
+                            variant_path, argv[1]);
+                }
+            }
+        }
+        (void)plen;
+    }
+
     /* Read module binary */
-    int fd = open(argv[1], O_RDONLY | O_CLOEXEC);
+    int fd = open(mod_path_open, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
-        fprintf(stderr, "open(%s): %s\n", argv[1], strerror(errno));
+        fprintf(stderr, "open(%s): %s\n", mod_path_open, strerror(errno));
         return 1;
     }
 

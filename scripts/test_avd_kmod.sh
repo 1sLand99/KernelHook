@@ -283,7 +283,14 @@ test_avd() {
 
     # Push files
     if [ "$effective_mode" = "sdk" ]; then
-        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null 2>&1 || true
+        # Push the generic kernelhook.ko plus both ksymtab-layout variants.
+        # kmod_loader auto-selects kernelhook-{prel32,abs64}.ko by kernel
+        # version when the path argument ends in "kernelhook.ko". Missing
+        # variants are silently skipped — the legacy single-.ko build still
+        # works for developers who haven't run `make module-dual` yet.
+        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                 /data/local/tmp/kernelhook.ko        >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-prel32.ko" ] && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-prel32.ko" /data/local/tmp/kernelhook-prel32.ko >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]  && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64.ko"  /data/local/tmp/kernelhook-abs64.ko  >/dev/null 2>&1 || true
         for c in "${CONSUMER_ARR[@]}"; do
             adb -s emulator-5554 push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1 || true
         done
