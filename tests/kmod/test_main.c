@@ -81,6 +81,7 @@
 #if !defined(KH_SDK_MODE)
 #include <types.h>
 #include <kh_hook.h>
+#include <kh_strategy.h>
 #include <memory.h>
 #include <symbol.h>
 #include <arch/arm64/pgtable.h>
