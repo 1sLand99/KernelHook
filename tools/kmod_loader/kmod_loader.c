@@ -828,6 +828,80 @@ static int patch_kcfi_hashes(uint8_t *mod, size_t mod_size, const Ehdr *eh)
     return 0;
 }
 
+/* ---- __ex_table entry-format patcher ----
+ *
+ * arm64 __ex_table entry format switched in v5.15:
+ *   v4.x – v5.14: 8 bytes = { s32 insn_off; s32 fixup_off; }
+ *   v5.15+      : 12 bytes = { s32 insn_off; s32 fixup_off; s16 type; s16 data; }
+ *
+ * kernelhook.ko is compiled with the new 12B format (EX_TYPE_UACCESS_ERR_ZERO,
+ * type=2, data=0x129) for the inline sttrb/ldtrb fault fixups in
+ * src/strategies/uaccess_copy.c. On pre-5.15 kernels the module loader would
+ * either reject the section (bad entry size) or misinterpret 8-byte chunks,
+ * so we compress each entry in place before insmod:
+ *
+ *   (a) shrink the section's sh_size to entry_count * 8 (kernel iterates
+ *       entry-by-entry using sizeof(struct exception_table_entry));
+ *   (b) rewrite every .rela__ex_table relocation's r_offset from 12·n+{0,4}
+ *       to 8·n+{0,4}, keeping the symbol reference intact — so the module
+ *       loader resolves insn/fixup pointers to the correct labels after
+ *       relocation; and
+ *   (c) the 4-byte (type,data) tail of each entry is dropped logically
+ *       (physical bytes remain in the file-backed section but are past
+ *       the new sh_size, so the kernel never reads them).
+ *
+ * The fixup code at kh_sttr_fixup restores PAN and falls through to a
+ * `ret` with `rem` holding bytes-not-copied — that's the pre-5.15 handler
+ * contract too (generic __ex_table handler simply jumps to fixup without
+ * writing any reg_err/reg_zero), so the 12-byte-only (type,data) fields
+ * aren't actually needed for our use case.
+ */
+static int patch_extable_format(uint8_t *mod, const Ehdr *eh, int target_entry_size)
+{
+    if (target_entry_size != 8 && target_entry_size != 12) return 0;
+    if (target_entry_size == 12) return 0;  /* already native format */
+
+    Shdr *ex = elf_find_section(mod, eh, "__ex_table");
+    if (!ex || ex->sh_size == 0) return 0;
+    if (ex->sh_size % 12 != 0) {
+        fprintf(stderr, "kmod_loader: __ex_table size %lu not multiple of 12 — leaving untouched\n",
+                (unsigned long)ex->sh_size);
+        return 0;
+    }
+    int num_entries = ex->sh_size / 12;
+
+    Shdr *rela = elf_find_section(mod, eh, ".rela__ex_table");
+    if (!rela || rela->sh_entsize != sizeof(Rela)) {
+        fprintf(stderr, "kmod_loader: no .rela__ex_table — assuming pre-resolved values (unusual)\n");
+        /* Without relocs we can't fix up insn/fixup offsets for the new entry
+         * positions. Safer to leave it alone; kernel will reject 12B entries
+         * and module load fails visibly. */
+        return 0;
+    }
+
+    size_t num_relas = rela->sh_size / sizeof(Rela);
+    Rela *relas = (Rela *)(mod + rela->sh_offset);
+    int rewired = 0;
+    for (size_t i = 0; i < num_relas; i++) {
+        uint64_t old_off = relas[i].r_offset;
+        uint64_t entry_idx = old_off / 12;
+        uint64_t field_off = old_off % 12;
+        if (field_off != 0 && field_off != 4) {
+            fprintf(stderr, "kmod_loader: unexpected __ex_table reloc field_off=%lu — abort\n",
+                    (unsigned long)field_off);
+            return -1;
+        }
+        if ((int)entry_idx >= num_entries) continue;
+        relas[i].r_offset = entry_idx * 8 + field_off;
+        rewired++;
+    }
+
+    ex->sh_size = (uint32_t)(num_entries * 8);
+    fprintf(stderr, "kmod_loader: __ex_table: %d entries compressed 12B→8B "
+            "(legacy format, %d relocs rewired)\n", num_entries, rewired);
+    return num_entries;
+}
+
 static int patch_crcs(uint8_t *mod, const Ehdr *eh)
 {
     Shdr *ver = elf_find_section(mod, eh, "__versions");
@@ -2357,6 +2431,16 @@ static int do_load(int argc, char *argv[], int dry_run)
      * Only applicable to 6.1+ kernels which use kCFI; pre-6.1 uses shadow CFI. */
     if (kmajor > 6 || (kmajor == 6 && kminor >= 1))
         patch_kcfi_hashes(mod, mod_size, eh);
+
+    /* Step 4.6: __ex_table entry format. arm64 switched from 8B to 12B in
+     * v5.15 (type-aware extable). kernelhook.ko is built with 12B entries
+     * because its inline uaccess fault fixups carry EX_TYPE_UACCESS_ERR_ZERO
+     * (type=2, data=0x129). Pre-5.15 kernels expect 8B entries; compress
+     * in place and rewire the .rela__ex_table r_offsets accordingly. */
+    {
+        int target_entry_size = (kmajor > 5 || (kmajor == 5 && kminor >= 15)) ? 12 : 8;
+        patch_extable_format(mod, eh, target_entry_size);
+    }
 
     /* Dry-run (info subcommand): dump the resolution trace and exit. */
     if (dry_run) {
