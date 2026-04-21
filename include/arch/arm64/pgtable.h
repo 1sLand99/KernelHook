@@ -41,6 +41,10 @@
 extern uint64_t kh_page_shift;
 extern uint64_t page_size;
 extern uint64_t page_level;
+/* Output-Address width in bits, decoded from ID_AA64MMFR0_EL1.PARange.
+ * Used by page-table descriptor masks to cover FEAT_LPA/LPA2 (52-bit PA).
+ * Valid values: 32, 36, 40, 42, 44, 48, 52, 56. Default 48 before init. */
+extern uint64_t kh_pa_bits;
 
 /* Resolved kernel function pointers (freestanding only — runtime ksyms) */
 typedef void (*flush_tlb_kernel_page_func_t)(uint64_t addr);
@@ -93,12 +97,20 @@ static inline int pte_valid_cont(uint64_t pte)
 #include <asm/cacheflush.h>
 #include <asm/set_memory.h>
 
-/* In freestanding mode `page_size` / `kh_page_shift` are runtime-detected
- * uint64_t variables. In kbuild mode the kernel provides compile-time
- * PAGE_SIZE / PAGE_SHIFT — alias them so consumers like inline.c
- * write_insts_at() don't need per-mode conditionals. */
+/* In freestanding mode `page_size` / `kh_page_shift` / `kh_page_offset` are
+ * runtime-detected uint64_t variables. In kbuild mode the kernel provides
+ * compile-time PAGE_SIZE / PAGE_SHIFT / PAGE_OFFSET — alias them so
+ * consumers (inline.c write_insts_at(), cred_task.c walk_task_for_cred())
+ * don't need per-mode conditionals. */
 #define page_size ((uint64_t)PAGE_SIZE)
 #define kh_page_shift ((uint64_t)PAGE_SHIFT)
+#define kh_page_offset ((uint64_t)PAGE_OFFSET)
+/* PA width alias. CONFIG_ARM64_PA_BITS exists from v4.13; older kernels were
+ * always 48-bit — default if the Kconfig symbol isn't defined. */
+#ifndef CONFIG_ARM64_PA_BITS
+#define CONFIG_ARM64_PA_BITS 48
+#endif
+#define kh_pa_bits ((uint64_t)CONFIG_ARM64_PA_BITS)
 
 #endif /* KMOD_FREESTANDING */
 

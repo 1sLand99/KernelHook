@@ -43,11 +43,13 @@ static int strat_init_mm_pgd(void *out, size_t sz)
 
     /* Scan first 0x100 bytes of init_mm for a kernel-VA, page-aligned value.
      * The pgd field exists somewhere in that range on every ARM64 GKI
-     * variant. We accept the first plausible candidate. */
-    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
+     * variant. We accept the first plausible candidate. kh_page_offset is
+     * established by kh_pgtable_init before any strategy resolve runs; if
+     * it's zero here the caller violated init order and we refuse to walk. */
+    if (!kh_page_offset) return KH_STRAT_ENODATA;
     for (unsigned long off = 0; off < 0x100; off += 8) {
         uint64_t cand = *(uint64_t *)(mm + off);
-        if (cand >= kva_min && cand != 0 && (cand & 0xFFF) == 0) {
+        if (cand >= kh_page_offset && cand != 0 && (cand & 0xFFF) == 0) {
             *(uint64_t *)out = cand;
             return 0;
         }
@@ -61,18 +63,24 @@ static int strat_ttbr1_walk(void *out, size_t sz)
 
     uint64_t ttbr1;
     asm volatile("mrs %0, ttbr1_el1" : "=r"(ttbr1));
-    /* TTBR1_EL1 layout (ARMv8-A 48-bit PA, 4K granule):
+    /* TTBR1_EL1 layout (ARMv8-A, PA width = kh_pa_bits decoded at init):
      *   bits[63:48]: ASID (16-bit) — must be masked off
-     *   bits[47:12]: BADDR (page-aligned PA of PGD)
-     *   bits[11:1]:  reserved
+     *   bits[47:page_shift]: BADDR (page-aligned PA of PGD)
+     *   bits[(page_shift-1):1]: reserved
      *   bit[0]:      CnP
-     * Correct mask: zero ASID (top 16) and in-page offset (bits[11:0]).
-     * Prior `& ~0xFFFFULL` over-masked (zeroed bits[15:12] of valid PA when
-     * PGD PA isn't on a 64K boundary — e.g. PA=0x80123000 got rounded to
-     * 0x80120000, causing divergence from kallsyms swapper_pg_dir by 0x3000).
-     * TODO LPA2 (52-bit PA): BADDR[51:48] live in TTBR1_EL1[5:2]; if we
-     * ever target FEAT_LPA2 kernels, combine those bits in. */
-    uint64_t pgd_pa = ttbr1 & 0x0000FFFFFFFFF000ULL;
+     * Mask is built from kh_pa_bits (capped at 48 here) and kh_page_shift so
+     * 4/16/64K granules and 48-bit-or-less PA systems all land correctly.
+     * The low page_size bits are zeroed because BADDR is page-aligned.
+     *
+     * FEAT_LPA2 (ARMv8.7, 52-bit PA with TCR_EL1.DS=1) places BADDR[51:48] in
+     * TTBR1_EL1[5:2] instead of the natural position. Handling that requires
+     * TCR_EL1.DS detection and the matching PTE Output-Address rewrite across
+     * the whole walker — out of scope for this fix. On LPA2 hardware the
+     * kallsyms strategy (prio 0) or loader injection should win; this
+     * fallback would yield a truncated PA. */
+    uint64_t baddr_hi = (kh_pa_bits < 48) ? kh_pa_bits : 48;
+    uint64_t pgd_pa_mask = ((1ULL << baddr_hi) - 1) & ~((1ULL << kh_page_shift) - 1);
+    uint64_t pgd_pa = ttbr1 & pgd_pa_mask;
 
     /* Recursive resolution: get memstart_addr via the registry. */
     uint64_t memstart = 0;

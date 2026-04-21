@@ -28,6 +28,7 @@
 #else
 
 #include <symbol.h>
+#include <arch/arm64/pgtable.h>  /* kh_page_offset (runtime VA_BITS lower bound) */
 
 /* in_interrupt() — provided by linux/preempt.h in kbuild mode; our
  * freestanding shim defines it too. Pull via linux/sched.h as specified
@@ -38,14 +39,17 @@ static uint64_t walk_task_for_cred(uint64_t task)
 {
     /* Scan the first 0x1000 bytes of task_struct at 8-byte stride looking
      * for a `struct cred *cred` (or `real_cred`) field. Candidate must:
-     *   - be a kernel VA (bit 63 set for canonical 48-bit VAs)
+     *   - be a kernel VA at or above kh_page_offset (derived from TCR_EL1.T1SZ
+     *     at kh_pgtable_init time; correct for 39/47/48/52-bit VA layouts)
      *   - first 4 bytes read as a plausible usage count (1..0xFFFF)
      *   - next 4 bytes read as a plausible uid (< 65536 or 0xFFFFFFFF
      *     for the init KUIDT sentinel)
-     * Returns 0 if no candidate found. */
+     * Returns 0 if no candidate found. kh_pgtable_init runs before any
+     * strategy resolve path, so kh_page_offset is populated. */
+    if (!kh_page_offset) return 0;
     for (unsigned long off = 0; off < 0x1000; off += 8) {
         uint64_t cand = *(uint64_t *)(task + off);
-        if (cand < 0xffff000000000000ULL) continue;
+        if (cand < kh_page_offset) continue;
         uint32_t usage = *(uint32_t *)cand;
         if (usage < 1 || usage > 0xFFFF) continue;
         uint32_t uid = *(uint32_t *)(cand + 4);
@@ -154,9 +158,10 @@ static int strat_kallsyms_init_stack(void *out, size_t sz)
  * strat_current_task_walk applies on pre-4.9 kernels. */
 static uint64_t find_stack_in_task(uint64_t task)
 {
+    if (!kh_page_offset) return 0;
     for (unsigned long off = 0; off < 0x200; off += 8) {
         uint64_t cand = *(uint64_t *)(task + off);
-        if (cand < 0xffff000000000000ULL) continue;
+        if (cand < kh_page_offset) continue;
         /* Thread sizes we accept: 8K (older ARM32-ish), 16K (most ARM64),
          * 32K (some hardened builds). Try largest alignment first so we
          * prefer the strongest match. */

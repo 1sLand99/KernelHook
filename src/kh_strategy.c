@@ -314,6 +314,19 @@ int kh_strategy_run_consistency_check(void)
 
 void kh_strategy_dump(void)
 {
+#ifndef __USERSPACE__
+    /* Root-cause hint before the per-cap listing. The most frequent reason
+     * every strategy returns ENODATA is that kallsyms isn't resolving at all
+     * — either CONFIG_KALLSYMS=n on the target kernel, or a freestanding
+     * insmod without `kallsyms_addr=0x...`. Probe with a symbol every kernel
+     * in range (4.4–6.12) exports (_printk on 5.15+, printk before that).
+     * If both miss, ksyms is genuinely not wired up. */
+    if (!ksyms_lookup("_printk") && !ksyms_lookup("printk")) {
+        pr_warn("[kh_strategy] DIAGNOSTIC: ksyms not resolving any kernel symbol. "
+                "Check CONFIG_KALLSYMS=y on target kernel; for freestanding "
+                "loads pass kallsyms_addr=0x<addr-of-kallsyms_lookup_name>.");
+    }
+#endif
     for (int ci = 0; ci < g_cap_count; ci++) {
         struct cap_slot *c = &g_caps[ci];
         for (int i = 0; i < c->num; i++) {

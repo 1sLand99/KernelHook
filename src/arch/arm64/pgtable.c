@@ -37,6 +37,12 @@ uint64_t kimage_voffset = 0;
 uint64_t phys_offset = 0;
 uint64_t kh_page_offset = 0;
 
+/* Output-Address width in bits, decoded at kh_pgtable_init from
+ * ID_AA64MMFR0_EL1.PARange. Used by all page-table descriptor masks so we
+ * correctly sign-extend past bit 47 on FEAT_LPA / FEAT_LPA2 hardware.
+ * Default 48 keeps legacy behaviour before init runs. */
+uint64_t kh_pa_bits = 48;
+
 /* Resolved flush function pointers */
 flush_tlb_kernel_page_func_t flush_tlb_kernel_page;
 flush_tlb_kernel_range_func_t flush_tlb_kernel_range;
@@ -74,6 +80,21 @@ int kh_pgtable_init(void)
     detect_page_size();
     pr_info("pgtable: page_size=%llu kh_page_shift=%llu",
           (unsigned long long)page_size, (unsigned long long)kh_page_shift);
+
+    /* Detect PA width from ID_AA64MMFR0_EL1.PARange (bits [3:0]).
+     * ARMv8-A encoding: 0..6 → 32/36/40/42/44/48/52 bits, 7 → 56 (FEAT_D128).
+     * All page-table descriptor masks below use kh_pa_bits so bits above 47
+     * survive on FEAT_LPA/LPA2 hardware. Per Arm ARM D13.2.64, unknown values
+     * ≥8 are RES0; default to 48 for defensive forward compatibility. */
+    {
+        uint64_t mmfr0;
+        asm volatile("mrs %0, s3_0_c0_c7_0" : "=r"(mmfr0)); /* ID_AA64MMFR0_EL1 */
+        static const uint8_t parange_to_bits[8] = {32, 36, 40, 42, 44, 48, 52, 56};
+        uint64_t parange = mmfr0 & 0xfULL;
+        kh_pa_bits = (parange < 8) ? parange_to_bits[parange] : 48;
+        pr_info("pgtable: ID_AA64MMFR0_EL1.PARange=%llu → kh_pa_bits=%llu",
+              (unsigned long long)parange, (unsigned long long)kh_pa_bits);
+    }
 
     /* Detect page-table levels + PAGE_OFFSET from TCR_EL1.T1SZ BEFORE any
      * ksyms lookups. PAGE_OFFSET is the kernel VA lower bound; we need it
@@ -132,7 +153,7 @@ int kh_pgtable_init(void)
         kh_strategy_dump();
         return -1;
     }
-    pr_info("pgtable: kimage_voffset value=%llx", (unsigned long long)kimage_voffset);
+    pr_info("pgtable: kimage_voffset value=0x%llx", (unsigned long long)kimage_voffset);
 
     /* Validate kimage_voffset is in kernel VA range */
     if (kimage_voffset == 0) {
@@ -145,7 +166,7 @@ int kh_pgtable_init(void)
      * prior behavior for kernels that don't export memstart_addr). */
     rc = kh_strategy_resolve("memstart_addr", &phys_offset, sizeof(phys_offset));
     if (rc == 0) {
-        pr_info("pgtable: memstart_addr=%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
+        pr_info("pgtable: memstart_addr=0x%llx (PHYS_OFFSET)", (unsigned long long)phys_offset);
     } else {
         pr_warn("pgtable: memstart_addr unresolved (rc=%d), assuming PHYS_OFFSET=0", rc);
         phys_offset = 0;
@@ -198,9 +219,15 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
     uint64_t block_lv = 0;
 
     /* Sanity check: pgd and VA must be in kernel address space.
-     * Use kh_page_offset (computed from VA_BITS) as the lower bound. */
-    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
-    if (pxd_va < kva_min || va < kva_min) {
+     * kh_page_offset was computed from TCR_EL1.T1SZ at kh_pgtable_init; any
+     * caller reaching pgtable_entry has observed a successful init, so
+     * kh_page_offset is non-zero. A zero value here indicates broken init
+     * order — surface it as an error instead of silently falling back. */
+    if (!kh_page_offset) {
+        pr_err("pgtable_entry: kh_page_offset unset (pgtable_init not run?)");
+        return 0;
+    }
+    if (pxd_va < kh_page_offset || va < kh_page_offset) {
         pr_err("pgtable_entry: invalid addr pgd=%llx va=%llx",
               (unsigned long long)pxd_va, (unsigned long long)va);
         return 0;
@@ -225,11 +252,11 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
-            pxd_pa = pxd_desc & (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
+            pxd_pa = pxd_desc & (((1UL << (kh_pa_bits - kh_page_shift)) - 1) << kh_page_shift);
         } else if ((pxd_desc & 0x3) == 0x1) {
             /* Block descriptor */
             uint64_t block_bits = (uint64_t)(3 - lv) * pxd_bits + kh_page_shift;
-            pxd_pa = pxd_desc & (((1UL << (48 - block_bits)) - 1) << block_bits);
+            pxd_pa = pxd_desc & (((1UL << (kh_pa_bits - block_bits)) - 1) << block_bits);
             block_lv = (uint64_t)lv;
         } else {
             /* Invalid descriptor */
@@ -261,8 +288,7 @@ uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va)
     uint64_t pxd_pa = 0;
     uint64_t pxd_va = pgd_va;
 
-    uint64_t kva_min = kh_page_offset ? kh_page_offset : 0xffffff8000000000ULL;
-    if (pxd_va < kva_min || va < kva_min)
+    if (!kh_page_offset || pxd_va < kh_page_offset || va < kh_page_offset)
         return 0;
 
     for (uint64_t line = pxd_va; line < pxd_va + page_size; line += 64)
@@ -275,11 +301,11 @@ uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va)
         uint64_t pxd_desc = ((uint64_t *)pxd_va)[pxd_index];
         uint8_t kind = pxd_desc & 0x3;
         if (kind == 0x3) {
-            pxd_pa = pxd_desc & (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
+            pxd_pa = pxd_desc & (((1UL << (kh_pa_bits - kh_page_shift)) - 1) << kh_page_shift);
         } else if (kind == 0x1) {
             uint64_t bits = (uint64_t)(3 - lv) * pxd_bits;
             uint64_t block_bits = bits + kh_page_shift;
-            pxd_pa = (pxd_desc & (((1UL << (48 - block_bits)) - 1) << block_bits)) +
+            pxd_pa = (pxd_desc & (((1UL << (kh_pa_bits - block_bits)) - 1) << block_bits)) +
                      (va & (((1UL << bits) - 1) << kh_page_shift));
             break;
         } else {
@@ -310,7 +336,7 @@ void modify_entry_kernel(uint64_t va, uint64_t *entry, uint64_t value)
     }
 
     /* Handle contiguous PTE: update all entries in the contiguous group */
-    uint64_t table_pa_mask = (((1UL << (48 - kh_page_shift)) - 1) << kh_page_shift);
+    uint64_t table_pa_mask = (((1UL << (kh_pa_bits - kh_page_shift)) - 1) << kh_page_shift);
     uint64_t prot = value & ~table_pa_mask;
     uint64_t *p = (uint64_t *)((uintptr_t)entry & ~(sizeof(*entry) * CONT_PTES - 1));
     for (int i = 0; i < CONT_PTES; ++i, ++p)
