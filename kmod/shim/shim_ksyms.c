@@ -38,7 +38,6 @@
 #include <linux/types.h>   /* umode_t, etc. */
 #include <linux/kernel.h>  /* add_taint, kstrtol declarations */
 #include <linux/uaccess.h> /* copy_to/from_user declarations */
-#include <linux/debugfs.h> /* debugfs_* declarations */
 #include <linux/string.h>  /* snprintf declaration */
 #include <symbol.h>        /* ksyms_lookup */
 #include <kh_hook.h>       /* KCFI_EXEMPT */
@@ -72,6 +71,19 @@ void add_taint(unsigned flag, int lockdep_ok)
  * (nothing copied) if the symbol isn't resolved yet, mimicking a
  * full failure — the caller sees no data transferred and handles the
  * error normally.
+ *
+ * NOTE on symbol naming: these wrappers are prefixed `kh_shim_*` (not
+ * `copy_to_user` / `copy_from_user`) so they don't collide with the
+ * kernel-side names in kallsyms. If we exported `copy_to_user` as a
+ * global, `ksyms_lookup("copy_to_user")` from the strategy resolver
+ * (src/strategies/uaccess_copy.c prio 1) would find our own module
+ * symbol first on kernels that don't export the bare names — on Pixel 6
+ * GKI 6.1, for example, only `__arch_copy_to_user` is in kallsyms, not
+ * `copy_to_user` / `_copy_to_user`. Finding our own wrapper produced a
+ * self-call recursion that stack-overflowed the kernel.
+ *
+ * Callers keep using `copy_to_user(...)` — the shim header aliases it
+ * to `kh_shim_copy_to_user` via a static-inline wrapper.
  * ======================================================================== */
 
 typedef unsigned long (*copy_from_user_fn_t)(void *, const void __user *, unsigned long);
@@ -81,73 +93,33 @@ static copy_from_user_fn_t kh_copy_from_user_fn;
 static copy_to_user_fn_t   kh_copy_to_user_fn;
 
 KCFI_EXEMPT
-unsigned long copy_from_user(void *to, const void __user *from, unsigned long n)
+unsigned long kh_shim_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
     if (!kh_copy_from_user_fn)
         kh_copy_from_user_fn = (copy_from_user_fn_t)(uintptr_t)ksyms_lookup("_copy_from_user");
     if (!kh_copy_from_user_fn)
         kh_copy_from_user_fn = (copy_from_user_fn_t)(uintptr_t)ksyms_lookup("copy_from_user");
+    if (!kh_copy_from_user_fn)
+        kh_copy_from_user_fn = (copy_from_user_fn_t)(uintptr_t)ksyms_lookup("__arch_copy_from_user");
+    if (!kh_copy_from_user_fn)
+        kh_copy_from_user_fn = (copy_from_user_fn_t)(uintptr_t)ksyms_lookup("__copy_from_user");
     if (!kh_copy_from_user_fn) return n;
     return kh_copy_from_user_fn(to, from, n);
 }
 
 KCFI_EXEMPT
-unsigned long copy_to_user(void __user *to, const void *from, unsigned long n)
+unsigned long kh_shim_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
     if (!kh_copy_to_user_fn)
         kh_copy_to_user_fn = (copy_to_user_fn_t)(uintptr_t)ksyms_lookup("_copy_to_user");
     if (!kh_copy_to_user_fn)
         kh_copy_to_user_fn = (copy_to_user_fn_t)(uintptr_t)ksyms_lookup("copy_to_user");
+    if (!kh_copy_to_user_fn)
+        kh_copy_to_user_fn = (copy_to_user_fn_t)(uintptr_t)ksyms_lookup("__arch_copy_to_user");
+    if (!kh_copy_to_user_fn)
+        kh_copy_to_user_fn = (copy_to_user_fn_t)(uintptr_t)ksyms_lookup("__copy_to_user");
     if (!kh_copy_to_user_fn) return n;
     return kh_copy_to_user_fn(to, from, n);
-}
-
-/* ========================================================================
- * debugfs_create_dir / debugfs_create_file / debugfs_remove_recursive
- *
- * On kernels without CONFIG_DEBUG_FS these symbols don't exist. In that
- * case the wrapper returns NULL / is a no-op, and consumers treat the
- * NULL as "debugfs unavailable" — kh_strategy_debugfs_init() already
- * checks its return value.
- * ======================================================================== */
-
-typedef struct dentry *(*debugfs_create_dir_fn_t)(const char *, struct dentry *);
-typedef struct dentry *(*debugfs_create_file_fn_t)(const char *, unsigned short,
-                                                    struct dentry *, void *,
-                                                    const struct file_operations *);
-typedef void (*debugfs_remove_recursive_fn_t)(struct dentry *);
-
-static debugfs_create_dir_fn_t       kh_debugfs_create_dir_fn;
-static debugfs_create_file_fn_t      kh_debugfs_create_file_fn;
-static debugfs_remove_recursive_fn_t kh_debugfs_remove_recursive_fn;
-
-KCFI_EXEMPT
-struct dentry *debugfs_create_dir(const char *name, struct dentry *parent)
-{
-    if (!kh_debugfs_create_dir_fn)
-        kh_debugfs_create_dir_fn = (debugfs_create_dir_fn_t)(uintptr_t)ksyms_lookup("debugfs_create_dir");
-    if (!kh_debugfs_create_dir_fn) return (struct dentry *)0;
-    return kh_debugfs_create_dir_fn(name, parent);
-}
-
-KCFI_EXEMPT
-struct dentry *debugfs_create_file(const char *name, unsigned short mode,
-                                    struct dentry *parent, void *data,
-                                    const struct file_operations *fops)
-{
-    if (!kh_debugfs_create_file_fn)
-        kh_debugfs_create_file_fn = (debugfs_create_file_fn_t)(uintptr_t)ksyms_lookup("debugfs_create_file");
-    if (!kh_debugfs_create_file_fn) return (struct dentry *)0;
-    return kh_debugfs_create_file_fn(name, mode, parent, data, fops);
-}
-
-KCFI_EXEMPT
-void debugfs_remove_recursive(struct dentry *dentry)
-{
-    if (!kh_debugfs_remove_recursive_fn)
-        kh_debugfs_remove_recursive_fn = (debugfs_remove_recursive_fn_t)(uintptr_t)ksyms_lookup("debugfs_remove_recursive");
-    if (!kh_debugfs_remove_recursive_fn) return;
-    kh_debugfs_remove_recursive_fn(dentry);
 }
 
 /* ========================================================================

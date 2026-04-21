@@ -95,12 +95,12 @@ MODULE_PARM_DESC(iomem_memstart,
  * kh_strategy_boot — called early in kernelhook_init(), after
  * kmod_compat_init() so kallsyms is available, before hook memory init.
  *
- * Registers link-time strategies, applies CSV module-param overrides, and
- * wires debugfs. Does NOT invoke the consistency check — that runs lazily
- * from kh_strategy_post_init() after kh_pgtable_init has populated the
- * pgtable globals that some strategies (text_va_minus_pa, ttbr1_walk)
- * depend on. Running it here would compare lower-prio strategies against
- * uninitialized globals and produce false TAINT_CRAP warnings.
+ * Registers link-time strategies and applies CSV module-param overrides.
+ * Does NOT invoke the consistency check — that runs lazily from
+ * kh_strategy_post_init() after kh_pgtable_init has populated the pgtable
+ * globals that some strategies (text_va_minus_pa, ttbr1_walk) depend on.
+ * Running it here would compare lower-prio strategies against uninitialized
+ * globals and produce false TAINT_CRAP warnings.
  *
  * Returns 0 on success. Currently always succeeds.
  */
@@ -123,13 +123,6 @@ int kh_strategy_boot(void)
     kh_strategy_apply_force_list(kh_force);
     kh_strategy_apply_inject_list(kh_inject_fail);
 
-    /* Always init in freestanding mode — cross-compiled .ko targets kernels
-     * that have debugfs. */
-    {
-        extern void kh_strategy_debugfs_init(void);
-        kh_strategy_debugfs_init();
-    }
-
     return 0;
 }
 
@@ -144,19 +137,23 @@ int kh_strategy_boot(void)
  */
 int kh_strategy_post_init(void)
 {
-    if (!kh_consistency_check)
-        return 0;
-
-    int mis = kh_strategy_run_consistency_check();
-    if (mis > 0) {
-        pr_warn("[kh_strategy] consistency check: %d mismatch(es) — tainting kernel\n",
-                mis);
-        /* TAINT_CRAP signals that a module is doing something unusual.
-         * LOCKDEP_STILL_OK = 1: lockdep can still be used after this taint. */
-        add_taint(TAINT_CRAP, LOCKDEP_STILL_OK);
-    } else {
-        pr_info("[kh_strategy] consistency check: all strategies agree\n");
+    if (kh_consistency_check) {
+        int mis = kh_strategy_run_consistency_check();
+        if (mis > 0) {
+            pr_warn("[kh_strategy] consistency check: %d mismatch(es) — tainting kernel\n",
+                    mis);
+            /* TAINT_CRAP signals that a module is doing something unusual.
+             * LOCKDEP_STILL_OK = 1: lockdep can still be used after this taint. */
+            add_taint(TAINT_CRAP, LOCKDEP_STILL_OK);
+        } else {
+            pr_info("[kh_strategy] consistency check: all strategies agree\n");
+        }
     }
+
+    /* Always snapshot the registry to dmesg after init. strategy_matrix_dump
+     * in userspace parses these lines as the sole source of registry state
+     * (debugfs has been removed to avoid kCFI entry-point exposure). */
+    kh_strategy_dump();
     return 0;
 }
 
@@ -168,18 +165,7 @@ int kh_strategy_post_init(void)
  */
 int kh_strategy_boot(void)
 {
-    int rc = kh_strategy_init();
-    if (rc)
-        return rc;
-
-#if IS_ENABLED(CONFIG_DEBUG_FS)
-    {
-        extern void kh_strategy_debugfs_init(void);
-        kh_strategy_debugfs_init();
-    }
-#endif
-
-    return 0;
+    return kh_strategy_init();
 }
 
 /* kbuild/SDK mode: consumer module owns its own consistency_check module_param.

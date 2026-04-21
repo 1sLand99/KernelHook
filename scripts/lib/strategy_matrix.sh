@@ -23,9 +23,14 @@ _SM_EXPECT="$_SM_GOLDEN_DIR/expectations.yaml"
 #
 # Emit a YAML document to stdout describing the current state of the strategy
 # registry on the connected device.  The document has three sections:
-#   run_metadata  -- date, kernel uname, linux_banner sha256, git sha, device id
-#   capabilities  -- parsed from /sys/kernel/debug/kernelhook/strategies
-#   observed_values -- scalar values extracted from recent dmesg [KH/…] lines
+#   run_metadata     -- date, kernel uname, linux_banner sha256, git sha, device id
+#   capabilities     -- parsed from `[kh_strategy] <cap> <strat> …` dmesg lines
+#                       (emitted by kh_strategy_dump() called from kh_strategy_post_init
+#                       and at the tail of kh_test.ko's test harness)
+#   observed_values  -- scalar values extracted from recent dmesg [KH/…] lines
+#
+# Debugfs was removed to avoid exposing kCFI entry points (4 × file_operations
+# callbacks) that would otherwise need per-kernel hash patching by kmod_loader.
 # ---------------------------------------------------------------------------
 strategy_matrix_dump() {
     local device="$1"; shift
@@ -40,6 +45,8 @@ strategy_matrix_dump() {
     git_sha=$(cd "$_SM_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo nogit)
 
     cat <<YAML
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Auto-generated via: scripts/test.sh strategy-matrix --accept $device
 run_metadata:
   date: $(date -u +%Y-%m-%dT%H:%M:%SZ)
   kernel_uname: "$uname"
@@ -49,67 +56,121 @@ run_metadata:
 
 YAML
 
-    # Parse /sys/kernel/debug/kernelhook/strategies.
-    # Each line: <32-char-cap> <24-char-strat> prio=N enabled=N winner=Y|""
-    # Convert to YAML capability blocks.
-    local strat_dump
-    strat_dump=$(adb "${adb_args[@]}" shell \
-        'cat /sys/kernel/debug/kernelhook/strategies 2>/dev/null' 2>/dev/null \
-        | tr -d '\r') || strat_dump=""
+    # Grab the full dmesg once; subsequent parses slice it.
+    local dmesg_full
+    dmesg_full=$(adb "${adb_args[@]}" shell 'dmesg 2>/dev/null' 2>/dev/null \
+        | tr -d '\r') || dmesg_full=""
+
+    # Strategy snapshot: take the tail slice of `[kh_strategy] <cap> <strat>
+    # prio=N enabled=N winner=Y|""` lines. The module emits a full snapshot
+    # once at kh_strategy_post_init and once at the end of kh_test_init; we
+    # want the most recent one, so locate its start by scanning backwards for
+    # the first registered capability and keep from there.
+    #
+    # Each matching line is uniquely identifiable by the `[kh_strategy] `
+    # prefix followed by a `prio=` field (that filters out the KALLSYMS
+    # diagnostic and consistency-check notices which share the prefix but
+    # lack `prio=`).
+    local strat_lines
+    strat_lines=$(printf '%s\n' "$dmesg_full" \
+        | grep -E '\[kh_strategy\][^A-Z]*prio=' \
+        | tail -200) || strat_lines=""
 
     echo "capabilities:"
 
-    if [[ -z "$strat_dump" ]]; then
-        echo "  # (no strategies dump available -- module not loaded or debugfs not mounted)"
+    if [[ -z "$strat_lines" ]]; then
+        echo "  # (no strategy snapshot in dmesg -- module not loaded?)"
     else
-        echo "$strat_dump" | awk '
-        NF < 2 { next }
+        # awk expects each line of form
+        #   ...[kh_strategy] <cap> <strat> prio=N enabled=N winner=Y|""
+        # Extract fields after the [kh_strategy] tag.
+        printf '%s\n' "$strat_lines" | awk '
         {
-            cap   = $1
-            strat = $2
-            prio=""; enabled=""; winner="false"
-            for (i = 3; i <= NF; i++) {
-                n = split($i, kv, "=")
-                if (n == 2) {
-                    if (kv[1] == "prio")    prio    = kv[2]
-                    if (kv[1] == "enabled") enabled = kv[2]
-                    if (kv[1] == "winner")  winner  = (kv[2] == "Y" ? "true" : "false")
+            # Strip everything up to and including "[kh_strategy] ".
+            idx = index($0, "[kh_strategy] ")
+            if (idx == 0) next
+            payload = substr($0, idx + length("[kh_strategy] "))
+            n = split(payload, f, /[ \t]+/)
+            if (n < 3) next
+            cap = f[1]; strat = f[2]
+            prio = ""; enabled = "false"; winner = "false"
+            for (i = 3; i <= n; i++) {
+                k = split(f[i], kv, "=")
+                if (k < 1) continue
+                if (kv[1] == "prio")    prio    = (k >= 2 ? kv[2] : "")
+                if (kv[1] == "enabled") enabled = (k >= 2 && kv[2] == "1" ? "true" : "false")
+                if (kv[1] == "winner")  winner  = (k >= 2 && kv[2] == "Y" ? "true" : "false")
+            }
+            if (prio == "") next
+            # Collapse duplicate snapshot lines (older boot snapshot vs the
+            # trailing one). Keep the LAST line per (cap,strat); accomplish
+            # this by deferring output until END.
+            key = cap "\t" strat
+            order[key] = (order[key] == "" ? ++ord : order[key])
+            caps[key] = cap
+            strats[key] = strat
+            prios[key] = prio
+            ens[key] = enabled
+            wins[key] = winner
+            cap_first_order[cap] = (cap_first_order[cap] == "" ? ord : cap_first_order[cap])
+        }
+        END {
+            # Emit capabilities in first-appearance order; within each cap,
+            # strategies in prio order.
+            n_keys = 0
+            for (key in caps) { keys[++n_keys] = key }
+            # Sort keys by (cap_first_order, prio).
+            for (i = 1; i <= n_keys; i++) {
+                for (j = i + 1; j <= n_keys; j++) {
+                    ai = cap_first_order[caps[keys[i]]]
+                    aj = cap_first_order[caps[keys[j]]]
+                    if (ai > aj || (ai == aj && (prios[keys[i]] + 0) > (prios[keys[j]] + 0))) {
+                        t = keys[i]; keys[i] = keys[j]; keys[j] = t
+                    }
                 }
             }
-            if (cap != prev_cap) {
-                if (prev_cap != "") printf "\n"
-                printf "  %s:\n    strategies:\n", cap
-                prev_cap = cap
+            prev_cap = ""
+            for (i = 1; i <= n_keys; i++) {
+                k = keys[i]
+                if (caps[k] != prev_cap) {
+                    if (prev_cap != "") printf "\n"
+                    printf "  %s:\n    strategies:\n", caps[k]
+                    prev_cap = caps[k]
+                }
+                printf "      - { name: %s, prio: %s, enabled: %s, winner: %s }\n",
+                       strats[k], prios[k], ens[k], wins[k]
             }
-            printf "      - { name: %s, prio: %s, enabled: %s, winner: %s }\n",
-                   strat, prio, enabled, winner
         }
         '
     fi
 
     # Dmesg-derived scalar values.  Kernels that load kernelhook.ko (or
     # kh_test.ko) log resolved values via pr_info at the [KH/<cap>] tag.
-    # We tail the last 500 dmesg lines so we catch values from the most
-    # recent module load without pulling the entire ring buffer.
+    # Use the tail-500 slice so we catch the most recent module load.
     local dmesg_tail
-    dmesg_tail=$(adb "${adb_args[@]}" shell \
-        'dmesg 2>/dev/null | tail -500' 2>/dev/null \
-        | tr -d '\r') || dmesg_tail=""
+    dmesg_tail=$(printf '%s\n' "$dmesg_full" | tail -500)
 
     # Helper: extract last occurrence of pattern from dmesg_tail, or "unknown".
+    # Patterns must end with a VALUE capture group (either 0x<hex> or bare decimal);
+    # the trailing grep picks exactly that tail token, preserving any 0x prefix.
     _sm_extract() {
         local pattern="$1"
         local val
-        val=$(printf '%s\n' "$dmesg_tail" | grep -oE "$pattern" | tail -1 | grep -oE '[0-9a-fx]+$') \
+        val=$(printf '%s\n' "$dmesg_tail" | grep -oE "$pattern" | tail -1 \
+                | grep -oE '(0x[0-9a-f]+|[0-9]+)$') \
             || val="unknown"
         [[ -n "$val" ]] || val="unknown"
         printf '%s' "$val"
     }
 
-    local kimage_voffset memstart_addr swapper_pg_dir thread_size pt_regs_size
-    kimage_voffset=$(_sm_extract 'kimage_voffset[= ]+0x[0-9a-f]+')
-    memstart_addr=$(_sm_extract 'memstart_addr[= ]+0x[0-9a-f]+')
-    swapper_pg_dir=$(_sm_extract 'pgd=0x[0-9a-f]+')
+    # dmesg formats (see src/arch/arm64/pgtable.c + src/uaccess.c):
+    #   "pgtable: kimage_voffset value=0x<hex>"
+    #   "pgtable: memstart_addr=0x<hex> (PHYS_OFFSET)"
+    #   "pgtable: init ok, pgd=0x<hex> (...) voffset=0x<hex> ... levels=<dec>"
+    #   "uaccess: pt_regs_size=0x<hex> thread_size=<dec> (cached)"
+    local kimage_voffset memstart_addr thread_size pt_regs_size
+    kimage_voffset=$(_sm_extract 'kimage_voffset value=0x[0-9a-f]+')
+    memstart_addr=$(_sm_extract 'memstart_addr=0x[0-9a-f]+')
     thread_size=$(_sm_extract 'thread_size=[0-9]+')
     pt_regs_size=$(_sm_extract 'pt_regs_size=0x[0-9a-f]+')
 
@@ -118,7 +179,6 @@ YAML
 observed_values:
   kimage_voffset: "$kimage_voffset"
   memstart_addr:  "$memstart_addr"
-  swapper_pg_dir: "$swapper_pg_dir"
   thread_size:    "$thread_size"
   pt_regs_size:   "$pt_regs_size"
 YAML

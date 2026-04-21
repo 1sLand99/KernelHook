@@ -211,8 +211,8 @@ void *memmove(void *dst, const void *src, unsigned long n);
  *   1. Self-implementing pure-algorithm libc (memcpy, memset, memmove,
  *      memcmp, strcmp, strncmp, strchr, strlcpy) in kmod/shim/shim_libc.c.
  *   2. Wrapping every genuinely-kernel function (add_taint, copy_to_user,
- *      copy_from_user, debugfs_*, kstrtol, snprintf, vprintk, etc.) in
- *      a ksyms_lookup + static-cache shim in kmod/shim/shim_ksyms.c and
+ *      copy_from_user, kstrtol, snprintf, vprintk, etc.) in a
+ *      ksyms_lookup + static-cache shim in kmod/shim/shim_ksyms.c and
  *      kmod/src/log.c.
  *
  * The only remaining UND symbol that the kernel's module loader checks

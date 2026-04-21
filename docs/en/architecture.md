@@ -150,19 +150,27 @@ Four mechanisms allow per-strategy control without recompilation. All accept CSV
 | `kh_inject_fail="cap:name:count,..."` | Force the strategy to fail the next `count` calls |
 | `kh_consistency_check=1` | Run all enabled strategies and compare results at init |
 
-**debugfs** (under `/sys/kernel/debug/kernelhook/`):
+**dmesg snapshot** — the sole runtime observability channel. `kh_strategy_dump()`
+emits one line per `(capability, strategy)` tuple in the canonical form:
 
-| File | Operation | Semantics |
-|---|---|---|
-| `strategies` | read | Tabular listing: (cap, name, prio, enabled, last-winner, last-value) |
-| `disable` | write | `"cap:name"` — disable a strategy at runtime |
-| `enable` | write | `"cap:name"` — re-enable |
-| `force` | write | `"cap:name"` to pin; `"cap:"` to clear |
-| `consistency_last` | read | JSON-like result of the most recent consistency run |
+```
+[kh_strategy] <cap> <strategy> prio=<N> enabled=<0|1> winner=<Y|>
+```
 
-debugfs entries are compiled in only when `CONFIG_DEBUG_FS=y` (or
-`KMOD_FREESTANDING`). They are observability and test interfaces only; they are not
-on the capability resolution critical path.
+This dump is called automatically from `kh_strategy_post_init()` and at the tail of
+`kh_test_init()`, so `dmesg` always carries a fresh snapshot after module load.
+`scripts/lib/strategy_matrix.sh` parses these lines as the single source of
+registry state.
+
+> Why no debugfs? Exposing `struct file_operations` callbacks makes `.read` and
+> `.write` pointers kernel→module indirect-call entry points. On kCFI kernels
+> (GKI 6.1+) each such entry point needs an exact type-hash prefix that
+> `kmod_loader` would have to patch at insmod time. To keep a single
+> `kernelhook.ko` compatible with 4.4–6.12 we eliminated every kernel→ko entry
+> point that isn't strictly needed (currently only `init_module` /
+> `cleanup_module`; their hashes are patched by `kmod_loader` from a vendor
+> reference `.ko`). Runtime strategy overrides therefore use `rmmod` +
+> `insmod <params>` instead of writable debugfs files.
 
 ### Consistency-Check Mode
 
@@ -171,9 +179,9 @@ When `kh_consistency_check=1` is passed at load time:
 1. Module init runs **every enabled strategy** for each capability, not just the
    highest-priority one.
 2. All successful results are compared against each other.
-3. Any mismatch triggers `WARN` + `add_taint(TAINT_CRAP)`.
-4. The full result table is written to debugfs `consistency_last` for automated
-   assertion by the test harness.
+3. Any mismatch triggers `WARN` + `add_taint(TAINT_CRAP)` and emits a
+   `[kh_strategy] consistency mismatch in <cap>: <strategy> diverged` line to
+   dmesg (parsed by the golden-matrix validator).
 
 Overhead is bounded: roughly N `ksyms_lookup` calls per capability (N = 2–4), estimated
 at under 50 ms total for all 12 capabilities. Consistency check runs in CI by default
@@ -268,9 +276,9 @@ L2 runs as part of `scripts/test.sh avd` and `scripts/test.sh device`.
 Location: `tests/golden/strategy_matrix/`
 
 `scripts/test.sh strategy-matrix` loads `kernelhook.ko` with `kh_consistency_check=1`
-on each available AVD and real device, reads
-`/sys/kernel/debug/kernelhook/strategies` and `consistency_last`, and compares the
-output against checked-in golden files:
+on each available AVD and real device, parses the dmesg snapshot emitted by
+`kh_strategy_post_init()` (`[kh_strategy] <cap> <strat> prio=N enabled=N winner=Y|`),
+and compares against checked-in golden files:
 
 | Artifact | Path | Contents |
 |---|---|---|
@@ -404,7 +412,7 @@ Commit the updated `values/<device>.yaml`, `survival.tsv`, and
 | Path | Contents |
 |---|---|
 | `include/kh_strategy.h` | Registry API: `kh_strategy_resolve`, `KH_STRATEGY_DECLARE`, control functions |
-| `src/kh_strategy.c` | Registry implementation, module parameters, debugfs entries |
+| `src/kh_strategy.c` | Registry implementation, module-param CSV parsers, `kh_strategy_dump()` |
 | `src/strategies/swapper_pg_dir.c` | Four strategies for `swapper_pg_dir` |
 | `src/strategies/kimage_voffset.c` | Three strategies for `kimage_voffset` |
 | `src/strategies/memstart_addr.c` | Three strategies for `memstart_addr` |

@@ -278,14 +278,8 @@ static int kh_subsystem_init(void)
      * needed here. */
     {
         extern int kh_strategy_init(void);
-        extern void kh_strategy_debugfs_init(void);
         int srv = kh_strategy_init();
         if (srv) pr_warn(KH_TEST_TAG "kh_strategy_init returned %d\n", srv);
-        /* Mount /sys/kernel/debug/kernelhook/ so strategy-matrix tooling
-         * can dump the registry from userspace (SP-7 follow-up: lets
-         * Pixel_30..34 AVD scans work against freestanding kh_test.ko
-         * without having to rebuild in SDK mode). */
-        kh_strategy_debugfs_init();
     }
 
     /* 3. pgtable — not fatal: set_memory mode works without it */
@@ -657,6 +651,13 @@ results:
 #endif
     pr_info(KH_TEST_TAG "=== Results: %d run, %d passed, %d failed ===\n",
             tests_run, tests_passed, tests_failed);
+
+    /* Strategy matrix snapshot for userspace tooling. Dumps every
+     * capability × strategy tuple to dmesg in the canonical format
+     * `[kh_strategy] <cap> <strat> prio=N enabled=N winner=Y|`
+     * so strategy_matrix_dump() in scripts/lib/strategy_matrix.sh can
+     * parse the running registry state without needing debugfs. */
+    kh_strategy_dump();
 
     if (tests_failed > 0)
         pr_err(KH_TEST_TAG "SOME TESTS FAILED\n");

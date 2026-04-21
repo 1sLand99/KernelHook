@@ -19,18 +19,21 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Flag parser: --mode={sdk,freestanding} (default sdk). Remaining positional
-# arguments are AVD names. Bash-3.2 / macOS-safe: the `"${NEW_ARGS[@]+...}"`
-# form avoids the "unbound variable" error that `set -u` would raise on an
-# empty array re-expansion.
+# Flag parser: --mode={sdk,freestanding} (default sdk),
+#              --consumers=csv (SDK mode only; default: full SDK consumer set).
+# Remaining positional arguments are AVD names. Bash-3.2 / macOS-safe: the
+# `"${NEW_ARGS[@]+...}"` form avoids the "unbound variable" error that
+# `set -u` would raise on an empty array re-expansion.
 KH_MODE="sdk"
+KH_CONSUMERS="hello_hook,fp_hook,hook_chain,hook_wrap_args,ksyms_lookup"
 NEW_ARGS=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --mode=*) KH_MODE="${1#--mode=}"; shift ;;
-        --)       shift; while [ "$#" -gt 0 ]; do NEW_ARGS+=("$1"); shift; done ;;
-        -*)       echo "unknown flag $1" >&2; exit 2 ;;
-        *)        NEW_ARGS+=("$1"); shift ;;
+        --mode=*)      KH_MODE="${1#--mode=}"; shift ;;
+        --consumers=*) KH_CONSUMERS="${1#--consumers=}"; shift ;;
+        --)            shift; while [ "$#" -gt 0 ]; do NEW_ARGS+=("$1"); shift; done ;;
+        -*)            echo "unknown flag $1" >&2; exit 2 ;;
+        *)             NEW_ARGS+=("$1"); shift ;;
     esac
 done
 set -- "${NEW_ARGS[@]+"${NEW_ARGS[@]}"}"
@@ -38,6 +41,25 @@ case "$KH_MODE" in
     sdk|freestanding) ;;
     *) echo "invalid --mode=$KH_MODE (expected sdk|freestanding)" >&2; exit 2 ;;
 esac
+
+# Parse consumer csv into a bash array (used by the SDK build + load loops).
+IFS=',' read -ra CONSUMER_ARR <<< "$KH_CONSUMERS"
+
+# consumer_marker <name> — emit the init-time pr_info() substring that proves
+# the consumer loaded. Grepped from /dev/kmsg live capture (primary) or
+# `dmesg` poll (fallback) in the SDK test loop. Source refs:
+#   hello_hook.c:122  fp_hook.c:112  hook_chain.c:155
+#   hook_wrap_args.c:132  ksyms_lookup.c:74
+consumer_marker() {
+    case "$1" in
+        hello_hook)     echo "hello_hook: hooked do_sys_open" ;;
+        fp_hook)        echo "kh_fp_hook: function pointer hooked" ;;
+        hook_chain)     echo "hook_chain: registered 3 before callbacks" ;;
+        hook_wrap_args) echo "hook_wrap_args: hooked do_sys_open" ;;
+        ksyms_lookup)   echo "ksyms_lookup: all lookups complete" ;;
+        *)              echo "$1:" ;;
+    esac
+}
 
 # Resolve SDK + toolchain via shared detector.
 # Exports KH_ANDROID_SDK, KH_CC, KH_LD, KH_NDK_BIN, KH_ANDROID_API_LEVEL, ...
@@ -72,13 +94,14 @@ if [ ! -f "$LOADER" ]; then
     make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC"
 fi
 
-# SDK-mode build is common across AVDs: build kernelhook.ko + hello_hook.ko
+# SDK-mode build is common across AVDs: build kernelhook.ko + all consumer .ko
 # ONCE here, push to each AVD in the loop. Common-kernel vermagic assumption
 # is reasonable for the Pixel_30..37 matrix (all are android GKI). If an AVD
 # has a divergent KERNELRELEASE, the per-AVD load step will surface the
 # vermagic mismatch as a load failure, which is the correct classification.
 if [ "$KH_MODE" = "sdk" ]; then
-    printf "${KH_BOLD}Building SDK artifacts (kernelhook.ko + hello_hook.ko)...${KH_RESET}\n"
+    printf "${KH_BOLD}Building SDK artifacts (kernelhook.ko + %d consumers: %s)...${KH_RESET}\n" \
+        "${#CONSUMER_ARR[@]}" "${CONSUMER_ARR[*]}"
     : > /tmp/kh_avd_sdk_build.log
     if ! ( cd "$ROOT/kmod" && \
            { make clean >/dev/null 2>&1 || true; } && \
@@ -91,17 +114,23 @@ if [ "$KH_MODE" = "sdk" ]; then
         tail -30 /tmp/kh_avd_sdk_build.log | sed 's/^/       /'
         exit 1
     fi
-    if ! ( cd "$ROOT/examples/hello_hook" && \
-           { make clean >/dev/null 2>&1 || true; } && \
-           CC="$KH_CC" \
-           LD="$KH_LD" \
-           CROSS_COMPILE="$KH_CROSS_COMPILE" \
-           make module \
-               >>/tmp/kh_avd_sdk_build.log 2>&1 ); then
-        printf "${KH_RED}FAIL${KH_RESET} hello_hook.ko (SDK) build failed — see /tmp/kh_avd_sdk_build.log\n"
-        tail -30 /tmp/kh_avd_sdk_build.log | sed 's/^/       /'
-        exit 1
-    fi
+    for c in "${CONSUMER_ARR[@]}"; do
+        if [ ! -d "$ROOT/examples/$c" ]; then
+            printf "${KH_RED}FAIL${KH_RESET} examples/%s: directory not found\n" "$c"
+            exit 1
+        fi
+        if ! ( cd "$ROOT/examples/$c" && \
+               { make clean >/dev/null 2>&1 || true; } && \
+               CC="$KH_CC" \
+               LD="$KH_LD" \
+               CROSS_COMPILE="$KH_CROSS_COMPILE" \
+               make module \
+                   >>/tmp/kh_avd_sdk_build.log 2>&1 ); then
+            printf "${KH_RED}FAIL${KH_RESET} %s.ko (SDK) build failed — see /tmp/kh_avd_sdk_build.log\n" "$c"
+            tail -30 /tmp/kh_avd_sdk_build.log | sed 's/^/       /'
+            exit 1
+        fi
+    done
 fi
 
 # Determine AVD list
@@ -255,18 +284,26 @@ test_avd() {
     # Push files
     if [ "$effective_mode" = "sdk" ]; then
         adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null 2>&1 || true
-        adb -s emulator-5554 push "$ROOT/examples/hello_hook/hello_hook.ko" /data/local/tmp/hello_hook.ko >/dev/null 2>&1 || true
+        for c in "${CONSUMER_ARR[@]}"; do
+            adb -s emulator-5554 push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1 || true
+        done
     else
         adb -s emulator-5554 push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null 2>&1 || true
     fi
     adb -s emulator-5554 push "$LOADER" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
     adb -s emulator-5554 shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null 2>&1 || true
 
-    # Unload any stale modules from a previous run. In SDK mode the consumer
-    # (hello_hook) must come off first because it holds a refcount on
-    # kernelhook via the ksymtab imports.
+    # Unload any stale modules from a previous run. In SDK mode consumers must
+    # come off first (reverse-order) because each holds a refcount on
+    # kernelhook via its ksymtab imports — then kernelhook itself last.
     if [ "$effective_mode" = "sdk" ]; then
-        adb -s emulator-5554 shell "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
+        local stale_cmd=""
+        local _i
+        for (( _i=${#CONSUMER_ARR[@]}-1; _i>=0; _i-- )); do
+            stale_cmd+="rmmod ${CONSUMER_ARR[$_i]} 2>/dev/null; "
+        done
+        stale_cmd+="rmmod kernelhook 2>/dev/null; true"
+        adb -s emulator-5554 shell "$stale_cmd" >/dev/null 2>&1 || true
     else
         adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
     fi
@@ -300,9 +337,159 @@ test_avd() {
             kill_emulator
             return
         fi
-        # Step 2: insmod hello_hook.ko (the SDK consumer).
-        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
-        load_rc=$?
+
+        # Step 2: iterate every SDK consumer — load → verify init marker → rmmod.
+        # Serial (rmmod between each) because hello_hook / hook_chain /
+        # hook_wrap_args all target do_sys_openat2: keeping them isolated
+        # makes per-consumer failures unambiguous (no chain cross-talk).
+        local golden_captured=0
+        for c in "${CONSUMER_ARR[@]}"; do
+            load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+            load_rc=$?
+
+            sleep 2
+            local marker
+            marker="$(consumer_marker "$c")"
+            # Prefer live /dev/kmsg capture (callback-spam can evict the
+            # init line from the ring buffer before a fresh dmesg poll).
+            local hook_line=""
+            if [ -s "$live_dmesg" ]; then
+                hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
+            fi
+            if [ -z "$hook_line" ]; then
+                hook_line=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
+            fi
+
+            if [ -n "$hook_line" ]; then
+                printf "  ${KH_GREEN}PASS${KH_RESET} $avd/%s (API %s, kernel %s)\n" "$c" "$sdk" "$uname"
+                printf "       %s\n" "$hook_line"
+                RESULTS+=("PASS|$avd|sdk_consumer:$c|$sdk|$uname")
+                PASS_COUNT=$((PASS_COUNT + 1))
+
+                # Opportunistic golden capture for the strategy matrix — run
+                # exactly once per AVD, anchored to hello_hook success (same
+                # anchor as pre-refactor behavior). Safe: reads dmesg-emitted
+                # `[kh_strategy] …` snapshot + a few scalar pr_info lines and
+                # writes tests/golden/strategy_matrix/values/<avd>.yaml.
+                # Does not fail the PASS if something is missing.
+                #
+                # debugfs was removed: kernelhook.ko no longer exposes any
+                # struct file_operations, so strategy_matrix_dump consumes
+                # dmesg as the single source of registry state.
+                if [ "$c" = "hello_hook" ] && [ "$golden_captured" -eq 0 ]; then
+                    golden_captured=1
+                    local golden_dir="$ROOT/tests/golden/strategy_matrix/values"
+                    mkdir -p "$golden_dir"
+                    adb -s emulator-5554 root >/dev/null 2>&1 || true
+                    sleep 1
+                    adb -s emulator-5554 wait-for-device >/dev/null 2>&1 || true
+                    # Snapshot lines emitted by kh_strategy_post_init() right
+                    # before hello_hook's init returns. tail -N captures only
+                    # the most recent dump (the module is loaded anew every
+                    # AVD run so earlier snapshots are absent from this boot).
+                    local strategies_dump
+                    strategies_dump=$(adb -s emulator-5554 shell 'dmesg 2>/dev/null' | tr -d '\r' \
+                        | grep -E '\[kh_strategy\][^A-Z]*prio=' \
+                        | sed -E 's/^.*\[kh_strategy\] //' | tail -200)
+                    if [ -n "$strategies_dump" ]; then
+                        local banner_sha
+                        banner_sha=$(adb -s emulator-5554 shell 'cat /proc/version' 2>/dev/null | tr -d '\r' | shasum -a 256 | awk '{print $1}')
+                        local git_sha
+                        git_sha=$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo nogit)
+                        local kimage_voff memstart pgd thread_size pt_regs
+                        kimage_voff=$(grep -oE 'kimage_voffset value=0x[0-9a-f]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
+                        memstart=$(grep -oE 'memstart_addr=0x[0-9a-f]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
+                        pgd=$(grep -oE 'pgd=0x[0-9a-f]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
+                        {
+                            echo "# SPDX-License-Identifier: GPL-2.0-or-later"
+                            echo "# Auto-generated by scripts/test_avd_kmod.sh (SDK mode hello_hook PASS path)."
+                            echo "run_metadata:"
+                            echo "  date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                            echo "  kernel_uname: \"$uname\""
+                            echo "  linux_banner_sha256: \"${banner_sha:-unknown}\""
+                            echo "  kernelhook_git_sha: \"$git_sha\""
+                            echo "  device: \"$avd\""
+                            echo
+                            echo "capabilities:"
+                            # Each input line: `<cap> <strat> prio=N enabled=N winner=Y|""`
+                            # Keep in sync with scripts/lib/strategy_matrix.sh
+                            # (strategy_matrix_dump). Must emit `enabled: true|false`
+                            # (not 0/1) so committed goldens stay byte-compatible.
+                            echo "$strategies_dump" | awk '
+                                NF < 2 { next }
+                                {
+                                    cap=$1; strat=$2;
+                                    prio=""; enabled="false"; winner="false";
+                                    for (i=3;i<=NF;i++) {
+                                        n = split($i, kv, "=");
+                                        if (n == 2) {
+                                            if (kv[1] == "prio")    prio    = kv[2];
+                                            if (kv[1] == "enabled") enabled = (kv[2] == "1" ? "true" : "false");
+                                            if (kv[1] == "winner")  winner  = (kv[2] == "Y" ? "true" : "false");
+                                        }
+                                    }
+                                    if (prio == "") next;
+                                    if (cap != prev_cap) {
+                                        if (prev_cap != "") printf "\n";
+                                        print "  " cap ":";
+                                        print "    strategies:";
+                                        prev_cap = cap;
+                                    }
+                                    printf "      - { name: %s, prio: %s, enabled: %s, winner: %s }\n",
+                                        strat, prio, enabled, winner;
+                                }'
+                            echo
+                            # observed_values intentionally omits swapper_pg_dir — the
+                            # committed baselines don't carry it, and diff-based golden
+                            # checks would otherwise flag phantom drift on every AVD run.
+                            echo "observed_values:"
+                            echo "  kimage_voffset: \"${kimage_voff:-unknown}\""
+                            echo "  memstart_addr:  \"${memstart:-unknown}\""
+                            echo "  thread_size:    \"${thread_size:-16384}\""
+                            echo "  pt_regs_size:   \"${pt_regs:-0x150}\""
+                        } > "$golden_dir/$avd.yaml.new"
+                        if ! diff -q "$golden_dir/$avd.yaml" "$golden_dir/$avd.yaml.new" >/dev/null 2>&1; then
+                            # New or changed — leave as .new for user review + accept.
+                            printf "       golden: %s (DRIFT — review + mv to accept)\n" "$golden_dir/$avd.yaml.new"
+                        else
+                            rm -f "$golden_dir/$avd.yaml.new"
+                        fi
+                    fi
+                fi
+            else
+                printf "  ${KH_RED}FAIL${KH_RESET} $avd/%s: marker '%s' not found in live kmsg or dmesg\n" "$c" "$marker"
+                if echo "$load_output" | grep -qi "loaded"; then
+                    printf "       loader: ok ('loaded') — init ran but marker missing\n"
+                else
+                    echo "$load_output" | sed 's/^/       loader: /'
+                fi
+                if [ -s "$live_dmesg" ]; then
+                    grep -E "${c}:|kernelhook:" "$live_dmesg" | tail -10 | sed 's/^/       live: /'
+                fi
+                adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep -E "${c}:|kernelhook:" | tail -10 | sed 's/^/       poll: /'
+                RESULTS+=("FAIL|$avd|sdk_consumer:$c|$sdk|$uname")
+                FAIL_COUNT=$((FAIL_COUNT + 1))
+            fi
+
+            # rmmod this consumer before loading the next. Don't abort the
+            # loop on a single failure — keep going so every consumer gets
+            # its own PASS/FAIL line.
+            adb -s emulator-5554 shell "rmmod $c 2>/dev/null; true" >/dev/null 2>&1 || true
+        done
+
+        # Let adb drain any in-flight kernel-log lines + check panic.
+        sleep 1
+        kill "$dmesg_pid" 2>/dev/null || true
+        wait "$dmesg_pid" 2>/dev/null || true
+        if [ -s "$live_dmesg" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$live_dmesg"; then
+            printf "  ${KH_YELLOW}Kernel panic captured in live kmsg:${KH_RESET}\n"
+            awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$live_dmesg" | sed 's/^/       /'
+        fi
+
+        # Final cleanup: kernelhook.ko off last. Consumers already rmmod'd in-loop.
+        adb -s emulator-5554 shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
+        kill_emulator
+        return
     else
         # Freestanding kh_test.ko: init runs every test synchronously before
         # init_module returns — on slow AVDs (Pixel_30..34) this can exceed
@@ -327,120 +514,12 @@ test_avd() {
     # perl-alarm before init_module returns): dmesg captured the kh_test
     # === Results: summary — proof init ran to completion.
     if ! echo "$load_output" | grep -qi "loaded" \
-       && ! ([ "$effective_mode" != "sdk" ] && [ -s "$live_dmesg" ] \
+       && ! ([ -s "$live_dmesg" ] \
              && grep -qE "kh_test: === Results:" "$live_dmesg"); then
         printf "  ${KH_RED}FAIL${KH_RESET} $avd: module load failed\n"
         echo "$load_output" | sed 's/^/       /'
         RESULTS+=("FAIL|$avd|load_failed|$sdk|$uname")
         FAIL_COUNT=$((FAIL_COUNT + 1))
-        # SDK mode: best-effort peel kernelhook back off so it's not left loaded.
-        if [ "$effective_mode" = "sdk" ]; then
-            adb -s emulator-5554 shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
-        fi
-        kill_emulator
-        return
-    fi
-
-    # ---- SDK mode: runtime-verify the hello_hook consumer marker, unload reverse.
-    if [ "$effective_mode" = "sdk" ]; then
-        sleep 2
-        # Marker is emitted at hello_hook_init() time — i.e. during the insmod
-        # call above. The live /dev/kmsg capture ($live_dmesg) caught it at
-        # emit time; a fresh `adb shell dmesg` poll here can miss it because
-        # the callback-spam (one pr_info per open(2)) can evict the setup
-        # line from the kernel ring buffer before we poll. Prefer the live
-        # capture; fall back to fresh dmesg only if the capture missed it.
-        local hook_line=""
-        if [ -s "$live_dmesg" ]; then
-            hook_line=$(grep "hello_hook: hooked do_sys_open" "$live_dmesg" | tail -1)
-        fi
-        if [ -z "$hook_line" ]; then
-            local sdk_dmesg=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null)
-            hook_line=$(echo "$sdk_dmesg" | grep "hello_hook: hooked do_sys_open" | tail -1)
-        fi
-        if [ -n "$hook_line" ]; then
-            printf "  ${KH_GREEN}PASS${KH_RESET} $avd: hello_hook active (API %s, kernel %s)\n" "$sdk" "$uname"
-            printf "       %s\n" "$hook_line"
-            RESULTS+=("PASS|$avd|hello_hook|$sdk|$uname")
-            PASS_COUNT=$((PASS_COUNT + 1))
-
-            # Opportunistic golden capture for the strategy matrix. Always safe:
-            # reads /sys/kernel/debug/kernelhook/strategies + a few dmesg values
-            # and writes tests/golden/strategy_matrix/values/<avd>.yaml. Does not
-            # fail the PASS if something is missing.
-            local golden_dir="$ROOT/tests/golden/strategy_matrix/values"
-            mkdir -p "$golden_dir"
-            # AVD emulator needs adb root + explicit debugfs mount on some images.
-            adb -s emulator-5554 root >/dev/null 2>&1 || true
-            sleep 1
-            adb -s emulator-5554 wait-for-device >/dev/null 2>&1 || true
-            adb -s emulator-5554 shell 'mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug' >/dev/null 2>&1 || true
-            local strategies_dump
-            strategies_dump=$(adb -s emulator-5554 shell 'cat /sys/kernel/debug/kernelhook/strategies 2>/dev/null' | tr -d '\r')
-            # Skip generation if debugfs read returned nothing. On some GKI
-            # builds (observed 6.1 / 5.x), the shim file_operations layout
-            # (kmod/shim/include/linux/debugfs.h — 4 fields only, no .open)
-            # causes debugfs's full_proxy to return 0 bytes. Hand-crafted
-            # goldens are the pragmatic fallback; see the values/ yamls
-            # already in git for the 4 working Pixel_3x AVDs.
-            if [ -n "$strategies_dump" ]; then
-                local banner_sha
-                banner_sha=$(adb -s emulator-5554 shell 'cat /proc/version' 2>/dev/null | tr -d '\r' | shasum -a 256 | awk '{print $1}')
-                local git_sha
-                git_sha=$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo nogit)
-                local kimage_voff memstart pgd thread_size pt_regs
-                kimage_voff=$(grep -oE 'kimage_voffset value=[0-9a-fx]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
-                memstart=$(grep -oE 'memstart_addr=[0-9a-fx]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
-                pgd=$(grep -oE 'pgd=0x[0-9a-f]+' "$live_dmesg" 2>/dev/null | head -1 | awk -F= '{print $2}')
-                {
-                    echo "# SPDX-License-Identifier: GPL-2.0-or-later"
-                    echo "# Auto-generated by scripts/test_avd_kmod.sh (SDK mode hello_hook PASS path)."
-                    echo "run_metadata:"
-                    echo "  date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                    echo "  kernel_uname: \"$uname\""
-                    echo "  linux_banner_sha256: \"${banner_sha:-unknown}\""
-                    echo "  kernelhook_git_sha: \"$git_sha\""
-                    echo "  device: \"$avd\""
-                    echo
-                    echo "capabilities:"
-                    echo "$strategies_dump" | awk '
-                        {
-                            cap=$1; strat=$2;
-                            for (i=3;i<=NF;i++) { split($i, kv, "="); v[kv[1]]=kv[2]; }
-                            if (cap != prev_cap) {
-                                print "  " cap ":";
-                                print "    strategies:";
-                                prev_cap = cap;
-                            }
-                            printf "      - { name: %s, prio: %s, enabled: %s, winner: %s }\n",
-                                strat, v["prio"], v["enabled"], (v["winner"] == "Y" ? "true" : "false");
-                        }'
-                    echo
-                    echo "observed_values:"
-                    echo "  kimage_voffset: \"${kimage_voff:-unknown}\""
-                    echo "  memstart_addr:  \"${memstart:-unknown}\""
-                    echo "  swapper_pg_dir: \"${pgd:-unknown}\""
-                    echo "  thread_size:    \"${thread_size:-16384}\""
-                    echo "  pt_regs_size:   \"${pt_regs:-0x150}\""
-                } > "$golden_dir/$avd.yaml.new"
-                if ! diff -q "$golden_dir/$avd.yaml" "$golden_dir/$avd.yaml.new" >/dev/null 2>&1; then
-                    # New or changed — leave as .new for user review + accept.
-                    printf "       golden: %s (DRIFT — review + mv to accept)\n" "$golden_dir/$avd.yaml.new"
-                else
-                    rm -f "$golden_dir/$avd.yaml.new"
-                fi
-            fi
-        else
-            printf "  ${KH_RED}FAIL${KH_RESET} $avd: hello_hook marker not found in live kmsg or dmesg\n"
-            if [ -s "$live_dmesg" ]; then
-                grep -E "hello_hook:|kernelhook:" "$live_dmesg" | tail -10 | sed 's/^/       live: /'
-            fi
-            adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep -E "hello_hook:|kernelhook:" | tail -10 | sed 's/^/       poll: /'
-            RESULTS+=("FAIL|$avd|hello_hook_marker|$sdk|$uname")
-            FAIL_COUNT=$((FAIL_COUNT + 1))
-        fi
-        # Reverse-order rmmod: consumer first (refcount holder), then SDK base.
-        adb -s emulator-5554 shell "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
         kill_emulator
         return
     fi
@@ -538,6 +617,9 @@ test_avd() {
 
 printf "${KH_BOLD}KernelHook kmod AVD Test Suite${KH_RESET}\n"
 printf "Mode: %s\n" "$KH_MODE"
+if [ "$KH_MODE" = "sdk" ]; then
+    printf "SDK consumers: %s\n" "${CONSUMER_ARR[*]}"
+fi
 printf "AVDs to test: %s\n" "${AVDS[*]}"
 printf "Toolchain: %s\n\n" "$KH_TOOLCHAIN_DESC"
 
