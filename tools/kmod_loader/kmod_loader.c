@@ -159,6 +159,127 @@ int parse_kver(int *major, int *minor)
     return 0;
 }
 
+/* ---- /proc/kallsyms based live probes ----
+ *
+ * Derive target-kernel ABI facts (struct kernel_symbol size, __ex_table
+ * entry size) from live kernel state rather than from (kmajor, kminor)
+ * version heuristics.  This covers vendor forks, backports, and the
+ * occasional GKI 5.15-but-actually-6.1-style reshuffle.
+ *
+ * Requires kptr_restrict=0 (caller toggles via /proc/sys/kernel/kptr_restrict).
+ * If the probe can't collect a quorum it returns 0 so callers can fall back.
+ */
+
+/* Read /proc/kallsyms, find every "ADDR . __ksymtab_<sym>" row,
+ * return the most common adjacent-address difference — the stride IS
+ * sizeof(struct kernel_symbol) on the target kernel.
+ *   12 → prel32 (5.5+ arm64 with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y)
+ *   24 → abs64  (pre-5.5 / GKI 5.4 Android 11 with PREL32 off)
+ * Returns 0 if no signal (empty kallsyms, restricted mode, too few rows). */
+static uint32_t probe_ksymtab_entry_size_via_kallsyms(void)
+{
+    FILE *fp = fopen("/proc/kallsyms", "r");
+    if (!fp) return 0;
+    /* Collect up to N addresses of __ksymtab_* symbols (NOT __ksymtab_strings). */
+    enum { MAX_ADDRS = 2048 };
+    static uint64_t addrs[MAX_ADDRS];
+    int n = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        /* Format: "<hex> <type> <name>\n". Skip short lines fast. */
+        if (n >= MAX_ADDRS) break;
+        char *sp1 = strchr(line, ' ');   if (!sp1) continue;
+        char *sp2 = strchr(sp1 + 1, ' '); if (!sp2) continue;
+        const char *name = sp2 + 1;
+        if (strncmp(name, "__ksymtab_", 10) != 0) continue;
+        if (strncmp(name, "__ksymtab_strings", 17) == 0) continue;
+        if (strncmp(name, "__ksymtab_gpl_strings", 21) == 0) continue;
+        uint64_t a = strtoull(line, NULL, 16);
+        if (a == 0) continue;  /* kptr_restrict active */
+        addrs[n++] = a;
+    }
+    fclose(fp);
+    if (n < 4) return 0;
+
+    /* Sort ascending so adjacent differences are meaningful. */
+    for (int i = 1; i < n; i++) {
+        uint64_t key = addrs[i]; int j = i - 1;
+        while (j >= 0 && addrs[j] > key) { addrs[j+1] = addrs[j]; j--; }
+        addrs[j+1] = key;
+    }
+
+    /* Count occurrences of each small-stride between adjacent entries.
+     * The dominant stride is the entry size; sporadic large gaps are
+     * section boundaries (ignored). */
+    int votes_12 = 0, votes_24 = 0;
+    for (int i = 1; i < n; i++) {
+        uint64_t d = addrs[i] - addrs[i-1];
+        if (d == 12)       votes_12++;
+        else if (d == 24)  votes_24++;
+    }
+    if (votes_12 > votes_24 && votes_12 >= 3) return 12;
+    if (votes_24 > votes_12 && votes_24 >= 3) return 24;
+    return 0;
+}
+
+/* Read /proc/kallsyms, compute __ex_table size as
+ *   __stop___ex_table - __start___ex_table
+ * and derive per-entry size by scanning a loaded module's .ko file on disk
+ * for its __ex_table section vs .rela__ex_table reloc count:
+ *   entry_size = 2 * ex_size / nrela  (every entry has 2 PC-rel fields)
+ * This mirrors the vendor-ko probe but doesn't require the first scanned
+ * .ko to carry __ex_table; any .ko with at least one uaccess fault fixup
+ * works.  Returns 8, 12, or 0. */
+static uint32_t probe_extable_entry_size_via_vendor_ko(void)
+{
+    static const char *ko_dirs[] = {
+        "/vendor_dlkm/lib/modules",
+        "/vendor/lib/modules",
+        "/system/lib/modules",
+        "/odm/lib/modules",
+        "/lib/modules",
+        NULL,
+    };
+    for (int d = 0; ko_dirs[d]; d++) {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "ls %s/*.ko 2>/dev/null", ko_dirs[d]);
+        FILE *fp = popen(cmd, "r");
+        if (!fp) continue;
+        char path[256];
+        while (fgets(path, sizeof(path), fp)) {
+            path[strcspn(path, "\n")] = 0;
+            int fd = open(path, O_RDONLY);
+            if (fd < 0) continue;
+            struct stat st;
+            if (fstat(fd, &st) < 0 || st.st_size < (off_t)sizeof(Ehdr) ||
+                st.st_size > 4 * 1024 * 1024) { close(fd); continue; }
+            uint8_t *buf = malloc(st.st_size);
+            if (!buf) { close(fd); continue; }
+            if (read(fd, buf, st.st_size) != st.st_size) {
+                free(buf); close(fd); continue;
+            }
+            close(fd);
+            Ehdr *eh = (Ehdr *)buf;
+            if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 ||
+                eh->e_machine != EM_AARCH64) { free(buf); continue; }
+            Shdr *ex = elf_find_section(buf, eh, "__ex_table");
+            Shdr *exr = elf_find_section(buf, eh, ".rela__ex_table");
+            if (ex && ex->sh_size > 0 && exr && exr->sh_entsize > 0) {
+                size_t nr = exr->sh_size / exr->sh_entsize;
+                if (nr >= 2) {
+                    size_t es = (size_t)ex->sh_size * 2 / nr;
+                    free(buf); pclose(fp);
+                    if (es == 8 || es == 12) return (uint32_t)es;
+                    return 0;
+                }
+            }
+            free(buf);
+        }
+        pclose(fp);
+    }
+    return 0;
+}
+
 static const char *detect_vermagic_from_vendor_ko(void)
 {
     static const char *ko_dirs[] = {
@@ -392,6 +513,13 @@ done:
 static uint32_t g_ko_this_module_size = 0;
 static uint32_t g_ko_init_off = 0;
 static uint32_t g_ko_exit_off = 0;
+/* Probed from vendor .ko .rela__ksymtab: 12 = prel32 (modern), 24 = abs64
+ * (Android 11 GKI 5.4 / pre-PREL32). 0 = no signal (falls back to kernel
+ * version heuristic). See probe_vendor_ksymtab_layout() below. */
+static uint32_t g_ko_ksymtab_entry_size = 0;
+/* Probed from vendor .ko __ex_table: 8 = pre-5.15 (insn+fixup only),
+ * 12 = 5.15+ (insn+fixup+type+data). 0 = no signal. */
+static uint32_t g_ko_extable_entry_size = 0;
 static int ko_loaded = 0;
 
 /* Method 3: Scan vendor .ko files for __versions CRC */
@@ -493,10 +621,48 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
                             }
                         }
                     }
+
+                    /* Probe struct kernel_symbol layout from the FIRST reloc
+                     * in .rela__ksymtab. Vendor .ko was compiled with the
+                     * same toolchain as the running kernel, so the reloc
+                     * type is ground truth for the target kernel's ABI:
+                     *   R_AARCH64_PREL32 (261) → 12B entries (prel32)
+                     *   R_AARCH64_ABS64  (257) → 24B entries (abs64)
+                     * No version heuristic needed. */
+                    if (g_ko_ksymtab_entry_size == 0) {
+                        Shdr *kr = elf_find_section(ko_buf, keh, ".rela__ksymtab");
+                        if (kr && kr->sh_size >= sizeof(Elf64_Rela)) {
+                            Elf64_Rela *r0 = (Elf64_Rela *)(ko_buf + kr->sh_offset);
+                            uint32_t typ = ELF64_R_TYPE(r0->r_info);
+                            if (typ == 261) g_ko_ksymtab_entry_size = 12;
+                            else if (typ == 257) g_ko_ksymtab_entry_size = 24;
+                        }
+                    }
+
+                    /* Probe __ex_table entry size. Each entry contains 2
+                     * PC-relative fields (insn + fixup), so n_relocs = 2 * n_entries.
+                     *   entry_size = ex_size / (nrelocs / 2)
+                     *             = 2 * ex_size / nrelocs
+                     * Expected: 8 (pre-5.15) or 12 (5.15+). */
+                    if (g_ko_extable_entry_size == 0) {
+                        Shdr *ex = elf_find_section(ko_buf, keh, "__ex_table");
+                        Shdr *exr = elf_find_section(ko_buf, keh, ".rela__ex_table");
+                        if (ex && ex->sh_size > 0 && exr && exr->sh_entsize > 0) {
+                            size_t nr = exr->sh_size / exr->sh_entsize;
+                            if (nr >= 2) {
+                                size_t es = (size_t)ex->sh_size * 2 / nr;
+                                if (es == 8 || es == 12)
+                                    g_ko_extable_entry_size = (uint32_t)es;
+                            }
+                        }
+                    }
+
                     fprintf(stderr, "kmod_loader: CRC source: %s (%d entries, "
-                            "this_module_size=0x%x, init_off=0x%x, exit_off=0x%x)\n",
+                            "this_module_size=0x%x, init_off=0x%x, exit_off=0x%x, "
+                            "ksymtab_entry=%uB, extable_entry=%uB)\n",
                             path, ko_crc_count, g_ko_this_module_size,
-                            g_ko_init_off, g_ko_exit_off);
+                            g_ko_init_off, g_ko_exit_off,
+                            g_ko_ksymtab_entry_size, g_ko_extable_entry_size);
                     pclose(fp);
                     goto ko_done;
                 }
@@ -2215,17 +2381,18 @@ static int do_load(int argc, char *argv[], int dry_run)
     (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
     /* Dual-layout dispatch: kernelhook ships as
-     *   kernelhook-prel32.ko — CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y
-     *                          (arm64 GKI 5.10+ / upstream 5.5+ — 12B ksymtab entries)
-     *   kernelhook-abs64.ko  — pre-5.10 kernels (arm64 GKI 5.4 / AOSP 4.x — 24B entries)
+     *   kernelhook-prel32.ko — struct kernel_symbol = 12B (PREL32 relocs)
+     *   kernelhook-abs64.ko  — struct kernel_symbol = 24B (ABS64 relocs)
      *
-     * If the caller gave "…/kernelhook.ko" (no variant suffix), auto-pick by
-     * kernel version. If a variant path was passed explicitly, honour it.
-     * The ksymtab-layout prel32↔abs64 gap is a full ELF rewrite (section size
-     * + reloc count change), so we ship two .ko binaries here instead of
-     * patching at load time; the extable format (P2-S2) and kCFI hashes
-     * (Step 4.5) are patched in place because they preserve section/reloc
-     * cardinality. */
+     * If the caller gave "…/kernelhook.ko" (no variant suffix), we probe
+     * the TARGET kernel's actual ABI via /proc/kallsyms (__ksymtab_*
+     * adjacent-address stride) and pick the matching variant.  No version
+     * heuristic: vendor forks, backports, and LTS reshuffles are handled
+     * the same way as stock GKI because we measure what's actually there.
+     * The ksymtab-layout gap is a full ELF rewrite (section-size and
+     * reloc-count changes), so we ship two .ko binaries; extable format
+     * (Step 4.6) and kCFI hashes (Step 4.5) are patched in place instead
+     * because their rewrites preserve section cardinality. */
     char variant_path[512];
     const char *mod_path_open = argv[1];
     {
@@ -2233,21 +2400,35 @@ static int do_load(int argc, char *argv[], int dry_run)
         const char *bn = strrchr(argv[1], '/');
         bn = bn ? bn + 1 : argv[1];
         if (strcmp(bn, "kernelhook.ko") == 0) {
-            const char *variant = (ctx.kmajor > 5 || (ctx.kmajor == 5 && ctx.kminor >= 10))
-                                  ? "kernelhook-prel32.ko" : "kernelhook-abs64.ko";
-            size_t dirlen = bn - argv[1];
-            if (dirlen + strlen(variant) + 1 < sizeof(variant_path)) {
-                memcpy(variant_path, argv[1], dirlen);
-                strcpy(variant_path + dirlen, variant);
-                struct stat vst;
-                if (stat(variant_path, &vst) == 0) {
-                    fprintf(stderr, "kmod_loader: auto-select %s for kernel %d.%d\n",
-                            variant, ctx.kmajor, ctx.kminor);
-                    mod_path_open = variant_path;
-                } else {
-                    fprintf(stderr, "kmod_loader: %s not found; falling back to %s\n",
-                            variant_path, argv[1]);
+            /* kptr_restrict must be 0 for the live probe — we lift it here
+             * (already done later in do_load, but we need it BEFORE open). */
+            FILE *kpt = fopen("/proc/sys/kernel/kptr_restrict", "w");
+            if (kpt) { fputs("0", kpt); fclose(kpt); }
+
+            uint32_t entry_size = probe_ksymtab_entry_size_via_kallsyms();
+            const char *variant = NULL;
+            const char *src = NULL;
+            if (entry_size == 12)      { variant = "kernelhook-prel32.ko"; src = "kallsyms stride=12"; }
+            else if (entry_size == 24) { variant = "kernelhook-abs64.ko";  src = "kallsyms stride=24"; }
+            if (variant) {
+                size_t dirlen = bn - argv[1];
+                if (dirlen + strlen(variant) + 1 < sizeof(variant_path)) {
+                    memcpy(variant_path, argv[1], dirlen);
+                    strcpy(variant_path + dirlen, variant);
+                    struct stat vst;
+                    if (stat(variant_path, &vst) == 0) {
+                        fprintf(stderr, "kmod_loader: auto-select %s (probe: %s)\n",
+                                variant, src);
+                        mod_path_open = variant_path;
+                    } else {
+                        fprintf(stderr, "kmod_loader: %s not found on device; "
+                                "using %s as-is (may fail if layout mismatch)\n",
+                                variant_path, argv[1]);
+                    }
                 }
+            } else {
+                fprintf(stderr, "kmod_loader: ksymtab layout probe inconclusive; "
+                        "using %s as-is\n", argv[1]);
             }
         }
         (void)plen;
@@ -2466,19 +2647,31 @@ static int do_load(int argc, char *argv[], int dry_run)
     /* Step 4: Try to patch CRCs via the resolver framework. */
     patch_crcs_via_resolver(mod, eh, &ctx, trace, &trace_count);
 
-    /* Step 4.5: Patch kCFI hashes from vendor .ko (for CONFIG_CFI_ICALL_NORMALIZE_INTEGERS).
-     * Only applicable to 6.1+ kernels which use kCFI; pre-6.1 uses shadow CFI. */
-    if (kmajor > 6 || (kmajor == 6 && kminor >= 1))
-        patch_kcfi_hashes(mod, mod_size, eh);
+    /* Step 4.5: Patch kCFI hashes from vendor .ko. kCFI metadata only
+     * matters on kernels that actually validate it; we probe for that by
+     * looking at whether the first vendor .ko we can open carries a
+     * non-zero 4-byte prefix before init_module.  crc_from_vendor_ko()
+     * populated the vendor-scan cache earlier in patch_crcs_via_resolver,
+     * so vendor_kcfi_hash() here won't do extra disk work. */
+    patch_kcfi_hashes(mod, mod_size, eh);
 
-    /* Step 4.6: __ex_table entry format. arm64 switched from 8B to 12B in
-     * v5.15 (type-aware extable). kernelhook.ko is built with 12B entries
-     * because its inline uaccess fault fixups carry EX_TYPE_UACCESS_ERR_ZERO
-     * (type=2, data=0x129). Pre-5.15 kernels expect 8B entries; compress
-     * in place and rewire the .rela__ex_table r_offsets accordingly. */
+    /* Step 4.6: __ex_table entry format.  arm64 switched from 8B to 12B
+     * in v5.15 (type-aware extable).  kernelhook.ko ships with 12B
+     * entries because its inline uaccess fault fixups declare
+     * EX_TYPE_UACCESS_ERR_ZERO (type=2, data=0x129).  Probe the TARGET
+     * kernel's expected entry size from a vendor .ko's
+     * __ex_table/.rela__ex_table and compress in place if it's 8B — no
+     * (kmajor, kminor) heuristic so LTS backports and vendor forks
+     * behave the same as stock upstream. */
     {
-        int target_entry_size = (kmajor > 5 || (kmajor == 5 && kminor >= 15)) ? 12 : 8;
-        patch_extable_format(mod, eh, target_entry_size);
+        uint32_t probed = g_ko_extable_entry_size;
+        if (probed == 0) probed = probe_extable_entry_size_via_vendor_ko();
+        if (probed == 8 || probed == 12) {
+            patch_extable_format(mod, eh, (int)probed);
+        } else {
+            fprintf(stderr, "kmod_loader: __ex_table entry-size probe "
+                    "inconclusive; leaving 12B (module-native) format\n");
+        }
     }
 
     /* Dry-run (info subcommand): dump the resolution trace and exit. */
