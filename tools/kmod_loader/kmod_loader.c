@@ -2652,8 +2652,15 @@ static int do_load(int argc, char *argv[], int dry_run)
      * looking at whether the first vendor .ko we can open carries a
      * non-zero 4-byte prefix before init_module.  crc_from_vendor_ko()
      * populated the vendor-scan cache earlier in patch_crcs_via_resolver,
-     * so vendor_kcfi_hash() here won't do extra disk work. */
-    patch_kcfi_hashes(mod, mod_size, eh);
+     * so vendor_kcfi_hash() here won't do extra disk work.
+     *
+     * Env KH_SKIP_KCFI=1 disables this for diagnosis: on Android 15 GKI
+     * 6.6 we want to distinguish "vendor hash mismatches kernel" from
+     * deeper init_module panics. */
+    if (!getenv("KH_SKIP_KCFI"))
+        patch_kcfi_hashes(mod, mod_size, eh);
+    else
+        fprintf(stderr, "kmod_loader: KH_SKIP_KCFI=1 — leaving kCFI prefixes untouched\n");
 
     /* Step 4.6: __ex_table entry format.  arm64 switched from 8B to 12B
      * in v5.15 (type-aware extable).  kernelhook.ko ships with 12B
@@ -2692,9 +2699,32 @@ static int do_load(int argc, char *argv[], int dry_run)
                 close(tmpfd);
                 tmpfd = open(tmppath, O_RDONLY | O_CLOEXEC);
                 if (tmpfd >= 0) {
-                    int flags = MODULE_INIT_IGNORE_MODVERSIONS | MODULE_INIT_IGNORE_VERMAGIC;
-                    int ret = (int)syscall(__NR_finit_module, tmpfd, params, flags);
+                    /* First try with IGNORE flags (fast path on kernels that
+                     * honour them); then fall back to strict finit_module
+                     * with no flags.  Android 15 GKI 6.6 silently rejects
+                     * the IGNORE_VERMAGIC path for reasons we can't yet
+                     * isolate without common-kernel source; the strict
+                     * path gives dmesg diagnostics and may actually succeed
+                     * once vermagic has been patched in-place (which loader
+                     * already does earlier). */
+                    int flags_lax = MODULE_INIT_IGNORE_MODVERSIONS | MODULE_INIT_IGNORE_VERMAGIC;
+                    fprintf(stderr, "kmod_loader: calling finit_module(lax, fd=%d)\n", tmpfd);
+                    fflush(stderr);
+                    int ret = (int)syscall(__NR_finit_module, tmpfd, params, flags_lax);
                     int err = errno;
+                    fprintf(stderr, "kmod_loader: finit_module(lax) → ret=%d errno=%d (%s)\n",
+                            ret, err, strerror(err));
+                    fflush(stderr);
+                    if (ret != 0) {
+                        fprintf(stderr, "kmod_loader: retrying strict finit_module\n");
+                        fflush(stderr);
+                        lseek(tmpfd, 0, SEEK_SET);
+                        ret = (int)syscall(__NR_finit_module, tmpfd, params, 0);
+                        err = errno;
+                        fprintf(stderr, "kmod_loader: finit_module(strict) → ret=%d errno=%d (%s)\n",
+                                ret, err, strerror(err));
+                        fflush(stderr);
+                    }
                     close(tmpfd);
                     unlink(tmppath);
                     if (ret == 0) {
