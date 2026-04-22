@@ -8,6 +8,24 @@
 
 SECTIONS
 {
+    /* arm64 GNU property note + Linux note — required by Android 15 GKI
+     * 6.6+ module loader.  Must be placed before any other SECTIONS rule
+     * so ld.lld's -r mode keeps them in the output; late placement lets
+     * an earlier catch-all merge them into DISCARD (observed: silent
+     * drop in kernelhook.ko.tmp even when rules exist after the last
+     * real section).
+     *
+     * .note.Linux carries per-module "OPEN"/"func" markers; the kernel
+     * pre-load check rejects .ko's missing it with -ENOEXEC silently.
+     * .note.gnu.property declares FEAT_BTI + FEAT_PAC, matching the
+     * compile flag -mbranch-protection=standard. */
+    .note.gnu.property : ALIGN(8) {
+        KEEP(*(.note.gnu.property))
+    }
+    .note.Linux : ALIGN(4) {
+        KEEP(*(.note.Linux))
+    }
+
     .text : {
         *(.text .text.*)
     }
@@ -105,6 +123,7 @@ SECTIONS
 
     /DISCARD/ : {
         *(.comment)
-        *(.note.*)
+        *(.note.GNU-stack)
+        *(.note.gnu.build-id)
     }
 }

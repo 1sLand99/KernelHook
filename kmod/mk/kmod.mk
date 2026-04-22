@@ -33,8 +33,14 @@ KH_GEN_DIR   := $(KERNELHOOK_DIR)/generated
 KH_EXPORTS_S := $(KH_GEN_DIR)/kh_exports.S
 KH_SYMVERS_H := $(KERNELHOOK_DIR)/include/kernelhook/kh_symvers.h
 
+# kh_crc is a HOST tool (reads the export manifest, emits .S/.h for the
+# cross-compiled kmod). When the outer `make module` is invoked with
+# CC=<NDK clang> the env var leaks into this sub-make and the tool gets
+# built as an ARM64 binary that can't run on the host. Pin CC to host `cc`
+# (kh_crc's own Makefile defaults CC ?= cc, so this just reinforces it
+# against the parent override). Use HOSTCC if caller supplied one.
 $(KH_CRC):
-	$(MAKE) -C $(KH_ROOT)/tools/kh_crc
+	$(MAKE) -C $(KH_ROOT)/tools/kh_crc CC="$(or $(HOSTCC),cc)"
 
 $(KH_GEN_DIR):
 	mkdir -p $@
@@ -131,7 +137,7 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
              -fno-optimize-sibling-calls \
-             -mbranch-protection=bti \
+             -mbranch-protection=standard \
              -I$(KERNELHOOK_DIR)/shim/include \
              -I$(KH_ROOT)/include \
              -I$(KH_ROOT)/include/arch/arm64 \
@@ -142,18 +148,24 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
              $(KH_CFI_CFLAGS)
-# -fno-optimize-sibling-calls + -mbranch-protection=bti: Pixel production
-# kernels mark both kernel .text and module vmalloc .text with PROT_BTI.
+# -fno-optimize-sibling-calls + -mbranch-protection=standard: Pixel production
+# kernels mark both kernel .text and module vmalloc .text with PROT_BTI, and
+# Android 15 GKI 6.6 additionally requires modules to declare FEAT_PAC via
+# .note.gnu.property (vendor modules compiled with pac-ret show `paciasp` at
+# function entry; kernels without the note silently ENOEXEC).  `standard`
+# = bti + pac-ret + pauth-lr, matching stock Android common kernel
+# toolchain.  `paciasp` is a HINT instruction: on CPUs without FEAT_PAuth
+# it decodes as NOP, so no ARMv8.2 floor is imposed at runtime.
 # That means:
 #   (a) indirect calls from our module into kernel (ksyms-resolved fn
 #       pointers) must be BLR — never tail-called via BR.
 #       `-fno-optimize-sibling-calls` forbids clang to rewrite
 #       `return fn(...)` as BR.
 #   (b) the kernel's BLR into our init_module / cleanup_module / any
-#       callback must land on a BTI_C (or BTI_JC) landing pad.
-#       `-mbranch-protection=bti` makes clang prefix every function
-#       entry with BTI_C. Without it, kernel-issued BLR into our
-#       init_module lands on a plain `STP X29,X30,...` instruction
+#       callback must land on a BTI_C (or BTI_JC) landing pad, AND carry
+#       PAC prologue.  `-mbranch-protection=standard` makes clang prefix
+#       every function entry with `paciasp` + `bti c`.  Without PAC
+#       declaration Android 15 kernel rejects the module pre-init.
 #       and raises a BTI exception — instant kernel panic on
 #       CONFIG_CFI_PERMISSIVE=n kernels like stock Pixel 6.
 
