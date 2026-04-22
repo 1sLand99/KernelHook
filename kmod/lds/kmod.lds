@@ -33,6 +33,15 @@ SECTIONS
     .altinstructions : ALIGN(8) {
         KEEP(*(.altinstructions))
     }
+    /* .text.ftrace_trampoline — REQUIRED by arm64 module_init_ftrace_plt()
+     * on every CONFIG_DYNAMIC_FTRACE=y kernel (Android GKI 6.1+).  Missing
+     * → module_finalize() returns -ENOEXEC silently before init_module()
+     * runs. See arch/arm64/kernel/module.c:module_init_ftrace_plt in
+     * android15-6.6. Kernel writes a struct plt_entry (16B) into this
+     * region at insmod. */
+    .text.ftrace_trampoline : ALIGN(4) {
+        KEEP(*(.text.ftrace_trampoline))
+    }
 
     .text : {
         *(.text .text.*)

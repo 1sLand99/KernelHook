@@ -29,6 +29,25 @@
 	.balign 8
 
 /*
+ * .text.ftrace_trampoline — REQUIRED by arm64 module_init_ftrace_plt()
+ * on kernels built with CONFIG_DYNAMIC_FTRACE=y (all Android GKI 6.1+).
+ * When the section is missing, module_finalize() returns -ENOEXEC with
+ * zero dmesg output (see arch/arm64/kernel/module.c module_init_ftrace_plt
+ * in android15-6.6).  Kernel writes one `struct plt_entry` (16 bytes on
+ * arm64, index FTRACE_PLT_IDX=0) into this section at insmod, so we
+ * reserve enough room.  Align 4 matches arm64 instruction alignment.
+ *
+ * This was the silent rejection gate on Pixel_35 / Pixel_37 AVDs — the
+ * kernel pre-validation passes, relocations apply, then module_finalize
+ * fails this check before init_module() is ever invoked.  Dmesg is
+ * empty because the check has no pr_err/pr_warn; only an errno=8
+ * surfaces to userspace via finit_module.
+ */
+	.section .text.ftrace_trampoline, "ax", %progbits
+	.balign 4
+	.fill 16, 1, 0
+
+/*
  * Android 15 GKI 6.6+ module loader checks this per-module `.note.Linux`
  * note and rejects the .ko (finit_module → -ENOEXEC, silent) if missing.
  * Vendor modules in /vendor/lib/modules carry the same 48-byte blob, so
