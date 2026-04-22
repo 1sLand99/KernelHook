@@ -25,6 +25,14 @@ SECTIONS
     .note.Linux : ALIGN(4) {
         KEEP(*(.note.Linux))
     }
+    /* Empty .altinstructions — placeholder section header required on
+     * some Android 15 common-kernel branches (vendor modules always
+     * ship the header, the kernel walks apply_alternatives() with zero
+     * entries when sh_size=0). KEEP prevents ld.lld from folding the
+     * empty section away. */
+    .altinstructions : ALIGN(8) {
+        KEEP(*(.altinstructions))
+    }
 
     .text : {
         *(.text .text.*)

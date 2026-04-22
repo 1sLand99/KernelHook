@@ -16,6 +16,19 @@
 	nop
 
 /*
+ * Empty .altinstructions section so Android 15 GKI 6.6+ sees the header
+ * it expects on every module.  Vendor modules always carry this section
+ * (even if small); the kernel apply_alternatives() walks it at load
+ * time, and pre-5.15 behaviour was to tolerate missing but some Android
+ * common-kernel forks added a header-existence precondition.
+ *
+ * Content stays 0 bytes — no errata entries — so apply_alternatives
+ * walks zero iterations and returns OK. Align 8 matches vendor.
+ */
+	.section .altinstructions, "a", %progbits
+	.balign 8
+
+/*
  * Android 15 GKI 6.6+ module loader checks this per-module `.note.Linux`
  * note and rejects the .ko (finit_module → -ENOEXEC, silent) if missing.
  * Vendor modules in /vendor/lib/modules carry the same 48-byte blob, so
