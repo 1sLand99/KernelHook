@@ -247,7 +247,16 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         uint64_t pxd_shift = (kh_page_shift - 3) * (uint64_t)(4 - lv) + 3;
         uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
         pxd_entry_va = pxd_va + pxd_index * 8;
-        if (!pxd_entry_va)
+        /* Guard: if the caller-supplied pgd_va, or a table descriptor
+         * decoded via kh_phys_to_virt() on a previous iteration, yielded
+         * an address outside the kernel's linear VA window, a raw
+         * dereference would take a fault.  Return 0 so the caller can
+         * fall back (e.g. alias_init treats null entry as "alias path
+         * unavailable" and continues with set_memory mode).  Observed on
+         * Pixel_29 AVD (Android 10, kernel 4.14) where vmalloc-area VAs
+         * walked through swapper_pg_dir produce L1 entries decoding to
+         * non-linear-mapping PAs. */
+        if (pxd_entry_va < kh_page_offset)
             return 0;
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
         if ((pxd_desc & 0x3) == 0x3) {

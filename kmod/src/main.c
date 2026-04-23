@@ -22,11 +22,13 @@
 #include "compat.h"
 #include "mem_ops.h"
 
+#ifndef KH_PAYLOAD
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("bmax121");
 MODULE_DESCRIPTION("KernelHook: ARM64 function hooking framework");
+#endif
 
-#ifdef KMOD_FREESTANDING
+#if defined(KMOD_FREESTANDING) && !defined(KH_PAYLOAD)
 MODULE_VERSIONS();
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
@@ -34,10 +36,19 @@ MODULE_THIS_MODULE();
 
 /* Force into .data (not .bss) so kmod_loader's patch_elf_symbol can write
  * the resolved address into the file-backed section. See exporter.c for the
- * full rationale (Plan 2 M-E T17 fix). */
+ * full rationale (Plan 2 M-E T17 fix).
+ *
+ * KH_PAYLOAD: non-static so graft tools / kmod_loader can locate the symbol
+ * in the merged vendor-ko symtab; no module_param because the payload is
+ * invoked via a vendor .ko's init_module, not the kernel's module-param
+ * machinery — the address is injected via patch_elf_symbol after graft. */
+#ifdef KH_PAYLOAD
+unsigned long kallsyms_addr __attribute__((used, section(".data"))) = 0;
+#else
 static unsigned long kallsyms_addr __attribute__((used, section(".data"))) = 0;
 module_param(kallsyms_addr, ulong, 0444);
 MODULE_PARM_DESC(kallsyms_addr, "Address of kallsyms_lookup_name (hex, required for freestanding builds)");
+#endif
 
 extern void kh_hook_chain_setup_transit(kh_hook_chain_rox_t *rox);
 extern void kh_fp_hook_chain_setup_transit(kh_fp_hook_chain_rox_t *rox);
@@ -48,11 +59,26 @@ extern int  kh_strategy_post_init(void);
 
 static int kh_initialized = 0;
 
+/* Non-static so KH_PAYLOAD mode can alias `kh_entry` to it. `__attribute__((alias))`
+ * requires the target to have external linkage. */
+#ifdef KH_PAYLOAD
+int __init kernelhook_init(void)
+#else
 static int __init kernelhook_init(void)
+#endif
 {
     int rc;
 
     pr_info("kernelhook: loading...\n");
+
+#ifdef KH_PAYLOAD_SMOKE
+    /* Level-0 smoke: return 0 immediately.  No pr_info, no symbol lookup,
+     * no stack work beyond the BL return.  If the kernel still panics
+     * loading this, the problem is in the ELF load path (relocation,
+     * CFI, BTI), not in our code. */
+    (void)rc;
+    return 0;
+#endif
 
     rc = kmod_compat_init(kallsyms_addr);
     if (rc) {
@@ -122,7 +148,11 @@ static int __init kernelhook_init(void)
  * their hooks before kernelhook.ko is unloaded. This module does not
  * track or teardown hooks registered by other modules.
  */
+#ifdef KH_PAYLOAD
+void __exit kernelhook_exit(void)
+#else
 static void __exit kernelhook_exit(void)
+#endif
 {
     if (kh_initialized) {
         sync_cleanup();
@@ -132,5 +162,15 @@ static void __exit kernelhook_exit(void)
     }
 }
 
+#ifdef KH_PAYLOAD
+/* Payload entry/exit — graft tools rewrite a host vendor .ko's
+ * .rela.gnu.linkonce.this_module init/exit relocations to point at these
+ * aliases.  The host's existing init_module/cleanup_module kCFI hash
+ * prefixes are preserved (they hash to the initcall_t typeid, which
+ * matches kh_entry's `int (*)(void)` prototype). */
+int  kh_entry(void) __attribute__((alias("kernelhook_init")));
+void kh_exit(void)  __attribute__((alias("kernelhook_exit")));
+#else
 module_init(kernelhook_init);
 module_exit(kernelhook_exit);
+#endif

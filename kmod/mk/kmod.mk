@@ -49,13 +49,22 @@ $(KH_GEN_DIR):
 #   prel32 (default) — 12-byte struct with PREL32 relocs. Matches kernels
 #                      built with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y (GKI
 #                      6.1+ on arm64, modern upstream).
-#   abs64            — 24-byte struct with ABS64 pointers. Required for
-#                      kernels where HAVE_ARCH_PREL32_RELOCATIONS is OFF
-#                      (e.g. Android 11 GKI 5.4). Mismatched layout causes
-#                      strcmp crashes in find_symbol at load time.
+#   abs64            — 24-byte struct with ABS64 pointers (value, name,
+#                      namespace). Required for kernels 5.3..5.7 where
+#                      HAVE_ARCH_PREL32_RELOCATIONS is OFF but namespaces
+#                      are already defined (Android 11 GKI 5.4).
+#   abs64_legacy     — 16-byte struct with ABS64 pointers (value, name
+#                      only). Required for pre-5.3 kernels where namespace
+#                      field does not exist in struct kernel_symbol
+#                      (Android 9 GKI 4.4, Android 10 GKI 4.14).
+# Mismatched layout causes strcmp crashes in find_symbol/cmp_name at load
+# time because the kernel's pointer walk stride differs from our entry
+# stride, landing `name` reads on stale/NULL fields.
 KH_KSYMTAB_LAYOUT ?= prel32
 ifeq ($(KH_KSYMTAB_LAYOUT),abs64)
   KH_CRC_ASM_MODE := asm-abs64
+else ifeq ($(KH_KSYMTAB_LAYOUT),abs64_legacy)
+  KH_CRC_ASM_MODE := asm-abs64-legacy
 else
   KH_CRC_ASM_MODE := asm
 endif
@@ -126,6 +135,24 @@ else
   KH_CFI_CFLAGS := -fsanitize=kcfi
 endif
 
+# KH_PAYLOAD=1 builds a self-contained ET_REL blob (kh_payload.o) meant to be
+# grafted into a vendor .ko by tools/kmod_loader/graft_vendor_ko.  Compared to
+# the standard `.ko` build:
+#   - plt_stub.S (notes, .altinstructions, .text.ftrace_trampoline, .plt) is
+#     NOT linked in — the host vendor .ko already carries the sections that
+#     the kernel's module pre-init checks look for.
+#   - kh_exports.S (__ksymtab via tools/kh_crc) is NOT linked in — consumers
+#     of EXPORT_SYMBOL go through a full kernelhook.ko deployment; graft mode
+#     is only the bootstrap payload.
+#   - MODULE_{LICENSE,AUTHOR,DESCRIPTION,VERSIONS,VERMAGIC,PARM_DESC} and the
+#     THIS_MODULE / __ksymtab / __versions / __param / .modinfo /
+#     .gnu.linkonce.this_module sections are all provided by the host.
+#   - Payload exports `kh_entry` (alias of kernelhook_init) and `kh_exit`
+#     (alias of kernelhook_exit) as external symbols so the graft tool can
+#     rewrite the host's .rela.gnu.linkonce.this_module init/exit relocs to
+#     point at them.
+KH_PAYLOAD ?= 0
+
 # IMPORTANT: Do NOT add -fsanitize=shadow-call-stack to freestanding builds.
 # The .ko must run on kernels with and without SCS. Our transit_body must
 # not use x18 (SCS register), which may be uninitialized on non-SCS kernels.
@@ -136,6 +163,7 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -DMODULE_NAME='"$(MODULE_NAME)"' \
              -ffreestanding -fno-builtin -fno-stack-protector -fno-common \
              -fno-PIE -fno-pic \
+             -mcmodel=large \
              -fno-optimize-sibling-calls \
              -mbranch-protection=standard \
              -I$(KERNELHOOK_DIR)/shim/include \
@@ -148,6 +176,10 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -Wno-unused-function \
              -Wno-unknown-sanitizers \
              $(KH_CFI_CFLAGS)
+
+ifeq ($(KH_PAYLOAD),1)
+  KH_CFLAGS += -DKH_PAYLOAD
+endif
 # -fno-optimize-sibling-calls + -mbranch-protection=standard: Pixel production
 # kernels mark both kernel .text and module vmalloc .text with PROT_BTI, and
 # Android 15 GKI 6.6 additionally requires modules to declare FEAT_PAC via
@@ -232,6 +264,15 @@ _KH_MOD_OBJS  := $(patsubst %.c,%.kmod.o,$(MODULE_SRCS))
 
 _KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_SHIM_OBJS) $(_KH_PLT_OBJS) $(_KH_GEN_OBJS)
 
+# Payload builds: drop plt_stub (host-provided notes/ftrace/altinstructions).
+# kh_exports.kmod.o is kept — consumer modules (hello_hook etc.) resolve
+# kh_hook_inline / kh_unhook / ... through the payload's __ksymtab.  The
+# graft tool merges the payload's __ksymtab into the host's so the kernel's
+# find_sec("__ksymtab") picks up our exports.
+ifeq ($(KH_PAYLOAD),1)
+  _KH_ALL_OBJS := $(filter-out $(_KH_PLT_OBJS),$(_KH_ALL_OBJS))
+endif
+
 # ---------- Targets ----------
 
 .PHONY: module loader clean
@@ -239,6 +280,30 @@ _KH_ALL_OBJS := $(_KH_MOD_OBJS) $(_KH_CORE_OBJS) $(_KH_KMOD_OBJS) $(_KH_SHIM_OBJ
 module: $(MODULE_NAME).ko
 	@echo "Built $(MODULE_NAME).ko successfully"
 	@file $(MODULE_NAME).ko
+
+# kh_payload.o — a single ET_REL .o meant to be grafted into a vendor .ko.
+# No linker script: the graft tool is responsible for merging sections into
+# the host's existing section layout.  No .rela.kh.this_module rename either
+# (payload does not emit MODULE_THIS_MODULE, so the section does not exist).
+# kh_symvers.h is still generated because some C sources optionally include
+# it; kh_exports.kmod.o itself is not linked in (filtered out above).
+#
+# Invoked from the outer Makefile's `payload` wrapper, which forces
+# KH_PAYLOAD=1.  This rule refuses to run without it — building a
+# kh_payload.o out of non-KH_PAYLOAD .kmod.o objects would produce a blob
+# missing the kh_entry/kh_exit aliases required by graft_vendor_ko.
+kh_payload.o: _kh_lint $(KH_SYMVERS_H) $(_KH_ALL_OBJS)
+	@if [ "$(KH_PAYLOAD)" != "1" ]; then \
+	    echo "ERROR: kh_payload.o needs KH_PAYLOAD=1 — run 'make payload' instead" >&2; \
+	    exit 1; \
+	fi
+	@# Pass the linker script so __start___kh_strategies / __stop___kh_strategies
+	@# (and other anchor symbols in the script) get defined during partial link.
+	@# Empty host-provided sections (.note.*, .altinstructions, .text.ftrace_trampoline,
+	@# .plt, .init.plt, __ksymtab etc.) are emitted but stay empty — graft_vendor_ko
+	@# appends them as .kh-prefixed no-op sections that the kernel module loader
+	@# walks as zero-entry ranges.
+	$(LD) -r -T $(KH_LDS) -o $@ $(_KH_ALL_OBJS)
 
 loader: $(KERNELHOOK_DIR)/loader/kmod_loader.c
 	$(CC) -static -O2 -o kmod_loader $<
@@ -284,5 +349,6 @@ $(KH_GEN_DIR)/kh_exports.kmod.o: $(KH_EXPORTS_S) | $(KH_GEN_DIR)
 
 clean:
 	rm -f $(MODULE_NAME).ko $(MODULE_NAME).ko.tmp $(_KH_MOD_OBJS)
+	rm -f kh_payload.o
 	rm -rf _kh_core/ _kh_kmod/ $(KH_GEN_DIR)
 	rm -f kmod_loader

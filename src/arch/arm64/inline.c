@@ -673,9 +673,17 @@ void kh_write_insts_init(void)
           (unsigned long long)(uintptr_t)kh_set_memory_ro,
           (unsigned long long)(uintptr_t)kh_set_memory_x);
 
-    /* Must run after pgtable_init (for kh_page_shift, kh_phys_to_virt,
-     * kernel_pgd) and after symbol resolution. */
-    kh_alias_init();
+    /* Only initialize the PTE-alias fast path when set_memory is NOT
+     * available.  The alias path requires walking swapper_pg_dir for a
+     * freshly vmalloc'd page, which on pre-5.0 Android kernels can hit
+     * unmapped-PMD ranges and fault even through the kernel linear
+     * mapping (observed on Pixel_28 4.4.302 and Pixel_29 4.14.175
+     * AVDs).  When set_memory_rw/ro resolved, the alias path is an
+     * unused optimization — the kh_write_mode==1 branch never reads
+     * kh_alias_pte — so skipping alias_init is both safe and correct.
+     * Must run after pgtable_init and symbol resolution. */
+    if (!kh_write_mode)
+        kh_alias_init();
 }
 
 /* Free the vmalloc'd alias page. Must be called from the module exit path

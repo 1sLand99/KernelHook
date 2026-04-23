@@ -2656,11 +2656,21 @@ static int do_load(int argc, char *argv[], int dry_run)
      *
      * Env KH_SKIP_KCFI=1 disables this for diagnosis: on Android 15 GKI
      * 6.6 we want to distinguish "vendor hash mismatches kernel" from
-     * deeper init_module panics. */
-    if (!getenv("KH_SKIP_KCFI"))
-        patch_kcfi_hashes(mod, mod_size, eh);
-    else
+     * deeper init_module panics.
+     *
+     * Env KH_GRAFTED=1 also skips the patch.  A grafted module (produced
+     * by tools/kmod_loader/graft_vendor_ko) inherits the host vendor .ko's
+     * kCFI hash prefixes verbatim — those are already the hashes the
+     * kernel expects.  Overwriting them from the vendor-scan cache would
+     * be a no-op in the happy path (same source) but can mismatch if the
+     * graft host and the vendor_kcfi_hash() scan land on different .ko
+     * files.  Skipping avoids that edge case. */
+    if (getenv("KH_GRAFTED"))
+        fprintf(stderr, "kmod_loader: KH_GRAFTED=1 — skipping kCFI prefix patch (host already carries vendor hashes)\n");
+    else if (getenv("KH_SKIP_KCFI"))
         fprintf(stderr, "kmod_loader: KH_SKIP_KCFI=1 — leaving kCFI prefixes untouched\n");
+    else
+        patch_kcfi_hashes(mod, mod_size, eh);
 
     /* Step 4.6: __ex_table entry format.  arm64 switched from 8B to 12B
      * in v5.15 (type-aware extable).  kernelhook.ko ships with 12B

@@ -39,11 +39,21 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
              -march=armv8.5-a -O2 -Wall -Wextra -Werror \
              -Wno-unused-parameter -Wno-unused-function
 
-.PHONY: all regenerate clean test
+.PHONY: all regenerate clean test graft
 
 # Default: build kmod_loader using pre-committed probe_embed.h
-all: kmod_loader
-	@echo "Built kmod_loader successfully"
+all: kmod_loader graft_vendor_ko
+	@echo "Built kmod_loader + graft_vendor_ko successfully"
+
+# graft_vendor_ko: host-side ELF merger.  Lives here because it shares
+# the same ELF-manipulation style as kmod_loader and consumes the same
+# KernelHook payload object.  Requires <elf.h> — Linux or Android NDK
+# host only.  macOS developers can build/run via docker.
+graft_vendor_ko: graft_vendor_ko.c
+	$(HOSTCC) -O2 -Wall -Wextra -Werror -o $@ $<
+
+graft: graft_vendor_ko
+	@echo "graft_vendor_ko built.  Usage: ./graft_vendor_ko --help"
 
 RESOLVER_SRCS := resolver.c \
                  strategies/cli.c \
