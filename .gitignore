@@ -14,8 +14,11 @@ _kh_kmod/
 modules.order
 Module.symvers
 kmod_loader
+kmod_loader_arm64
+graft_vendor_ko
 !tools/kmod_loader/
 !tools/kmod_loader/README.md
+!tools/kmod_loader/graft_vendor_ko.c
 
 # IDE
 .vscode/
