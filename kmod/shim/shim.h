@@ -236,8 +236,19 @@ struct modversion_info {
             .crc = (crc_val), .pad = 0, .name = (sym_name),            \
         }
 
+/* MODULE_VERSIONS — baseline __versions entries every freestanding .ko
+ * needs.  On pre-5.8 kernels with CONFIG_MODVERSIONS=y the module loader
+ * rejects UND symbols that have no matching __versions entry, so every
+ * kernel symbol we might import needs a placeholder here.  CRCs are
+ * sentinel 0xDEADBE01; kmod_loader rewrites them via --crc <sym>=<val>
+ * at load time.  We declare both `printk` and `_printk` (only one resolves
+ * on any given kernel — 4.x has `printk`, 5.8+ has `_printk`; the other
+ * stays unresolved but is not referenced by any UND symbol so the loader
+ * skips the version check for it). */
 #define MODULE_VERSIONS()                                                     \
-    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout")
+    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout"); \
+    _MODVER_ENTRY(__modver_printk,        0xDEADBE01u, "printk"); \
+    _MODVER_ENTRY(__modver__printk,       0xDEADBE01u, "_printk")
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING

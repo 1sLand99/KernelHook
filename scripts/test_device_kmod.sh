@@ -30,15 +30,20 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Flag parser: --mode={sdk,freestanding} (default sdk). Bare arg is the adb serial.
-# Default (sdk) builds + loads kernelhook.ko AND examples/hello_hook/hello_hook.ko
-# (the SDK consumer reference under Phase B / 方案 C). Freestanding mode falls back
-# to the legacy single-kh_test.ko path, which also runs the kh_root demo + Ring 3 sweep.
+# Flag parser: --mode={sdk,freestanding} (default sdk),
+#              --consumers=csv (SDK mode only; default: full SDK consumer set).
+# Bare arg is the adb serial.
+# Default (sdk) builds + loads kernelhook.ko AND every SDK consumer under
+# examples/ (hello_hook, fp_hook, hook_chain, hook_wrap_args, ksyms_lookup).
+# Freestanding mode falls back to the legacy single-kh_test.ko path, which
+# also runs the kh_root demo + Ring 3 sweep.
 KH_MODE="sdk"
 KH_SERIAL=""
+KH_CONSUMERS="hello_hook,fp_hook,hook_chain,hook_wrap_args,ksyms_lookup"
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --mode=*) KH_MODE="${1#--mode=}"; shift ;;
+        --mode=*)      KH_MODE="${1#--mode=}"; shift ;;
+        --consumers=*) KH_CONSUMERS="${1#--consumers=}"; shift ;;
         --) shift; break ;;
         -*) echo "unknown flag $1" >&2; exit 2 ;;
         *)  KH_SERIAL="$1"; shift ;;
@@ -48,6 +53,25 @@ case "$KH_MODE" in
     sdk|freestanding) ;;
     *) echo "invalid --mode=$KH_MODE (expected sdk|freestanding)" >&2; exit 2 ;;
 esac
+
+# Parse consumer csv into a bash array (used by SDK build + load loops).
+IFS=',' read -ra CONSUMER_ARR <<< "$KH_CONSUMERS"
+
+# consumer_marker <name> — emit the init-time pr_info() substring that proves
+# the consumer loaded. Grepped from `dmesg` (primary) or /dev/kmsg live
+# capture (fallback) in the SDK test loop. Source refs:
+#   hello_hook.c:122  fp_hook.c:112  hook_chain.c:155
+#   hook_wrap_args.c:132  ksyms_lookup.c:74
+consumer_marker() {
+    case "$1" in
+        hello_hook)     echo "hello_hook: hooked do_sys_open" ;;
+        fp_hook)        echo "kh_fp_hook: function pointer hooked" ;;
+        hook_chain)     echo "hook_chain: registered 3 before callbacks" ;;
+        hook_wrap_args) echo "hook_wrap_args: hooked do_sys_open" ;;
+        ksyms_lookup)   echo "ksyms_lookup: all lookups complete" ;;
+        *)              echo "$1:" ;;
+    esac
+}
 
 # shellcheck source=lib/detect_toolchain.sh
 . "$ROOT/scripts/lib/detect_toolchain.sh" || {
@@ -134,7 +158,8 @@ fi
 # Freestanding mode: tests/kmod/kh_test.ko (legacy single .ko, kh_root demo + Ring 3).
 : > /tmp/kh_test_build.log
 if [ "$KH_MODE" = "sdk" ]; then
-    printf "  Building kernelhook.ko + hello_hook.ko (SDK mode) for %s...\n" "$UNAME"
+    printf "  Building kernelhook.ko + %d consumers (SDK mode) for %s: %s\n" \
+        "${#CONSUMER_ARR[@]}" "$UNAME" "${CONSUMER_ARR[*]}"
     if ! ( cd "$ROOT/kmod" && \
            { make clean >/dev/null 2>&1 || true; } && \
            make module \
@@ -147,18 +172,24 @@ if [ "$KH_MODE" = "sdk" ]; then
         tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
         exit 1
     fi
-    if ! ( cd "$ROOT/examples/hello_hook" && \
-           { make clean >/dev/null 2>&1 || true; } && \
-           KERNELRELEASE="$UNAME" \
-           CC="$KH_CC" \
-           LD="$KH_LD" \
-           CROSS_COMPILE="$KH_CROSS_COMPILE" \
-           make module \
-               >>/tmp/kh_test_build.log 2>&1 ); then
-        printf "  ${RED}FAIL${RESET} hello_hook.ko (SDK) build failed — see /tmp/kh_test_build.log\n"
-        tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
-        exit 1
-    fi
+    for c in "${CONSUMER_ARR[@]}"; do
+        if [ ! -d "$ROOT/examples/$c" ]; then
+            printf "  ${RED}FAIL${RESET} examples/%s: directory not found\n" "$c"
+            exit 1
+        fi
+        if ! ( cd "$ROOT/examples/$c" && \
+               { make clean >/dev/null 2>&1 || true; } && \
+               KERNELRELEASE="$UNAME" \
+               CC="$KH_CC" \
+               LD="$KH_LD" \
+               CROSS_COMPILE="$KH_CROSS_COMPILE" \
+               make module \
+                   >>/tmp/kh_test_build.log 2>&1 ); then
+            printf "  ${RED}FAIL${RESET} %s.ko (SDK) build failed — see /tmp/kh_test_build.log\n" "$c"
+            tail -30 /tmp/kh_test_build.log | sed 's/^/       /'
+            exit 1
+        fi
+    done
 else
     printf "  Building kh_test.ko (freestanding) for %s...\n" "$UNAME"
     cd "$ROOT/tests/kmod"
@@ -201,8 +232,15 @@ fi
 
 # Push files. /data/local/tmp is world-writable; chmod happens there.
 if [ "$KH_MODE" = "sdk" ]; then
-    $ADB push "$ROOT/kmod/kernelhook.ko"                /data/local/tmp/kernelhook.ko >/dev/null
-    $ADB push "$ROOT/examples/hello_hook/hello_hook.ko" /data/local/tmp/hello_hook.ko >/dev/null
+    # Push kernelhook.ko plus both ksymtab-layout variants when available.
+    # kmod_loader auto-selects by kernel version when the path argument
+    # ends in "kernelhook.ko".
+    $ADB push "$ROOT/kmod/kernelhook.ko" /data/local/tmp/kernelhook.ko >/dev/null
+    [ -f "$ROOT/kmod/kernelhook-prel32.ko" ] && $ADB push "$ROOT/kmod/kernelhook-prel32.ko" /data/local/tmp/kernelhook-prel32.ko >/dev/null 2>&1 || true
+    [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]  && $ADB push "$ROOT/kmod/kernelhook-abs64.ko"  /data/local/tmp/kernelhook-abs64.ko  >/dev/null 2>&1 || true
+    for c in "${CONSUMER_ARR[@]}"; do
+        $ADB push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null
+    done
 else
     $ADB push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null
 fi
@@ -210,10 +248,15 @@ $ADB push "$LOADER" /data/local/tmp/kmod_loader >/dev/null
 $ADB shell 'chmod +x /data/local/tmp/kmod_loader' >/dev/null
 
 # Unload any stale modules from a previous run (ignore failure). In SDK mode
-# the consumer (hello_hook) must come off first because it holds a refcount on
-# kernelhook via the ksymtab imports.
+# consumers must come off first (reverse-order) because each holds a refcount
+# on kernelhook via its ksymtab imports — then kernelhook itself last.
 if [ "$KH_MODE" = "sdk" ]; then
-    dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+    stale_cmd=""
+    for (( _i=${#CONSUMER_ARR[@]}-1; _i>=0; _i-- )); do
+        stale_cmd+="rmmod ${CONSUMER_ARR[$_i]} 2>/dev/null; "
+    done
+    stale_cmd+="rmmod kernelhook 2>/dev/null; true"
+    dsu "$stale_cmd" >/dev/null || true
 else
     dsu "rmmod kh_test 2>/dev/null; true" >/dev/null || true
 fi
@@ -227,9 +270,14 @@ KMSG_PID=$!
 sleep 1
 
 # Load. Host-side 60s timeout handles old BusyBox lacking `timeout`.
-# SDK mode does a two-step load (kernelhook.ko first, then hello_hook.ko);
-# freestanding mode loads the single kh_test.ko as before.
+# SDK mode: load kernelhook.ko once, then iterate every SDK consumer
+#           (load → verify init marker → rmmod). hello_hook additionally
+#           runs a 'fire' verification that triggers real open(2) syscalls
+#           to confirm the before-callback gets invoked — silent no-op
+#           hooks would otherwise slip past the setup-only check.
+# Freestanding: load the single kh_test.ko as before.
 if [ "$KH_MODE" = "sdk" ]; then
+    # Step 1: kernelhook.ko
     LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
         $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} kh_consistency_check=1'" 2>&1) || true
     if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
@@ -240,22 +288,98 @@ if [ "$KH_MODE" = "sdk" ]; then
         echo "$LOAD_OUTPUT" | sed 's/^/       /'
         exit 1
     fi
-    LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/hello_hook.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
-    if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
-        sleep 1
-        kill "$KMSG_PID" 2>/dev/null || true
-        wait "$KMSG_PID" 2>/dev/null || true
-        printf "  ${RED}FAIL${RESET} hello_hook.ko load failed\n"
-        echo "$LOAD_OUTPUT" | sed 's/^/       /'
-        # Best-effort cleanup: peel kernelhook back off so we don't leave it loaded.
-        dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+
+    # Step 2: per-consumer loop — serial (rmmod between each) because
+    # hello_hook / hook_chain / hook_wrap_args all target do_sys_openat2;
+    # keeping them isolated makes per-consumer failures unambiguous.
+    SDK_PASS=0
+    SDK_FAIL=0
+    SDK_FAIL_NAMES=""
+    for c in "${CONSUMER_ARR[@]}"; do
+        printf "\n  ${BOLD}---- consumer: %s ----${RESET}\n" "$c"
+        LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
+            $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+        if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
+            printf "  ${RED}FAIL${RESET} %s.ko load failed\n" "$c"
+            echo "$LOAD_OUTPUT" | sed 's/^/       /'
+            SDK_FAIL=$((SDK_FAIL + 1))
+            SDK_FAIL_NAMES="$SDK_FAIL_NAMES $c(load)"
+            continue
+        fi
+
+        sleep 2
+        MARKER="$(consumer_marker "$c")"
+        # Prefer fresh `dmesg`; fall back to /dev/kmsg live capture in case
+        # callback spam has evicted the init line from the ring buffer.
+        SETUP_DMESG=$(dsu "dmesg" 2>/dev/null)
+        SETUP_LINE=""
+        if echo "$SETUP_DMESG" | grep -q "$MARKER"; then
+            SETUP_LINE=$(echo "$SETUP_DMESG" | grep "$MARKER" | tail -1)
+        elif [ -s "$LIVE_KMSG" ]; then
+            SETUP_LINE=$(grep "$MARKER" "$LIVE_KMSG" | tail -1)
+        fi
+        if [ -z "$SETUP_LINE" ]; then
+            printf "  ${RED}FAIL${RESET} %s: setup marker '%s' not found\n" "$c" "$MARKER"
+            echo "$SETUP_DMESG" | grep -E "${c}:|kernelhook:" | tail -10 | sed 's/^/       dmesg: /'
+            if [ -s "$LIVE_KMSG" ]; then
+                grep -E "${c}:|kernelhook:" "$LIVE_KMSG" | tail -10 | sed 's/^/       live:  /'
+            fi
+            SDK_FAIL=$((SDK_FAIL + 1))
+            SDK_FAIL_NAMES="$SDK_FAIL_NAMES $c(marker)"
+            dsu "rmmod $c 2>/dev/null; true" >/dev/null || true
+            continue
+        fi
+        printf "  ${GREEN}PASS${RESET} %s setup: %s\n" "$c" "$SETUP_LINE"
+
+        # hello_hook gets an extra runtime fire check — silent no-op hooks
+        # (install succeeds but callback never runs) would otherwise be
+        # invisible to a setup-only check.
+        if [ "$c" = "hello_hook" ]; then
+            dsu "cat /system/build.prop >/dev/null 2>&1; \
+                 cat /proc/version    >/dev/null 2>&1; \
+                 ls   /data/local/tmp  >/dev/null 2>&1; true" >/dev/null 2>&1 || true
+            sleep 1
+            FIRE_DMESG=$(dsu "dmesg" 2>/dev/null)
+            FIRE_COUNT=$(echo "$FIRE_DMESG" | grep -c "hello_hook: open called" || true)
+            if [ "${FIRE_COUNT:-0}" -lt 1 ]; then
+                printf "  ${RED}FAIL${RESET} %s: before-callback never fired on triggered opens\n" "$c"
+                echo "$FIRE_DMESG" | grep "hello_hook:" | tail -10 | sed 's/^/       /'
+                SDK_FAIL=$((SDK_FAIL + 1))
+                SDK_FAIL_NAMES="$SDK_FAIL_NAMES $c(fire)"
+                dsu "rmmod $c 2>/dev/null; true" >/dev/null || true
+                continue
+            fi
+            printf "  ${GREEN}PASS${RESET} %s fire: before-callback invoked %d time(s)\n" "$c" "$FIRE_COUNT"
+        fi
+
+        SDK_PASS=$((SDK_PASS + 1))
+        dsu "rmmod $c 2>/dev/null; true" >/dev/null || true
+    done
+
+    # Final cleanup + panic scan.
+    sleep 1
+    kill "$KMSG_PID" 2>/dev/null || true
+    wait "$KMSG_PID" 2>/dev/null || true
+    if [ -s "$LIVE_KMSG" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$LIVE_KMSG"; then
+        printf "\n  ${YELLOW}Kernel panic captured in live kmsg:${RESET}\n"
+        awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$LIVE_KMSG" \
+            | sed 's/^/       /'
+    fi
+    dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
+
+    printf "\n${BOLD}=== SDK Summary: %d PASS, %d FAIL (consumers: %s) ===${RESET}\n" \
+        "$SDK_PASS" "$SDK_FAIL" "${CONSUMER_ARR[*]}"
+    if [ "$SDK_FAIL" -gt 0 ]; then
+        printf "${RED}Failed:${RESET}%s\n" "$SDK_FAIL_NAMES"
         exit 1
     fi
-else
-    LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-        $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} kh_consistency_check=1'" 2>&1) || true
+    printf "${GREEN}All SDK consumers passed.${RESET}\n"
+    exit 0
 fi
+
+# Freestanding fall-through: kh_test.ko single load + panic scan + "loaded" check.
+LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
+    $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} kh_consistency_check=1'" 2>&1) || true
 
 sleep 1
 kill "$KMSG_PID" 2>/dev/null || true
@@ -271,56 +395,6 @@ if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
     printf "  ${RED}FAIL${RESET} module load failed\n"
     echo "$LOAD_OUTPUT" | sed 's/^/       /'
     exit 1
-fi
-
-# ---- SDK mode: runtime-verify the hello_hook consumer, unload in reverse order, done.
-# kh_root demo + Ring 3 are freestanding-mode concerns (kh_test.ko not loaded here).
-#
-# Two-step verification:
-#   (1) Setup marker: 'hello_hook: hooked do_sys_open*' must appear in dmesg
-#       after load — proves hook_wrap4() registered the trampoline.
-#   (2) Fire marker: trigger a few open syscalls on-device, then verify that
-#       'hello_hook: open called' appears >=1 time — proves the before-callback
-#       was actually invoked by the kernel (not just installed).
-# Both must succeed for the test to PASS. A hook that installs but never fires
-# is a silent failure we need to catch.
-if [ "$KH_MODE" = "sdk" ]; then
-    sleep 2
-    SDK_DMESG_SETUP=$(dsu "dmesg" 2>/dev/null)
-    if ! echo "$SDK_DMESG_SETUP" | grep -q "hello_hook: hooked do_sys_open"; then
-        printf "  ${RED}FAIL${RESET} hello_hook setup marker not found in dmesg\n"
-        echo "$SDK_DMESG_SETUP" | grep -E "hello_hook:|kernelhook:" | tail -20 | sed 's/^/       /'
-        dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
-        exit 1
-    fi
-    SETUP_LINE=$(echo "$SDK_DMESG_SETUP" | grep "hello_hook: hooked do_sys_open" | tail -1)
-    printf "  ${GREEN}PASS${RESET} setup: %s\n" "$SETUP_LINE"
-
-    # Trigger a handful of open syscalls; every cat/ls forces do_sys_openat2
-    # through the hooked path, so the before-callback should fire at least once.
-    dsu "cat /system/build.prop >/dev/null 2>&1; \
-         cat /proc/version    >/dev/null 2>&1; \
-         ls   /data/local/tmp  >/dev/null 2>&1; true" >/dev/null 2>&1 || true
-    sleep 1
-
-    SDK_DMESG_FIRE=$(dsu "dmesg" 2>/dev/null)
-    FIRE_COUNT=$(echo "$SDK_DMESG_FIRE" | grep -c "hello_hook: open called" || true)
-    if [ "${FIRE_COUNT:-0}" -lt 1 ]; then
-        printf "  ${RED}FAIL${RESET} hook installed but before-callback never fired (open_before not invoked)\n"
-        echo "$SDK_DMESG_FIRE" | grep "hello_hook:" | tail -10 | sed 's/^/       /'
-        dsu "rmmod hello_hook 2>/dev/null; rmmod kernelhook 2>/dev/null; true" >/dev/null || true
-        exit 1
-    fi
-    printf "  ${GREEN}PASS${RESET} fire: before-callback invoked %d time(s) on triggered opens\n" "$FIRE_COUNT"
-
-    # SDK unload: reverse order — consumer first (refcount holder),
-    # then the SDK base module.
-    dsu "rmmod hello_hook 2>/dev/null; true" >/dev/null || true
-    dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
-
-    printf "\n${GREEN}All device tests passed.${RESET}\n"
-    printf "=== Summary: %d PASS, %d FAIL ===\n" 2 0
-    exit 0
 fi
 
 sleep 3
