@@ -20,6 +20,14 @@
 
 #include <types.h>
 
+/* SDK-consumer builds automatically emit __versions entries for every
+ * kh_* export they might import (see MODULE_VERSIONS() macro below).
+ * Guarded on KH_SDK_MODE so kernelhook.ko's own build (which defines the
+ * exports, not imports them) doesn't pick up self-referential entries. */
+#ifdef KH_SDK_MODE
+#include <kernelhook/kh_symvers.h>
+#endif
+
 /* ---- .modinfo section entries ---- */
 
 #define __MODULE_INFO(tag, name, info)                                  \
@@ -244,11 +252,24 @@ struct modversion_info {
  * at load time.  We declare both `printk` and `_printk` (only one resolves
  * on any given kernel — 4.x has `printk`, 5.8+ has `_printk`; the other
  * stays unresolved but is not referenced by any UND symbol so the loader
- * skips the version check for it). */
-#define MODULE_VERSIONS()                                                     \
+ * skips the version check for it).
+ *
+ * KH_SDK_MODE builds (consumer .ko's) additionally emit frozen-CRC
+ * entries for every kh_* export from kernelhook.ko via KH_DECLARE_VERSIONS()
+ * — without those, pre-5.8 loaders reject consumer imports with
+ * "no symbol version for kh_…". */
+#ifdef KH_SDK_MODE
+#define MODULE_VERSIONS()                                                \
     _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout"); \
-    _MODVER_ENTRY(__modver_printk,        0xDEADBE01u, "printk"); \
+    _MODVER_ENTRY(__modver_printk,        0xDEADBE01u, "printk");        \
+    _MODVER_ENTRY(__modver__printk,       0xDEADBE01u, "_printk");       \
+    KH_DECLARE_VERSIONS()
+#else
+#define MODULE_VERSIONS()                                                \
+    _MODVER_ENTRY(__modver_module_layout, 0xDEADBE01u, "module_layout"); \
+    _MODVER_ENTRY(__modver_printk,        0xDEADBE01u, "printk");        \
     _MODVER_ENTRY(__modver__printk,       0xDEADBE01u, "_printk")
+#endif
 
 /* ---- vermagic ---- */
 #ifndef VERMAGIC_STRING

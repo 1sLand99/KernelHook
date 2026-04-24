@@ -33,14 +33,6 @@ MODULE_DESCRIPTION("KernelHook hello_hook example: log every open syscall");
 
 #ifdef KMOD_FREESTANDING
 MODULE_VERSIONS();
-/* Declare __versions entries for every kh_* symbol imported from
- * kernelhook.ko.  Required on pre-5.8 kernels with CONFIG_MODVERSIONS=y
- * where the module loader rejects UND symbols that have no matching
- * __versions entry with "no symbol version for X".  On newer kernels
- * (5.8+) this is tolerated, but emitting entries unconditionally is
- * harmless and keeps one build artifact usable across every AVD. */
-#include <kernelhook/kh_symvers.h>
-KH_DECLARE_VERSIONS();
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 #endif

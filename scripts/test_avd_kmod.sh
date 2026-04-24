@@ -232,19 +232,14 @@ test_avd() {
         return
     fi
 
-    # Per-AVD effective mode. SDK mode is the default but kernelhook.ko
-    # is built via kernel kbuild which emits reloc types + .plt sections
-    # that pre-5.10 goldfish AVD kernels (Pixel_28 / Pixel_29 / Pixel_30)
-    # refuse to load with "unsupported RELA relocation: 275" or "Exec
-    # format error". Auto-downgrade those older AVDs to freestanding mode,
-    # which builds kh_test.ko via NDK clang + our own linker script and
-    # loads cleanly on 4.4..5.4. Newer AVDs (>=5.10) keep SDK mode.
-    # The downgrade is emitted as a note so the operator knows why the
-    # mode silently changed.
+    # Per-AVD effective mode. SDK mode now supports pre-5.10 kernels via
+    # the abs64_legacy variant (16B struct kernel_symbol, pre-5.3) and
+    # mcmodel=large (pre-5.5 MOVW-only reloc set) — so no downgrade for
+    # 4.4+/4.14+/5.4. Only kernels older than 4.4 are genuinely unsupported.
     local effective_mode="$KH_MODE"
     if [ "$effective_mode" = "sdk" ]; then
-        if [ "$kmajor" -lt 5 ] || ([ "$kmajor" -eq 5 ] && [ "$kminor" -lt 10 ]); then
-            printf "  ${KH_YELLOW}NOTE${KH_RESET} $avd: kernel %s predates stable GKI kbuild reloc set; downgrading to freestanding mode\n" "$uname"
+        if [ "$kmajor" -lt 4 ] || ([ "$kmajor" -eq 4 ] && [ "$kminor" -lt 4 ]); then
+            printf "  ${KH_YELLOW}NOTE${KH_RESET} $avd: kernel %s predates 4.4 (unsupported by abs64_legacy variant); downgrading to freestanding mode\n" "$uname"
             effective_mode="freestanding"
         fi
     fi
