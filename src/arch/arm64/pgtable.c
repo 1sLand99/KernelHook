@@ -247,17 +247,29 @@ uint64_t *pgtable_entry(uint64_t pgd, uint64_t va)
         uint64_t pxd_shift = (kh_page_shift - 3) * (uint64_t)(4 - lv) + 3;
         uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
         pxd_entry_va = pxd_va + pxd_index * 8;
-        /* Guard: if the caller-supplied pgd_va, or a table descriptor
-         * decoded via kh_phys_to_virt() on a previous iteration, yielded
-         * an address outside the kernel's linear VA window, a raw
-         * dereference would take a fault.  Return 0 so the caller can
-         * fall back (e.g. alias_init treats null entry as "alias path
-         * unavailable" and continues with set_memory mode).  Observed on
-         * Pixel_29 AVD (Android 10, kernel 4.14) where vmalloc-area VAs
-         * walked through swapper_pg_dir produce L1 entries decoding to
-         * non-linear-mapping PAs. */
+        /* Sub-kernel-offset guard: on pre-5.0 Android kernels, a stale PA
+         * from a corrupt or unmapped table descriptor can decode to a VA
+         * below PAGE_OFFSET.  Treat as walk failure. */
         if (pxd_entry_va < kh_page_offset)
             return 0;
+        /* Safe-read probe via ARM64 address translation (AT S1E1R).
+         * Executes the MMU's privileged-read translation on pxd_entry_va
+         * and stores the result in PAR_EL1.  PAR_EL1.F (bit 0) is set if
+         * translation failed (unmapped, permission fault, fault status
+         * encoded in upper bits).  This lets us validate the intermediate
+         * walk VA without risking a synchronous data abort — the
+         * alternative (raw dereference) triggered repeatable kernel
+         * panics on Pixel_28 (4.4.302) and Pixel_29 (4.14.175) AVDs
+         * where the walker traverses into a non-linear-mapped range.
+         * Works on every arm64 kernel (AT is mandatory ARMv8.0-A).
+         * no_sanitize("kcfi") on pgtable_entry is preserved; this inline
+         * asm has no indirect calls. */
+        uint64_t __par;
+        asm volatile("at s1e1r, %1\n\t"
+                     "isb\n\t"
+                     "mrs %0, par_el1"
+                     : "=r"(__par) : "r"(pxd_entry_va) : "memory");
+        if (__par & 1) return 0;  /* PAR_EL1.F — translation fault */
         uint64_t pxd_desc = *((uint64_t *)pxd_entry_va);
         if ((pxd_desc & 0x3) == 0x3) {
             /* Table descriptor */
@@ -307,7 +319,14 @@ uint64_t kh_walk_va_to_pa(uint64_t pgd_va, uint64_t va)
     for (int64_t lv = 4 - (int64_t)page_level; lv < 4; lv++) {
         uint64_t pxd_shift = pxd_bits * (uint64_t)(4 - lv) + 3;
         uint64_t pxd_index = (va >> pxd_shift) & (pxd_ptrs - 1);
-        uint64_t pxd_desc = ((uint64_t *)pxd_va)[pxd_index];
+        uint64_t pxd_entry = pxd_va + pxd_index * 8;
+        if (pxd_entry < kh_page_offset) return 0;
+        /* AT S1E1R probe — see pgtable_entry() above for rationale. */
+        uint64_t __par;
+        asm volatile("at s1e1r, %1\n\tisb\n\tmrs %0, par_el1"
+                     : "=r"(__par) : "r"(pxd_entry) : "memory");
+        if (__par & 1) return 0;
+        uint64_t pxd_desc = *(uint64_t *)pxd_entry;
         uint8_t kind = pxd_desc & 0x3;
         if (kind == 0x3) {
             pxd_pa = pxd_desc & (((1UL << (kh_pa_bits - kh_page_shift)) - 1) << kh_page_shift);
