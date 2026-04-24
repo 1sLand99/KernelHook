@@ -742,6 +742,18 @@ static int emit_asm_abs64_legacy(kh_entry_t *entries, int n, FILE *out)
             entries[i].name);
     }
 
+    /* Pre-5.3 kernels declare `struct modversion_info { unsigned long crc; ... }`
+     * and `__kcrctab_<sym>` as `unsigned long` (commit 71810db27c1d moved it
+     * to unsigned int in v4.10-ish for modversion_info and later for kcrctab).
+     * Older arm64 kernels (Android 9 4.4) do an 8-byte load at each kcrctab
+     * stride.  Emitting 4-byte .long entries packs adjacent CRCs together,
+     * so the 8-byte load reads `[our_crc | next_crc]` and the next_crc
+     * contaminates the high word, producing a "disagrees about version"
+     * mismatch against the consumer's `__versions[].crc` (which has zero
+     * high bits because the consumer shim writes `unsigned int crc; unsigned
+     * int pad;`).  Emit 8-byte (.quad) entries here — the low 4 bytes carry
+     * the CRC, the high 4 bytes are zero, matching what a real 4.4 kbuild
+     * module produces. */
     for (i = 0; i < n; i++) {
         uint32_t crc;
         if (canonicalize(entries[i].name, entries[i].ret_tok,
@@ -752,12 +764,12 @@ static int emit_asm_abs64_legacy(kh_entry_t *entries, int n, FILE *out)
         fprintf(out,
             "\n"
             "\t.section ___kcrctab+%s,\"a\"\n"
-            "\t.balign 4\n"
+            "\t.balign 8\n"
             "\t.globl __crc_%s\n"
             "\t.type __crc_%s, @object\n"
-            "\t.size __crc_%s, 4\n"
+            "\t.size __crc_%s, 8\n"
             "__crc_%s:\n"
-            "\t.long 0x%08x\n",
+            "\t.quad 0x%08x\n",
             entries[i].name,
             entries[i].name, entries[i].name, entries[i].name,
             entries[i].name,
