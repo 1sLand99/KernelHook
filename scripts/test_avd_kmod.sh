@@ -87,11 +87,19 @@ case "${KH_TOOLCHAIN_KIND:-}" in
         ;;
 esac
 
-# Build kmod_loader if missing
+# Build both kmod_loader variants if missing. The static variant is the
+# default; the dynamic variant is used per-AVD for pre-5.10 kernels where
+# the NDK static bionic calls madvise(MADV_WIPEONFORK) during arc4random
+# init and aborts before main() (that madvise landed in kernel 4.14).
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
+LOADER_DYN="$ROOT/tools/kmod_loader/kmod_loader_dyn"
 if [ ! -f "$LOADER" ]; then
-    printf "${KH_BOLD}Building kmod_loader...${KH_RESET}\n"
+    printf "${KH_BOLD}Building kmod_loader (static)...${KH_RESET}\n"
     make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC"
+fi
+if [ ! -f "$LOADER_DYN" ]; then
+    printf "${KH_BOLD}Building kmod_loader_dyn (dynamic)...${KH_RESET}\n"
+    make -C "$ROOT/tools/kmod_loader" kmod_loader_dyn HOSTCC="$KH_CC"
 fi
 
 # SDK-mode build is common across AVDs: build kernelhook.ko + all consumer .ko
@@ -304,7 +312,19 @@ test_avd() {
     else
         adb -s emulator-5554 push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null 2>&1 || true
     fi
-    adb -s emulator-5554 push "$LOADER" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
+    # Pick kmod_loader variant by kernel version. Pre-5.10 kernels trip
+    # the NDK-r30 static bionic's MADV_WIPEONFORK abort on arc4random init;
+    # the dynamic variant (binds to the device's own libc.so) sidesteps that
+    # whole path. 5.10+ keeps the static binary for deployment simplicity
+    # (no libc.so dependency, useful for locked-down devices).
+    local use_loader="$LOADER"
+    if [ -f "$LOADER_DYN" ]; then
+        if [ "$kmajor" -lt 5 ] || ([ "$kmajor" -eq 5 ] && [ "$kminor" -lt 10 ]); then
+            use_loader="$LOADER_DYN"
+            printf "  loader: kmod_loader_dyn (dynamic — pre-5.10 kernel)\n"
+        fi
+    fi
+    adb -s emulator-5554 push "$use_loader" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
     adb -s emulator-5554 shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null 2>&1 || true
 
     # Unload any stale modules from a previous run. In SDK mode consumers must

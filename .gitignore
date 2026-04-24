@@ -15,6 +15,7 @@ modules.order
 Module.symvers
 kmod_loader
 kmod_loader_arm64
+kmod_loader_dyn
 graft_vendor_ko
 !tools/kmod_loader/
 !tools/kmod_loader/README.md

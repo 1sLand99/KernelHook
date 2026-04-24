@@ -42,8 +42,8 @@ FS_CFLAGS := -DKMOD_FREESTANDING \
 .PHONY: all regenerate clean test graft
 
 # Default: build kmod_loader using pre-committed probe_embed.h
-all: kmod_loader graft_vendor_ko
-	@echo "Built kmod_loader + graft_vendor_ko successfully"
+all: kmod_loader kmod_loader_dyn graft_vendor_ko
+	@echo "Built kmod_loader (static) + kmod_loader_dyn (dynamic) + graft_vendor_ko successfully"
 
 # graft_vendor_ko: host-side ELF merger.  Lives here because it shares
 # the same ELF-manipulation style as kmod_loader and consumes the same
@@ -71,6 +71,18 @@ RESOLVER_HDRS := resolver.h devices_table.h subcommands.h
 kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
              $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS) $(RESOLVER_HDRS)
 	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
+		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
+
+# kmod_loader_dyn — dynamic-link variant (~63 KB) for pre-5.10 Android kernels.
+# Rationale: NDK r30's static bionic calls madvise(MADV_WIPEONFORK) during
+# arc4random init, which 4.4 and earlier kernels don't implement — bionic's
+# async_safe_fatal() then aborts before main(). Dynamic linking binds to the
+# device's own libc.so (Android 9 kernel 4.4 included), which avoids that code
+# path entirely. Scripts that target API ≤ 29 should push this variant
+# instead of the static one.
+kmod_loader_dyn: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
+                 $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS) $(RESOLVER_HDRS)
+	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -O2 -o $@ \
 		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
 
 test: kmod_loader test_resolver test_patch_this_module
@@ -104,4 +116,4 @@ probe.ko: probe.c
 	$(CROSS_LD) -r -T $(KH_ROOT)/kmod/lds/kmod.lds -o $@ probe.fs.o probe_plt.fs.o
 
 clean:
-	rm -f kmod_loader test_resolver test_patch_this_module probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
+	rm -f kmod_loader kmod_loader_dyn graft_vendor_ko test_resolver test_patch_this_module probe.ko probe.fs.o probe_plt.fs.o $(DEVICES_TABLE_C)
