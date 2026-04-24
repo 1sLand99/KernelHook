@@ -232,14 +232,17 @@ fi
 
 # Push files. /data/local/tmp is world-writable; chmod happens there.
 if [ "$KH_MODE" = "sdk" ]; then
-    # Push kernelhook.ko plus all ksymtab-layout variants when available.
-    # kmod_loader auto-selects the matching variant from the path base
-    # "kernelhook.ko" via /proc/kallsyms __ksymtab_* stride:
-    #   12B → prel32 (GKI 6.1+), 16B → abs64-legacy (pre-5.3), 24B → abs64.
+    # Push kernelhook.ko plus all ksymtab/kcrctab variants when available.
+    # kmod_loader auto-selects the matching variant via /proc/kallsyms:
+    #   ksymtab=12B               → prel32               (GKI 6.1+)
+    #   ksymtab=16B + kcrctab=4B  → abs64-legacy-u32     (Android 4.14+/4.19/5.0-5.3)
+    #   ksymtab=16B + kcrctab=8B  → abs64-legacy         (Android 9 / 4.4)
+    #   ksymtab=24B               → abs64                (GKI 5.4..5.15)
     $ADB push "$ROOT/kmod/kernelhook.ko" /data/local/tmp/kernelhook.ko >/dev/null
-    [ -f "$ROOT/kmod/kernelhook-prel32.ko" ]       && $ADB push "$ROOT/kmod/kernelhook-prel32.ko"       /data/local/tmp/kernelhook-prel32.ko       >/dev/null 2>&1 || true
-    [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]        && $ADB push "$ROOT/kmod/kernelhook-abs64.ko"        /data/local/tmp/kernelhook-abs64.ko        >/dev/null 2>&1 || true
-    [ -f "$ROOT/kmod/kernelhook-abs64-legacy.ko" ] && $ADB push "$ROOT/kmod/kernelhook-abs64-legacy.ko" /data/local/tmp/kernelhook-abs64-legacy.ko >/dev/null 2>&1 || true
+    [ -f "$ROOT/kmod/kernelhook-prel32.ko" ]           && $ADB push "$ROOT/kmod/kernelhook-prel32.ko"           /data/local/tmp/kernelhook-prel32.ko           >/dev/null 2>&1 || true
+    [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]            && $ADB push "$ROOT/kmod/kernelhook-abs64.ko"            /data/local/tmp/kernelhook-abs64.ko            >/dev/null 2>&1 || true
+    [ -f "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" ] && $ADB push "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" /data/local/tmp/kernelhook-abs64-legacy-u32.ko >/dev/null 2>&1 || true
+    [ -f "$ROOT/kmod/kernelhook-abs64-legacy.ko" ]     && $ADB push "$ROOT/kmod/kernelhook-abs64-legacy.ko"     /data/local/tmp/kernelhook-abs64-legacy.ko     >/dev/null 2>&1 || true
     for c in "${CONSUMER_ARR[@]}"; do
         $ADB push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null
     done

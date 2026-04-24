@@ -174,8 +174,9 @@ int parse_kver(int *major, int *minor)
  * return the most common adjacent-address difference — the stride IS
  * sizeof(struct kernel_symbol) on the target kernel.
  *   12 → prel32       (5.5+ arm64 with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y)
- *   16 → abs64_legacy (pre-5.3: Android 9 4.4 / Android 10 4.14 — no namespace field)
- *   24 → abs64        (5.3 .. 5.15 with namespace, PREL32 off)
+ *   16 → abs64_legacy (pre-5.4: Android 9 4.4 / Android 10 4.14 — no namespace field;
+ *                      kcrctab stride may be 4 or 8, call probe_kcrctab_entry_size)
+ *   24 → abs64        (5.4 .. 5.15 with namespace, PREL32 off)
  * Returns 0 if no signal (empty kallsyms, restricted mode, too few rows). */
 static uint32_t probe_ksymtab_entry_size_via_kallsyms(void)
 {
@@ -223,6 +224,51 @@ static uint32_t probe_ksymtab_entry_size_via_kallsyms(void)
     if (votes_12 >= 3 && votes_12 > votes_16 && votes_12 > votes_24) return 12;
     if (votes_16 >= 3 && votes_16 > votes_12 && votes_16 > votes_24) return 16;
     if (votes_24 >= 3 && votes_24 > votes_12 && votes_24 > votes_16) return 24;
+    return 0;
+}
+
+/* Probe the target kernel's __kcrctab entry stride.  Needed on top of the
+ * ksymtab probe because Google's Android common kernel branches backported
+ * commit 71810db27c1d ("modversions: treat symbol CRCs as 32 bit quantities")
+ * into 4.14/4.19 while leaving struct kernel_symbol at the legacy 16-byte
+ * layout — so ksymtab stride alone can't tell us whether CRCs are 4 B u32
+ * (Android 4.14+) or 8 B unsigned long (mainline 4.4/4.9 and upstream
+ * pre-backport 4.14).
+ *
+ * Strategy: (__stop___kcrctab - __start___kcrctab) / num_exports, where
+ * num_exports = (__stop___ksymtab - __start___ksymtab) / ksymtab_stride.
+ *
+ * Returns 4 or 8, or 0 on failure (bounds not visible in kallsyms). */
+static uint32_t probe_kcrctab_entry_size_via_kallsyms(uint32_t ksymtab_stride)
+{
+    FILE *fp = fopen("/proc/kallsyms", "r");
+    if (!fp) return 0;
+    uint64_t ks_start = 0, ks_stop = 0, kc_start = 0, kc_stop = 0;
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        char *sp1 = strchr(line, ' '); if (!sp1) continue;
+        char *sp2 = strchr(sp1 + 1, ' '); if (!sp2) continue;
+        const char *name = sp2 + 1;
+        /* Name may have a trailing \n; strip. */
+        size_t nl = strlen(name);
+        while (nl > 0 && (name[nl-1] == '\n' || name[nl-1] == '\r')) nl--;
+        uint64_t a = strtoull(line, NULL, 16);
+        if (a == 0) continue;  /* kptr_restrict */
+        if (nl == strlen("__start___ksymtab") && strncmp(name, "__start___ksymtab", nl) == 0) ks_start = a;
+        else if (nl == strlen("__stop___ksymtab") && strncmp(name, "__stop___ksymtab", nl) == 0) ks_stop = a;
+        else if (nl == strlen("__start___kcrctab") && strncmp(name, "__start___kcrctab", nl) == 0) kc_start = a;
+        else if (nl == strlen("__stop___kcrctab") && strncmp(name, "__stop___kcrctab", nl) == 0) kc_stop = a;
+    }
+    fclose(fp);
+    if (!ks_start || !ks_stop || !kc_start || !kc_stop || ks_stop <= ks_start || kc_stop <= kc_start)
+        return 0;
+    if (!ksymtab_stride) return 0;
+    uint64_t ks_size = ks_stop - ks_start;
+    uint64_t kc_size = kc_stop - kc_start;
+    uint64_t n = ks_size / ksymtab_stride;
+    if (n == 0) return 0;
+    uint64_t stride = kc_size / n;
+    if (stride == 4 || stride == 8) return (uint32_t)stride;
     return 0;
 }
 
@@ -2403,20 +2449,22 @@ static int do_load(int argc, char *argv[], int dry_run)
     int trace_count = 0;
     (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
-    /* Tri-layout dispatch: kernelhook ships as
-     *   kernelhook-prel32.ko       — struct kernel_symbol = 12B (PREL32 relocs)
-     *   kernelhook-abs64.ko        — struct kernel_symbol = 24B (ABS64 + namespace)
-     *   kernelhook-abs64-legacy.ko — struct kernel_symbol = 16B (no namespace, pre-5.3)
+    /* Quad-layout dispatch: kernelhook ships as
+     *   kernelhook-prel32.ko             — 12 B ksymtab, 4 B kcrctab  (GKI 6.1+)
+     *   kernelhook-abs64.ko              — 24 B ksymtab, 4 B kcrctab  (GKI 5.4..5.15)
+     *   kernelhook-abs64-legacy-u32.ko   — 16 B ksymtab, 4 B kcrctab  (Android 4.14+/4.19/5.0-5.3)
+     *   kernelhook-abs64-legacy.ko       — 16 B ksymtab, 8 B kcrctab  (Android 9 / 4.4)
      *
      * If the caller gave "…/kernelhook.ko" (no variant suffix), we probe
-     * the TARGET kernel's actual ABI via /proc/kallsyms (__ksymtab_*
-     * adjacent-address stride) and pick the matching variant.  No version
-     * heuristic: vendor forks, backports, and LTS reshuffles are handled
-     * the same way as stock GKI because we measure what's actually there.
-     * The ksymtab-layout gap is a full ELF rewrite (section-size and
-     * reloc-count changes), so we ship three .ko binaries; extable format
-     * (Step 4.6) and kCFI hashes (Step 4.5) are patched in place instead
-     * because their rewrites preserve section cardinality. */
+     * the TARGET kernel's actual ABI via /proc/kallsyms:
+     *   - __ksymtab_* adjacent stride → struct kernel_symbol size
+     *   - (__stop___kcrctab - __start___kcrctab) / num_exports → CRC size
+     * No version heuristic: vendor forks, backports, and Android cherry-picks
+     * are handled identically because we measure what's actually there.
+     * The ksymtab + kcrctab layouts are encoded into the ELF on-disk (section
+     * sizes + reloc counts), so we ship four .ko binaries; extable format
+     * and kCFI hashes are patched in place because their rewrites preserve
+     * section cardinality. */
     char variant_path[512];
     const char *mod_path_open = argv[1];
     {
@@ -2429,12 +2477,35 @@ static int do_load(int argc, char *argv[], int dry_run)
             FILE *kpt = fopen("/proc/sys/kernel/kptr_restrict", "w");
             if (kpt) { fputs("0", kpt); fclose(kpt); }
 
-            uint32_t entry_size = probe_ksymtab_entry_size_via_kallsyms();
+            uint32_t ks_stride = probe_ksymtab_entry_size_via_kallsyms();
+            uint32_t kc_stride = ks_stride ? probe_kcrctab_entry_size_via_kallsyms(ks_stride) : 0;
             const char *variant = NULL;
-            const char *src = NULL;
-            if (entry_size == 12)      { variant = "kernelhook-prel32.ko";       src = "kallsyms stride=12"; }
-            else if (entry_size == 16) { variant = "kernelhook-abs64-legacy.ko"; src = "kallsyms stride=16"; }
-            else if (entry_size == 24) { variant = "kernelhook-abs64.ko";        src = "kallsyms stride=24"; }
+            char src_buf[80];
+            src_buf[0] = '\0';
+            if (ks_stride == 12) {
+                variant = "kernelhook-prel32.ko";
+                snprintf(src_buf, sizeof(src_buf), "kallsyms ksymtab=12");
+            } else if (ks_stride == 24) {
+                variant = "kernelhook-abs64.ko";
+                snprintf(src_buf, sizeof(src_buf), "kallsyms ksymtab=24");
+            } else if (ks_stride == 16) {
+                /* 16-byte ksymtab split by CRC stride: Android 4.14+ backport
+                 * uses u32 (4 B), mainline 4.4 and pre-backport 4.14 use
+                 * unsigned long (8 B). */
+                if (kc_stride == 4) {
+                    variant = "kernelhook-abs64-legacy-u32.ko";
+                    snprintf(src_buf, sizeof(src_buf), "kallsyms ksymtab=16 kcrctab=4");
+                } else if (kc_stride == 8) {
+                    variant = "kernelhook-abs64-legacy.ko";
+                    snprintf(src_buf, sizeof(src_buf), "kallsyms ksymtab=16 kcrctab=8");
+                } else {
+                    /* Unknown kcrctab stride — default to u32 (matches Android 4.14+,
+                     * the more common case). Explicitly note the fallback. */
+                    variant = "kernelhook-abs64-legacy-u32.ko";
+                    snprintf(src_buf, sizeof(src_buf), "kallsyms ksymtab=16 kcrctab=? default u32");
+                }
+            }
+            const char *src = src_buf[0] ? src_buf : NULL;
             if (variant) {
                 size_t dirlen = bn - argv[1];
                 if (dirlen + strlen(variant) + 1 < sizeof(variant_path)) {

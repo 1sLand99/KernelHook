@@ -53,10 +53,15 @@ $(KH_GEN_DIR):
 #                      namespace). Required for kernels 5.3..5.7 where
 #                      HAVE_ARCH_PREL32_RELOCATIONS is OFF but namespaces
 #                      are already defined (Android 11 GKI 5.4).
-#   abs64_legacy     — 16-byte struct with ABS64 pointers (value, name
-#                      only). Required for pre-5.3 kernels where namespace
-#                      field does not exist in struct kernel_symbol
-#                      (Android 9 GKI 4.4, Android 10 GKI 4.14).
+#   abs64_legacy     — 16-byte struct (value, name) + 8-byte `unsigned long`
+#                      CRC entries. Required for 4.4 where namespace field
+#                      doesn't exist AND the u32 CRC backport hasn't landed
+#                      (Android 9 GKI 4.4 only).
+#   abs64_legacy_u32 — 16-byte struct (value, name) + 4-byte `u32` CRC
+#                      entries. Android 4.14+ / 4.19 / upstream 5.0..5.3 —
+#                      namespace field missing, but Google backport of u32
+#                      CRC (commit 71810db27c1d) has landed, so __kcrctab
+#                      is 4 bytes per entry.
 # Mismatched layout causes strcmp crashes in find_symbol/cmp_name at load
 # time because the kernel's pointer walk stride differs from our entry
 # stride, landing `name` reads on stale/NULL fields.
@@ -65,6 +70,8 @@ ifeq ($(KH_KSYMTAB_LAYOUT),abs64)
   KH_CRC_ASM_MODE := asm-abs64
 else ifeq ($(KH_KSYMTAB_LAYOUT),abs64_legacy)
   KH_CRC_ASM_MODE := asm-abs64-legacy
+else ifeq ($(KH_KSYMTAB_LAYOUT),abs64_legacy_u32)
+  KH_CRC_ASM_MODE := asm-abs64-legacy-u32
 else
   KH_CRC_ASM_MODE := asm
 endif

@@ -15,30 +15,35 @@ include mk/kmod.mk
 # ---------- Multi-layout build ----------
 # module-dual produces every ksymtab layout so kmod_loader can pick the right
 # variant at insmod time:
-#   - prel32       : GKI 6.1+ (CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y, 12 B)
-#   - abs64        : GKI 5.4..5.15 with namespaces but no PREL32 (24 B)
-#   - abs64_legacy : pre-5.3 kernels (Android 9 4.4, Android 10 4.14) where
-#                    struct kernel_symbol has no namespace field (16 B)
+#   - prel32             : GKI 6.1+ (CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y, 12 B ksymtab + 4 B crc)
+#   - abs64              : GKI 5.4..5.15 (24 B ksymtab with namespace + 4 B crc)
+#   - abs64_legacy       : Android 9 / mainline 4.4 (16 B ksymtab + 8 B unsigned long crc)
+#   - abs64_legacy_u32   : Android 4.14+ / 4.19 / 5.0..5.3 (16 B ksymtab + 4 B u32 crc —
+#                          Google backport of commit 71810db27c1d treats CRCs as u32)
 # extable-format + kCFI-hash differences are patched live by kmod_loader; only
-# the ksymtab layout ships as multiple binaries because the on-disk entry
-# stride is encoded into the section (sh_size, reloc count) — a full ELF
+# the ksymtab + kcrctab layout ships as multiple binaries because the on-disk
+# entry stride is encoded into the section (sh_size, reloc count) — a full ELF
 # rewrite at load time would be considerably more complex than shipping the
-# three prebuilt variants.
+# four prebuilt variants.
 .PHONY: module-dual
 module-dual:
-	@# Build legacy first, then abs64, then prel32.  Each build wipes the
+	@# Build all four ksymtab/kcrctab layouts.  Each build wipes the
 	@# previous kmod object tree to avoid stale kh_exports.kmod.o (which
 	@# encodes the layout choice and must regenerate).  The final `module`
-	@# run uses prel32 so the default kernelhook.ko is the prel32 variant.
+	@# run uses prel32 so the default kernelhook.ko is the prel32 variant
+	@# (matches GKI 6.1+, the most common SDK-consumer target).
 	$(MAKE) module KH_KSYMTAB_LAYOUT=abs64_legacy
 	@mv kernelhook.ko kernelhook-abs64-legacy.ko
+	@rm -rf _kh_core _kh_kmod generated
+	$(MAKE) module KH_KSYMTAB_LAYOUT=abs64_legacy_u32
+	@mv kernelhook.ko kernelhook-abs64-legacy-u32.ko
 	@rm -rf _kh_core _kh_kmod generated
 	$(MAKE) module KH_KSYMTAB_LAYOUT=abs64
 	@mv kernelhook.ko kernelhook-abs64.ko
 	@rm -rf _kh_core _kh_kmod generated
 	$(MAKE) module KH_KSYMTAB_LAYOUT=prel32
 	@cp kernelhook.ko kernelhook-prel32.ko
-	@echo "Built multi-layout: kernelhook-prel32.ko + kernelhook-abs64.ko + kernelhook-abs64-legacy.ko"
+	@echo "Built multi-layout: prel32 + abs64 + abs64-legacy-u32 + abs64-legacy"
 
 # ---------- Vendor-ko graft payload ----------
 # Produces kh_payload.o — a self-contained ET_REL blob that tools/kmod_loader/
