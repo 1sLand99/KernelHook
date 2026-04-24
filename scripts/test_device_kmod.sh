@@ -135,7 +135,7 @@ fi
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 if [ ! -f "$LOADER" ]; then
     printf "${BOLD}Building kmod_loader...${RESET}\n"
-    make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC" >/dev/null
+    make -C "$ROOT/tools/kmod_loader" kmod_loader LOADER_CC="$KH_CC" >/dev/null
 fi
 
 # Read live kernel version and API level. These must come from the

@@ -95,11 +95,11 @@ LOADER="$ROOT/tools/kmod_loader/kmod_loader"
 LOADER_DYN="$ROOT/tools/kmod_loader/kmod_loader_dyn"
 if [ ! -f "$LOADER" ]; then
     printf "${KH_BOLD}Building kmod_loader (static)...${KH_RESET}\n"
-    make -C "$ROOT/tools/kmod_loader" kmod_loader HOSTCC="$KH_CC"
+    make -C "$ROOT/tools/kmod_loader" kmod_loader LOADER_CC="$KH_CC"
 fi
 if [ ! -f "$LOADER_DYN" ]; then
     printf "${KH_BOLD}Building kmod_loader_dyn (dynamic)...${KH_RESET}\n"
-    make -C "$ROOT/tools/kmod_loader" kmod_loader_dyn HOSTCC="$KH_CC"
+    make -C "$ROOT/tools/kmod_loader" kmod_loader_dyn LOADER_CC="$KH_CC"
 fi
 
 # SDK-mode build is common across AVDs: build kernelhook.ko + all consumer .ko

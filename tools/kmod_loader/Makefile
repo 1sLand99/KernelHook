@@ -17,8 +17,20 @@ include $(KH_ROOT)/kmod/mk/detect_toolchain.mk
 CROSS_CC := $(KH_CC)
 CROSS_LD := $(KH_LD)
 
-# Host compiler for kmod_loader itself
-HOSTCC ?= cc
+# Two separate compilers:
+#   HOSTCC     — real host compiler (native mac/linux). Used for graft_vendor_ko
+#                which runs on the developer machine.
+#   LOADER_CC  — cross-compiler producing aarch64-android binaries for
+#                kmod_loader / kmod_loader_dyn (target device).  Defaults to
+#                HOSTCC for legacy invocations; scripts set it explicitly via
+#                `make LOADER_CC=$KH_CC` to invoke the NDK.
+# Historically this Makefile overloaded HOSTCC to mean both; scripts passed
+# HOSTCC=$NDK-clang which then broke graft_vendor_ko (compiled for
+# aarch64-android) or, on macOS with HOSTCC=cc, broke kmod_loader (no <elf.h>
+# in macOS SDK for aarch64 output).  Splitting the two lets `make all` succeed
+# on macOS hosts too.
+HOSTCC    ?= cc
+LOADER_CC ?= $(HOSTCC)
 
 # Device database codegen (Plan 2 Milestone A).
 GEN_DEVICES := $(realpath ../gen_devices_table.py)
@@ -70,7 +82,7 @@ RESOLVER_HDRS := resolver.h devices_table.h subcommands.h
 
 kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
              $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS) $(RESOLVER_HDRS)
-	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
+	$(LOADER_CC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 -o $@ \
 		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
 
 # kmod_loader_dyn — dynamic-link variant (~63 KB) for pre-5.10 Android kernels.
@@ -82,7 +94,7 @@ kmod_loader: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
 # instead of the static one.
 kmod_loader_dyn: kmod_loader.c probe_embed.h $(DEVICES_TABLE_C) $(DEVICES_TABLE_H) \
                  $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS) $(RESOLVER_HDRS)
-	$(HOSTCC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -O2 -o $@ \
+	$(LOADER_CC) -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -O2 -o $@ \
 		kmod_loader.c $(DEVICES_TABLE_C) $(RESOLVER_SRCS) $(SUBCOMMAND_SRCS)
 
 test: kmod_loader test_resolver test_patch_this_module
