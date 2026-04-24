@@ -287,14 +287,17 @@ test_avd() {
 
     # Push files
     if [ "$effective_mode" = "sdk" ]; then
-        # Push the generic kernelhook.ko plus both ksymtab-layout variants.
-        # kmod_loader auto-selects kernelhook-{prel32,abs64}.ko by kernel
-        # version when the path argument ends in "kernelhook.ko". Missing
-        # variants are silently skipped — the legacy single-.ko build still
-        # works for developers who haven't run `make module-dual` yet.
-        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                 /data/local/tmp/kernelhook.ko        >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-prel32.ko" ] && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-prel32.ko" /data/local/tmp/kernelhook-prel32.ko >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]  && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64.ko"  /data/local/tmp/kernelhook-abs64.ko  >/dev/null 2>&1 || true
+        # Push the generic kernelhook.ko plus all three ksymtab-layout
+        # variants. kmod_loader auto-selects the matching variant via
+        # /proc/kallsyms __ksymtab_* stride when the path argument ends
+        # in "kernelhook.ko":
+        #   12B → prel32 (GKI 6.1+), 16B → abs64-legacy (pre-5.3), 24B → abs64.
+        # Missing variants are silently skipped — the legacy single-.ko build
+        # still works for developers who haven't run `make module-dual` yet.
+        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                        /data/local/tmp/kernelhook.ko              >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-prel32.ko" ]       && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-prel32.ko"       /data/local/tmp/kernelhook-prel32.ko       >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]        && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64.ko"        /data/local/tmp/kernelhook-abs64.ko        >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64-legacy.ko" ] && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64-legacy.ko" /data/local/tmp/kernelhook-abs64-legacy.ko >/dev/null 2>&1 || true
         for c in "${CONSUMER_ARR[@]}"; do
             adb -s emulator-5554 push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1 || true
         done

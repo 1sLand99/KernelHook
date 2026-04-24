@@ -173,8 +173,9 @@ int parse_kver(int *major, int *minor)
 /* Read /proc/kallsyms, find every "ADDR . __ksymtab_<sym>" row,
  * return the most common adjacent-address difference — the stride IS
  * sizeof(struct kernel_symbol) on the target kernel.
- *   12 → prel32 (5.5+ arm64 with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y)
- *   24 → abs64  (pre-5.5 / GKI 5.4 Android 11 with PREL32 off)
+ *   12 → prel32       (5.5+ arm64 with CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y)
+ *   16 → abs64_legacy (pre-5.3: Android 9 4.4 / Android 10 4.14 — no namespace field)
+ *   24 → abs64        (5.3 .. 5.15 with namespace, PREL32 off)
  * Returns 0 if no signal (empty kallsyms, restricted mode, too few rows). */
 static uint32_t probe_ksymtab_entry_size_via_kallsyms(void)
 {
@@ -211,14 +212,17 @@ static uint32_t probe_ksymtab_entry_size_via_kallsyms(void)
     /* Count occurrences of each small-stride between adjacent entries.
      * The dominant stride is the entry size; sporadic large gaps are
      * section boundaries (ignored). */
-    int votes_12 = 0, votes_24 = 0;
+    int votes_12 = 0, votes_16 = 0, votes_24 = 0;
     for (int i = 1; i < n; i++) {
         uint64_t d = addrs[i] - addrs[i-1];
         if (d == 12)       votes_12++;
+        else if (d == 16)  votes_16++;
         else if (d == 24)  votes_24++;
     }
-    if (votes_12 > votes_24 && votes_12 >= 3) return 12;
-    if (votes_24 > votes_12 && votes_24 >= 3) return 24;
+    /* Return the dominant stride (strict majority over the other two). */
+    if (votes_12 >= 3 && votes_12 > votes_16 && votes_12 > votes_24) return 12;
+    if (votes_16 >= 3 && votes_16 > votes_12 && votes_16 > votes_24) return 16;
+    if (votes_24 >= 3 && votes_24 > votes_12 && votes_24 > votes_16) return 24;
     return 0;
 }
 
@@ -622,20 +626,39 @@ int crc_from_vendor_ko(const char *sym, uint32_t *out)
                         }
                     }
 
-                    /* Probe struct kernel_symbol layout from the FIRST reloc
-                     * in .rela__ksymtab. Vendor .ko was compiled with the
-                     * same toolchain as the running kernel, so the reloc
-                     * type is ground truth for the target kernel's ABI:
+                    /* Probe struct kernel_symbol layout from .rela__ksymtab.
+                     * Vendor .ko was compiled with the same toolchain as the
+                     * running kernel, so the reloc type is ground truth:
                      *   R_AARCH64_PREL32 (261) → 12B entries (prel32)
-                     *   R_AARCH64_ABS64  (257) → 24B entries (abs64)
-                     * No version heuristic needed. */
+                     *   R_AARCH64_ABS64  (257) → 16B (pre-5.3, no namespace)
+                     *                          or 24B (5.3..5.15 with namespace)
+                     * ABS64 ambiguity is resolved by dividing __ksymtab section
+                     * size by entry count (each entry has ≥2 relocs for
+                     * value + name; namespace reloc is only emitted when the
+                     * namespace is non-null, which is rare). Diagnostic only:
+                     * variant-selection uses the kallsyms probe instead. */
                     if (g_ko_ksymtab_entry_size == 0) {
                         Shdr *kr = elf_find_section(ko_buf, keh, ".rela__ksymtab");
                         if (kr && kr->sh_size >= sizeof(Elf64_Rela)) {
                             Elf64_Rela *r0 = (Elf64_Rela *)(ko_buf + kr->sh_offset);
                             uint32_t typ = ELF64_R_TYPE(r0->r_info);
                             if (typ == 261) g_ko_ksymtab_entry_size = 12;
-                            else if (typ == 257) g_ko_ksymtab_entry_size = 24;
+                            else if (typ == 257) {
+                                Shdr *ks = elf_find_section(ko_buf, keh, "__ksymtab");
+                                if (ks && kr->sh_entsize > 0) {
+                                    size_t nr = kr->sh_size / kr->sh_entsize;
+                                    if (nr >= 2) {
+                                        size_t es = 2 * (size_t)ks->sh_size / nr;
+                                        if (es == 16 || es == 24)
+                                            g_ko_ksymtab_entry_size = (uint32_t)es;
+                                    }
+                                }
+                                /* Fallback: assume modern 24B if math didn't
+                                 * land on a known size (namespace relocs
+                                 * present, or malformed section). */
+                                if (g_ko_ksymtab_entry_size == 0)
+                                    g_ko_ksymtab_entry_size = 24;
+                            }
                         }
                     }
 
@@ -2380,9 +2403,10 @@ static int do_load(int argc, char *argv[], int dry_run)
     int trace_count = 0;
     (void)force_probe; /* force_probe currently re-entered via resolver probe chain */
 
-    /* Dual-layout dispatch: kernelhook ships as
-     *   kernelhook-prel32.ko — struct kernel_symbol = 12B (PREL32 relocs)
-     *   kernelhook-abs64.ko  — struct kernel_symbol = 24B (ABS64 relocs)
+    /* Tri-layout dispatch: kernelhook ships as
+     *   kernelhook-prel32.ko       — struct kernel_symbol = 12B (PREL32 relocs)
+     *   kernelhook-abs64.ko        — struct kernel_symbol = 24B (ABS64 + namespace)
+     *   kernelhook-abs64-legacy.ko — struct kernel_symbol = 16B (no namespace, pre-5.3)
      *
      * If the caller gave "…/kernelhook.ko" (no variant suffix), we probe
      * the TARGET kernel's actual ABI via /proc/kallsyms (__ksymtab_*
@@ -2390,7 +2414,7 @@ static int do_load(int argc, char *argv[], int dry_run)
      * heuristic: vendor forks, backports, and LTS reshuffles are handled
      * the same way as stock GKI because we measure what's actually there.
      * The ksymtab-layout gap is a full ELF rewrite (section-size and
-     * reloc-count changes), so we ship two .ko binaries; extable format
+     * reloc-count changes), so we ship three .ko binaries; extable format
      * (Step 4.6) and kCFI hashes (Step 4.5) are patched in place instead
      * because their rewrites preserve section cardinality. */
     char variant_path[512];
@@ -2408,8 +2432,9 @@ static int do_load(int argc, char *argv[], int dry_run)
             uint32_t entry_size = probe_ksymtab_entry_size_via_kallsyms();
             const char *variant = NULL;
             const char *src = NULL;
-            if (entry_size == 12)      { variant = "kernelhook-prel32.ko"; src = "kallsyms stride=12"; }
-            else if (entry_size == 24) { variant = "kernelhook-abs64.ko";  src = "kallsyms stride=24"; }
+            if (entry_size == 12)      { variant = "kernelhook-prel32.ko";       src = "kallsyms stride=12"; }
+            else if (entry_size == 16) { variant = "kernelhook-abs64-legacy.ko"; src = "kallsyms stride=16"; }
+            else if (entry_size == 24) { variant = "kernelhook-abs64.ko";        src = "kallsyms stride=24"; }
             if (variant) {
                 size_t dirlen = bn - argv[1];
                 if (dirlen + strlen(variant) + 1 < sizeof(variant_path)) {
