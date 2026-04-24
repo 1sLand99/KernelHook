@@ -4,19 +4,29 @@
  * SP-7 Capabilities: copy_to_user (Task 14), copy_from_user (Task 15),
  * and register_ex_table (Task 16).
  *
- * copy_to_user strategies (prio 0-3):
+ * Strategy selection is symbol-driven (not kernel-version-gated) so the
+ * same .ko works across Linux 4.4 → 6.12 on arm64 ARMv8.0 → latest. See
+ * the per-priority notes below for which era each symbol lives on.
+ *
+ * copy_to_user strategies (prio 0-5):
  *   prio 0: _copy_to_user          (current GKI export with underscore)
- *   prio 1: copy_to_user           (older export name)
- *   prio 2: __arch_copy_to_user    (arm64 arch-level symbol)
- *   prio 3: inline_ldtr_sttr       (our ARMv8.1+ sttr impl, gated on
+ *   prio 1: copy_to_user           (historical export variant, rare)
+ *   prio 2: __arch_copy_to_user    (arm64 arch-level symbol, ~v4.20+)
+ *   prio 3: __copy_to_user         (pre-v4.20 name: Android 4.4/4.9/4.14/4.19)
+ *   prio 4: inline_sttr_pan        (our ARMv8.1+ sttr impl with PAN mgmt,
+ *                                   self-gated on kh_cpu_has_pan() &&
+ *                                   register_ex_table succeeding)
+ *   prio 5: inline_sttr_no_pan     (our ARMv8.0 sttr impl without PAN mgmt,
+ *                                   self-gated on !kh_cpu_has_pan() &&
  *                                   register_ex_table succeeding)
  *
- * copy_from_user strategies (prio 0-3):
+ * copy_from_user strategies (prio 0-5):
  *   prio 0: _copy_from_user
  *   prio 1: copy_from_user
  *   prio 2: __arch_copy_from_user
- *   prio 3: inline_ldtr             (our ARMv8.1+ ldtr impl, gated on
- *                                    register_ex_table succeeding)
+ *   prio 3: __copy_from_user       (pre-v4.20 name)
+ *   prio 4: inline_ldtr_pan        (ARMv8.1+)
+ *   prio 5: inline_ldtr_no_pan     (ARMv8.0)
  *
  * register_ex_table strategies (prio 0-1):
  *   prio 0: probe_extable           (verify kernel loaded our __ex_table
@@ -59,6 +69,30 @@
 #include <linux/uaccess.h>   /* __user annotation */
 
 /* ========================================================================
+ * CPU feature probe: ARMv8.1 PAN extension
+ *
+ * PAN (Privileged Access Never) is an ARMv8.1 extension. On ARMv8.0
+ * implementations (Cortex-A53/A57/A72, QEMU cortex-a57 AVDs, Pixel 1/2)
+ * the `msr PAN, #imm` instruction is UNDEFINED. sttrb/ldtrb unprivileged
+ * accesses exist in the base ARMv8.0 ISA but behave differently w.r.t. PAN.
+ *
+ * ID_AA64MMFR1_EL1 (s3_0_c0_c7_1) is an architectural ID register readable
+ * from EL1 via MRS on every ARMv8.x implementation; unimplemented fields
+ * return zero rather than trapping. Bits [23:20] (.PAN):
+ *    0 = no PAN (v8.0)
+ *    1 = PAN             (v8.1)
+ *    2 = PAN + AT_S1E[01]R (v8.2)
+ *    3 = EPAN            (v8.7+)
+ * No kallsyms dependency — safe to call before any kernel symbol resolution.
+ * ======================================================================== */
+static inline bool kh_cpu_has_pan(void)
+{
+    uint64_t mmfr1;
+    __asm__ volatile("mrs %0, s3_0_c0_c7_1" : "=r"(mmfr1));
+    return ((mmfr1 >> 20) & 0xfULL) != 0;
+}
+
+/* ========================================================================
  * SP-7 Capability: copy_to_user (Task 14)
  * ======================================================================== */
 
@@ -86,6 +120,19 @@ static int strat_to_arch_copy_to_user(void *out, size_t sz)
 {
     if (sz != sizeof(copy_to_user_fn)) return -22;
     uint64_t a = ksyms_lookup("__arch_copy_to_user");
+    if (!a) return KH_STRAT_ENODATA;
+    *(copy_to_user_fn *)out = (copy_to_user_fn)(uintptr_t)a;
+    return 0;
+}
+
+static int strat_to___copy_to_user(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_to_user_fn)) return -22;
+    /* Pre-v4.20 arm64 kernels exported the raw assembly primitive under the
+     * name __copy_to_user. The rename to __arch_copy_to_user landed around
+     * v4.20 (late 2018); Android common kernels 4.4 / 4.9 / 4.14 / 4.19 still
+     * expose __copy_to_user and miss prio 0-2 entirely. */
+    uint64_t a = ksyms_lookup("__copy_to_user");
     if (!a) return KH_STRAT_ENODATA;
     *(copy_to_user_fn *)out = (copy_to_user_fn)(uintptr_t)a;
     return 0;
@@ -188,9 +235,70 @@ unsigned long kh_inline_copy_to_user(void __user *to, const void *from, unsigned
  * struct module field offsets. */
 extern char kh_sttr_insn_site[];
 
-static int strat_to_inline_sttr(void *out, size_t sz)
+/*
+ * kh_inline_copy_to_user_nopan — ARMv8.0 variant (no PAN manipulation).
+ *
+ * Identical to kh_inline_copy_to_user except that the `msr pan, #{0,1}` ops
+ * are omitted — those instructions UNDEF on ARMv8.0 implementations where
+ * the PAN extension is not present. On ARMv8.0 the sttrb unprivileged store
+ * works without any PAN handshake (there is no PAN bit to clear or restore).
+ *
+ * Independent global labels (kh_sttr_nopan_*) keep this variant's __ex_table
+ * entry disjoint from the PAN variant's. Both entries live in the same .ko
+ * __ex_table section and are registered together at insmod time, so the
+ * existing strat_probe_extable check on kh_sttr_insn_site transitively
+ * confirms this variant's fixup is registered as well.
+ *
+ * The fault fixup label sits at the natural end of the asm body: success
+ * falls through to it, and the exception handler jumps to it on fault.
+ * Both paths exit with `rem` holding bytes-not-copied.
+ */
+__attribute__((noinline))
+unsigned long kh_inline_copy_to_user_nopan(void __user *to, const void *from, unsigned long n)
+{
+    unsigned long to_a  = (unsigned long)(uintptr_t)to;
+    unsigned long frm_a = (unsigned long)(uintptr_t)from;
+    unsigned long rem   = n;
+    unsigned long scratch;
+
+    __asm__ volatile(
+        "1:  cbz %2, 2f\n"
+        "    ldrb %w3, [%1], #1\n"
+        "kh_sttr_nopan_insn_site:\n"
+        "    sttrb %w3, [%0]\n"
+        "    add %0, %0, #1\n"
+        "    sub %2, %2, #1\n"
+        "    b 1b\n"
+        "2:\n"
+        "kh_sttr_nopan_fixup:\n"
+        /* Same EX_TYPE_UACCESS_ERR_ZERO (type=2) + data=0x129 (reg_err=X9,
+         * reg_zero=X9) encoding as the PAN variant. */
+        ".pushsection __ex_table, \"a\"\n"
+        "    .align 2\n"
+        "    .long (kh_sttr_nopan_insn_site - .)\n"
+        "    .long (kh_sttr_nopan_fixup - .)\n"
+        "    .short 2\n"
+        "    .short 0x129\n"
+        ".popsection\n"
+        : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
+        :
+        : "memory", "x9"
+    );
+    (void)scratch;
+    return rem;
+}
+
+static int strat_to_inline_sttr_pan(void *out, size_t sz)
 {
     if (sz != sizeof(copy_to_user_fn)) return -22;
+
+    /* Gate on PAN presence: this variant emits `msr pan, #{0,1}` which
+     * UNDEF on ARMv8.0. Fall through to strat_to_inline_sttr_no_pan if
+     * the CPU is v8.0. */
+    if (!kh_cpu_has_pan()) {
+        pr_info("[copy_to_user/inline_sttr_pan] skipped: PAN not present (ARMv8.0)\n");
+        return KH_STRAT_ENODATA;
+    }
 
     /* Gate on register_ex_table: inline path is only safe when the kernel's
      * module loader has registered our __ex_table entries (otherwise a bad
@@ -203,19 +311,45 @@ static int strat_to_inline_sttr(void *out, size_t sz)
     return 0;
 }
 
-KH_STRATEGY_DECLARE(copy_to_user, _copy_to_user,       0, strat_to_copy_to_user,      sizeof(copy_to_user_fn));
-KH_STRATEGY_DECLARE(copy_to_user, copy_to_user_sym,    1, strat_to_sym_copy_to_user,  sizeof(copy_to_user_fn));
-KH_STRATEGY_DECLARE(copy_to_user, __arch_copy_to_user, 2, strat_to_arch_copy_to_user, sizeof(copy_to_user_fn));
-KH_STRATEGY_DECLARE(copy_to_user, inline_ldtr_sttr,    3, strat_to_inline_sttr,       sizeof(copy_to_user_fn));
+static int strat_to_inline_sttr_no_pan(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_to_user_fn)) return -22;
+
+    /* Gate on PAN absence: on ARMv8.1+ with PAN enabled (SCTLR.SPAN=0), a
+     * bare sttrb without clearing PAN first generates a Permission Fault on
+     * every byte. Our ex_table fixup would then short-circuit each call to
+     * rem=n — silent no-op where callers think the copy succeeded but 0
+     * bytes landed. Only safe on v8.0 where PAN doesn't exist. */
+    if (kh_cpu_has_pan()) {
+        pr_info("[copy_to_user/inline_sttr_no_pan] skipped: PAN present (ARMv8.1+)\n");
+        return KH_STRAT_ENODATA;
+    }
+
+    int dummy = 0;
+    int rc = kh_strategy_resolve("register_ex_table", &dummy, sizeof(dummy));
+    if (rc) return rc;
+
+    *(copy_to_user_fn *)out = kh_inline_copy_to_user_nopan;
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(copy_to_user, _copy_to_user,       0, strat_to_copy_to_user,         sizeof(copy_to_user_fn));
+KH_STRATEGY_DECLARE(copy_to_user, copy_to_user_sym,    1, strat_to_sym_copy_to_user,     sizeof(copy_to_user_fn));
+KH_STRATEGY_DECLARE(copy_to_user, __arch_copy_to_user, 2, strat_to_arch_copy_to_user,    sizeof(copy_to_user_fn));
+KH_STRATEGY_DECLARE(copy_to_user, __copy_to_user,      3, strat_to___copy_to_user,       sizeof(copy_to_user_fn));
+KH_STRATEGY_DECLARE(copy_to_user, inline_sttr_pan,     4, strat_to_inline_sttr_pan,      sizeof(copy_to_user_fn));
+KH_STRATEGY_DECLARE(copy_to_user, inline_sttr_no_pan,  5, strat_to_inline_sttr_no_pan,   sizeof(copy_to_user_fn));
 
 /* ========================================================================
  * SP-7 Capability: copy_from_user (Task 15)
  *
- * Symmetric to copy_to_user. Same 4-strategy shape with naming variants:
+ * Symmetric to copy_to_user. Same 6-strategy shape with naming variants:
  *   prio 0: _copy_from_user
  *   prio 1: copy_from_user
  *   prio 2: __arch_copy_from_user
- *   prio 3: inline_ldtr (our own ldtrb impl, gated on register_ex_table)
+ *   prio 3: __copy_from_user     (pre-v4.20 kernels)
+ *   prio 4: inline_ldtr_pan      (ARMv8.1+ with PAN mgmt)
+ *   prio 5: inline_ldtr_no_pan   (ARMv8.0 without PAN mgmt)
  * ======================================================================== */
 
 typedef unsigned long (*copy_from_user_fn)(void *to, const void __user *from, unsigned long n);
@@ -242,6 +376,17 @@ static int strat_from_arch_copy_from_user(void *out, size_t sz)
 {
     if (sz != sizeof(copy_from_user_fn)) return -22;
     uint64_t a = ksyms_lookup("__arch_copy_from_user");
+    if (!a) return KH_STRAT_ENODATA;
+    *(copy_from_user_fn *)out = (copy_from_user_fn)(uintptr_t)a;
+    return 0;
+}
+
+static int strat_from___copy_from_user(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+    /* Pre-v4.20 name (Android 4.4 / 4.9 / 4.14 / 4.19). See
+     * strat_to___copy_to_user for the full rationale. */
+    uint64_t a = ksyms_lookup("__copy_from_user");
     if (!a) return KH_STRAT_ENODATA;
     *(copy_from_user_fn *)out = (copy_from_user_fn)(uintptr_t)a;
     return 0;
@@ -306,11 +451,56 @@ unsigned long kh_inline_copy_from_user(void *to, const void __user *from, unsign
     return rem;
 }
 
-static int strat_from_inline_ldtr(void *out, size_t sz)
+/*
+ * kh_inline_copy_from_user_nopan — ARMv8.0 variant (no PAN manipulation).
+ *
+ * Symmetric to kh_inline_copy_to_user_nopan: same ldtrb loop as the PAN
+ * variant with the `msr pan, #{0,1}` instructions removed. See the to-variant
+ * comment for the full rationale.
+ */
+__attribute__((noinline))
+unsigned long kh_inline_copy_from_user_nopan(void *to, const void __user *from, unsigned long n)
+{
+    unsigned long to_a  = (unsigned long)(uintptr_t)to;
+    unsigned long frm_a = (unsigned long)(uintptr_t)from;
+    unsigned long rem   = n;
+    unsigned long scratch;
+
+    __asm__ volatile(
+        "1:  cbz %2, 2f\n"
+        "kh_ldtr_nopan_insn_site:\n"
+        "    ldtrb %w3, [%1]\n"
+        "    add %1, %1, #1\n"
+        "    strb %w3, [%0], #1\n"
+        "    sub %2, %2, #1\n"
+        "    b 1b\n"
+        "2:\n"
+        "kh_ldtr_nopan_fixup:\n"
+        ".pushsection __ex_table, \"a\"\n"
+        "    .align 2\n"
+        "    .long (kh_ldtr_nopan_insn_site - .)\n"
+        "    .long (kh_ldtr_nopan_fixup - .)\n"
+        "    .short 2\n"
+        "    .short 0x129\n"
+        ".popsection\n"
+        : "+r" (to_a), "+r" (frm_a), "+r" (rem), "=&r" (scratch)
+        :
+        : "memory", "x9"
+    );
+    (void)scratch;
+    return rem;
+}
+
+static int strat_from_inline_ldtr_pan(void *out, size_t sz)
 {
     if (sz != sizeof(copy_from_user_fn)) return -22;
 
-    /* Gate on register_ex_table: same reasoning as strat_to_inline_sttr. */
+    /* Gate on PAN presence — see strat_to_inline_sttr_pan for rationale. */
+    if (!kh_cpu_has_pan()) {
+        pr_info("[copy_from_user/inline_ldtr_pan] skipped: PAN not present (ARMv8.0)\n");
+        return KH_STRAT_ENODATA;
+    }
+
     int dummy = 0;
     int rc = kh_strategy_resolve("register_ex_table", &dummy, sizeof(dummy));
     if (rc) return rc;
@@ -319,10 +509,30 @@ static int strat_from_inline_ldtr(void *out, size_t sz)
     return 0;
 }
 
-KH_STRATEGY_DECLARE(copy_from_user, _copy_from_user,       0, strat_from_copy_from_user,      sizeof(copy_from_user_fn));
-KH_STRATEGY_DECLARE(copy_from_user, copy_from_user_sym,    1, strat_from_sym_copy_from_user,  sizeof(copy_from_user_fn));
-KH_STRATEGY_DECLARE(copy_from_user, __arch_copy_from_user, 2, strat_from_arch_copy_from_user, sizeof(copy_from_user_fn));
-KH_STRATEGY_DECLARE(copy_from_user, inline_ldtr,           3, strat_from_inline_ldtr,         sizeof(copy_from_user_fn));
+static int strat_from_inline_ldtr_no_pan(void *out, size_t sz)
+{
+    if (sz != sizeof(copy_from_user_fn)) return -22;
+
+    /* Gate on PAN absence — see strat_to_inline_sttr_no_pan for rationale. */
+    if (kh_cpu_has_pan()) {
+        pr_info("[copy_from_user/inline_ldtr_no_pan] skipped: PAN present (ARMv8.1+)\n");
+        return KH_STRAT_ENODATA;
+    }
+
+    int dummy = 0;
+    int rc = kh_strategy_resolve("register_ex_table", &dummy, sizeof(dummy));
+    if (rc) return rc;
+
+    *(copy_from_user_fn *)out = kh_inline_copy_from_user_nopan;
+    return 0;
+}
+
+KH_STRATEGY_DECLARE(copy_from_user, _copy_from_user,       0, strat_from_copy_from_user,        sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, copy_from_user_sym,    1, strat_from_sym_copy_from_user,    sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, __arch_copy_from_user, 2, strat_from_arch_copy_from_user,   sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, __copy_from_user,      3, strat_from___copy_from_user,      sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, inline_ldtr_pan,       4, strat_from_inline_ldtr_pan,       sizeof(copy_from_user_fn));
+KH_STRATEGY_DECLARE(copy_from_user, inline_ldtr_no_pan,    5, strat_from_inline_ldtr_no_pan,    sizeof(copy_from_user_fn));
 
 /* ========================================================================
  * SP-7 Capability: register_ex_table (Task 16)

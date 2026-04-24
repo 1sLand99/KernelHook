@@ -31,9 +31,24 @@ typedef long long loff_t;
 typedef long ssize_t;
 #endif
 
-extern unsigned long copy_from_user(void *to, const void __user *from,
-				    unsigned long n);
-extern unsigned long copy_to_user(void __user *to, const void *from,
-				  unsigned long n);
+/* shim_ksyms.c exports `kh_shim_*` wrappers (not the bare kernel names) so
+ * our module's ELF kallsyms cannot be picked up by ksyms_lookup("copy_to_user")
+ * from the strategy resolver — see shim_ksyms.c for the full rationale. */
+extern unsigned long kh_shim_copy_from_user(void *to, const void __user *from,
+					    unsigned long n);
+extern unsigned long kh_shim_copy_to_user(void __user *to, const void *from,
+					  unsigned long n);
+
+static inline unsigned long copy_from_user(void *to, const void __user *from,
+					   unsigned long n)
+{
+	return kh_shim_copy_from_user(to, from, n);
+}
+
+static inline unsigned long copy_to_user(void __user *to, const void *from,
+					 unsigned long n)
+{
+	return kh_shim_copy_to_user(to, from, n);
+}
 
 #endif /* _FAKE_LINUX_UACCESS_H */

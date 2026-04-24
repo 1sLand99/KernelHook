@@ -4,11 +4,28 @@
 #include <linux/uaccess.h>
 #include "test_resolver_common.h"
 
-/* ---- forward declarations for inline copy fns (defined in uaccess_copy.c) */
+/* ---- forward declarations for inline copy fns (defined in uaccess_copy.c)
+ * PAN variants use `msr pan, #{0,1}` (ARMv8.1+ only); nopan variants are
+ * for ARMv8.0 hardware where those instructions UNDEF. */
 extern unsigned long kh_inline_copy_to_user(void __user *to, const void *from,
                                              unsigned long n);
 extern unsigned long kh_inline_copy_from_user(void *to, const void __user *from,
                                                unsigned long n);
+extern unsigned long kh_inline_copy_to_user_nopan(void __user *to, const void *from,
+                                                   unsigned long n);
+extern unsigned long kh_inline_copy_from_user_nopan(void *to, const void __user *from,
+                                                     unsigned long n);
+
+/* Probe ARMv8.1 PAN extension via ID_AA64MMFR1_EL1.PAN (bits [23:20]).
+ * Architecturally readable from EL1 on every ARMv8.x; no kallsyms needed.
+ * Mirrors kh_cpu_has_pan() in src/strategies/uaccess_copy.c — duplicated
+ * here to keep this TU self-contained. */
+static inline bool test_cpu_has_pan(void)
+{
+    uint64_t mmfr1;
+    __asm__ volatile("mrs %0, s3_0_c0_c7_1" : "=r"(mmfr1));
+    return ((mmfr1 >> 20) & 0xfULL) != 0;
+}
 
 /* ---- vmalloc shim (freestanding builds have no vmalloc header) ---------- */
 #ifdef KMOD_FREESTANDING
@@ -94,9 +111,19 @@ int test_resolver_copy_user(void) {
          * by a sufficiently creative PIE/ASLR layout.) */
         void __user *bad_user = (void __user *)(uintptr_t)0xffff800000000000UL;
 
-        /* Test kh_inline_copy_to_user: fault on sttrb, fixup returns rem > 0. */
-        unsigned long rem_to = kh_inline_copy_to_user(
-            bad_user, kernel_src, KH_COPY_TEST_SIZE);
+        /* Pick the PAN / no-PAN inline variant matching the host hardware.
+         * On ARMv8.0 the PAN variant's `msr pan, #0` instruction UNDEFs. */
+        bool has_pan = test_cpu_has_pan();
+        to_t   inline_to   = has_pan ? kh_inline_copy_to_user
+                                     : kh_inline_copy_to_user_nopan;
+        from_t inline_from = has_pan ? kh_inline_copy_from_user
+                                     : kh_inline_copy_from_user_nopan;
+        pr_info("[test_resolver_copy_user] PAN probe: %s — exercising inline %s variant\n",
+                has_pan ? "present" : "absent",
+                has_pan ? "PAN (v8.1+)" : "no-PAN (v8.0)");
+
+        /* Test inline copy_to_user: fault on sttrb, fixup returns rem > 0. */
+        unsigned long rem_to = inline_to(bad_user, kernel_src, KH_COPY_TEST_SIZE);
 
         KH_TEST_ASSERT("copy_user",
                        rem_to > 0,
@@ -105,8 +132,8 @@ int test_resolver_copy_user(void) {
         pr_info("[test_resolver_copy_user] inline_copy_to_user fault-path:"
                 " rem=%lu (expected >0, fixup fired OK)\n", rem_to);
 
-        /* Test kh_inline_copy_from_user: fault on ldtrb, fixup returns rem > 0. */
-        unsigned long rem_from = kh_inline_copy_from_user(
+        /* Test inline copy_from_user: fault on ldtrb, fixup returns rem > 0. */
+        unsigned long rem_from = inline_from(
             kernel_dst ? (void *)kernel_dst : (void *)kernel_src,
             (const void __user *)bad_user, KH_COPY_TEST_SIZE);
 
@@ -125,14 +152,16 @@ part_b_done:
 
     /* ---- Part C: selection test — simulate no-kallsyms-export scenario ----
      *
-     * Simulate a kernel that doesn't export _copy_to_user / copy_to_user /
-     * __arch_copy_to_user by temporarily disabling the first 3 strategies.
-     * The resolver should fall through to prio 3 (inline_ldtr_sttr /
-     * inline_ldtr) — our own asm implementation. Verify:
-     *   1. Resolve succeeds (at least one prio 3 strategy works).
-     *   2. The returned fn pointer is literally kh_inline_copy_to/from_user.
+     * Simulate a kernel that doesn't export any of the 4 kallsyms-based
+     * copy_*_user variants by temporarily disabling prios 0-3. The resolver
+     * should fall through to prio 4 (inline_sttr_pan / inline_ldtr_pan) on
+     * ARMv8.1+ hardware, or prio 5 (inline_sttr_no_pan / inline_ldtr_no_pan)
+     * on ARMv8.0 — both are our own asm implementations. Verify:
+     *   1. Resolve succeeds (at least one inline prio works).
+     *   2. The returned fn pointer is one of the 2 inline variants, matching
+     *      the host's PAN feature.
      *   3. Fault path still engages correctly via the inline impl.
-     * Re-enable prios 0-2 after the test so downstream code paths (demo
+     * Re-enable prios 0-3 after the test so downstream code paths (demo
      * hook handlers, etc.) still resolve to the fast kallsyms path. */
     {
         int erc = -1;
@@ -144,13 +173,15 @@ part_b_done:
             goto part_c_done;
         }
 
-        /* Disable the 3 ksyms-based strategies for both capabilities. */
+        /* Disable the 4 ksyms-based strategies for both capabilities. */
         kh_strategy_set_enabled("copy_to_user",   "_copy_to_user",       false);
         kh_strategy_set_enabled("copy_to_user",   "copy_to_user_sym",    false);
         kh_strategy_set_enabled("copy_to_user",   "__arch_copy_to_user", false);
+        kh_strategy_set_enabled("copy_to_user",   "__copy_to_user",      false);
         kh_strategy_set_enabled("copy_from_user", "_copy_from_user",       false);
         kh_strategy_set_enabled("copy_from_user", "copy_from_user_sym",    false);
         kh_strategy_set_enabled("copy_from_user", "__arch_copy_from_user", false);
+        kh_strategy_set_enabled("copy_from_user", "__copy_from_user",      false);
 
         /* kh_strategy_force(cap, NULL) clears any force AND invalidates the
          * cache — so the next resolve re-iterates strategies. */
@@ -163,18 +194,27 @@ part_b_done:
         int rc2_c = kh_strategy_resolve("copy_from_user", &ffu_c, sizeof(ffu_c));
 
         KH_TEST_ASSERT("copy_user", rc1_c == 0,
-                       "[Part C] copy_to_user: no strategy resolved after disabling prios 0-2");
+                       "[Part C] copy_to_user: no strategy resolved after disabling prios 0-3");
         KH_TEST_ASSERT("copy_user", rc2_c == 0,
-                       "[Part C] copy_from_user: no strategy resolved after disabling prios 0-2");
-        KH_TEST_ASSERT("copy_user", (uintptr_t)ftu_c == (uintptr_t)kh_inline_copy_to_user,
-                       "[Part C] copy_to_user resolver did not pick inline_ldtr_sttr");
-        KH_TEST_ASSERT("copy_user", (uintptr_t)ffu_c == (uintptr_t)kh_inline_copy_from_user,
-                       "[Part C] copy_from_user resolver did not pick inline_ldtr");
+                       "[Part C] copy_from_user: no strategy resolved after disabling prios 0-3");
+
+        /* The inline variant that self-installs depends on the host CPU:
+         * PAN present (v8.1+) → prio 4 PAN variant; PAN absent (v8.0) →
+         * prio 5 no-PAN variant. Accept either; assert mutual exclusivity. */
+        bool has_pan = test_cpu_has_pan();
+        to_t   expected_to   = has_pan ? kh_inline_copy_to_user
+                                       : kh_inline_copy_to_user_nopan;
+        from_t expected_from = has_pan ? kh_inline_copy_from_user
+                                       : kh_inline_copy_from_user_nopan;
+        KH_TEST_ASSERT("copy_user", (uintptr_t)ftu_c == (uintptr_t)expected_to,
+                       "[Part C] copy_to_user did not pick the PAN-matching inline variant");
+        KH_TEST_ASSERT("copy_user", (uintptr_t)ffu_c == (uintptr_t)expected_from,
+                       "[Part C] copy_from_user did not pick the PAN-matching inline variant");
 
         /* Exercise the inline path on a deliberately-bad user pointer.
          * Expectation: fault handler engages via __ex_table, fixup returns
          * non-zero rem. Proves end-to-end: selection → inline asm → fault
-         * → ex_table lookup → fixup PC → PAN restore → C return. */
+         * → ex_table lookup → fixup PC → (PAN restore) → C return. */
         unsigned char pat[32];
         for (int i = 0; i < 32; i++) pat[i] = (unsigned char)(i ^ 0x5Au);
         void __user *bad = (void __user *)(uintptr_t)0xffff800000000000UL;
@@ -186,17 +226,20 @@ part_b_done:
         KH_TEST_ASSERT("copy_user", rem_c_from > 0,
                        "[Part C] inline copy_from_user fault path did not engage");
         pr_info("[test_resolver_copy_user] Part C: inline selection verified"
-                " (rem_to=%lu rem_from=%lu)\n", rem_c_to, rem_c_from);
+                " (%s variant, rem_to=%lu rem_from=%lu)\n",
+                has_pan ? "PAN" : "no-PAN", rem_c_to, rem_c_from);
 
-        /* Re-enable prio 0-2 so subsequent consumers (uaccess.c rewire,
+        /* Re-enable prio 0-3 so subsequent consumers (uaccess.c rewire,
          * demo hook callbacks) get the fast kallsyms path. Invalidate cache
          * so the next resolver call re-picks kallsyms. */
         kh_strategy_set_enabled("copy_to_user",   "_copy_to_user",       true);
         kh_strategy_set_enabled("copy_to_user",   "copy_to_user_sym",    true);
         kh_strategy_set_enabled("copy_to_user",   "__arch_copy_to_user", true);
+        kh_strategy_set_enabled("copy_to_user",   "__copy_to_user",      true);
         kh_strategy_set_enabled("copy_from_user", "_copy_from_user",       true);
         kh_strategy_set_enabled("copy_from_user", "copy_from_user_sym",    true);
         kh_strategy_set_enabled("copy_from_user", "__arch_copy_from_user", true);
+        kh_strategy_set_enabled("copy_from_user", "__copy_from_user",      true);
         kh_strategy_force("copy_to_user",   NULL);
         kh_strategy_force("copy_from_user", NULL);
     }
