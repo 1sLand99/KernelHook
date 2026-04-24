@@ -15,6 +15,7 @@ KH_SUBCOMMANDS=(
     "host-all|Host userspace, Debug + Release"
     "android|Userspace tests on Android device/emulator"
     "avd|kmod tests on AVD emulator(s)"
+    "avd-graft|Graft-path tests on AVD emulator(s) (Pixel_35+ / kernel 6.6+)"
     "avd-sdk-all|SDK kmod tests across every AVD on the host (Pixel_28..37)"
     "device|kmod tests on physical USB device"
     "sdk-consumer|SDK ABI link verification"
@@ -34,9 +35,13 @@ Subcommands:
   host-all                 Host userspace, Debug + Release
   android [--serial S]     Userspace tests pushed to Android via adb
   avd [name...]            kmod tests on AVD emulator(s) (default: all AVDs)
+  avd-graft [name...]      Graft-path tests on AVD emulator(s) — for kernels
+                           that reject self-built .ko via kCFI initcall gate
+                           (Android 15+ GKI / kernel 6.6+ → Pixel_35..37).
   avd-sdk-all              SDK-mode regression across every AVD on the host.
-                           Forces --mode=sdk and walks Pixel_28..37 (or whatever
-                           AVDs exist locally); fails if any AVD fails.
+                           Auto-routes Pixel_35..37 (and any AVD whose name
+                           parses to API≥35) through the graft path; others
+                           through the kmod path. Fails if any AVD fails.
   device [serial]          kmod tests on physical USB device (with kh_root demo)
   sdk-consumer             SDK ABI link verification (Ring 3 + hello_hook.ko consumer)
   kbuild-verify <ko> <kv>  Static .ko validation
@@ -179,11 +184,32 @@ case "$KH_SUBCMD" in
             exit "$rc"
         fi
         ;;
+    avd-graft)
+        kh_section_start "avd-graft: graft-path tests on AVD(s)"
+        if "$ROOT/scripts/test_avd_graft.sh" "${KH_SUBCMD_ARGS[@]+"${KH_SUBCMD_ARGS[@]}"}"; then
+            kh_section_end "avd-graft" PASS
+            kh_summary_line 1 0
+            exit 0
+        else
+            rc=$?
+            kh_section_end "avd-graft" FAIL
+            kh_summary_line 0 1
+            exit "$rc"
+        fi
+        ;;
     avd-sdk-all)
         # Single-command entry for "SDK mode regression across every AVD on
         # the host". Forces --mode=sdk regardless of the global --mode= flag
         # and intentionally drops any subcommand args (per-AVD selection)
-        # so the full Pixel_28..37 matrix runs. Exits non-zero on any failure.
+        # so the full Pixel_28..37 matrix runs.
+        #
+        # API-level routing: the AVD name's trailing numeric segment is
+        # treated as the target API level (Pixel_35 → 35, Pixel_36_1 → 36,
+        # Pixel_35_ext15 → 35). AVDs with API≥35 (Android 15+ / kernel 6.6+)
+        # are routed to the graft path because their kCFI initcall typeid
+        # check rejects our self-built kernelhook.ko in do_init_module.
+        # Others go through the kmod path.
+        # Exits non-zero on any AVD failure.
         kh_section_start "avd-sdk-all: SDK matrix (all local AVDs)"
         AVDS_LIST=$(ls ~/.android/avd/*.ini 2>/dev/null | sed 's|.*/||;s|\.ini$||' | grep -v Small | sort)
         if [ -z "$AVDS_LIST" ]; then
@@ -192,17 +218,44 @@ case "$KH_SUBCMD" in
             kh_summary_line 0 0
             exit 0
         fi
-        printf "  AVD matrix: %s\n" "$(echo $AVDS_LIST | tr '\n' ' ')"
-        # shellcheck disable=SC2086
-        if "$ROOT/scripts/test_avd_kmod.sh" --mode=sdk $AVDS_LIST; then
+
+        # Split AVDS_LIST into kmod-path and graft-path buckets based on the
+        # trailing numeric segment of the AVD name. Pixel_35_ext15 → 35.
+        KMOD_AVDS=""
+        GRAFT_AVDS=""
+        for a in $AVDS_LIST; do
+            api=$(echo "$a" | grep -oE '[0-9]+' | head -1)
+            if [ -n "$api" ] && [ "$api" -ge 35 ] 2>/dev/null; then
+                GRAFT_AVDS="$GRAFT_AVDS $a"
+            else
+                KMOD_AVDS="$KMOD_AVDS $a"
+            fi
+        done
+        printf "  kmod-path AVDs:  %s\n"  "$(echo $KMOD_AVDS)"
+        printf "  graft-path AVDs: %s\n" "$(echo $GRAFT_AVDS)"
+
+        overall_rc=0
+        if [ -n "$KMOD_AVDS" ]; then
+            # shellcheck disable=SC2086
+            if ! "$ROOT/scripts/test_avd_kmod.sh" --mode=sdk $KMOD_AVDS; then
+                overall_rc=1
+            fi
+        fi
+        if [ -n "$GRAFT_AVDS" ]; then
+            # shellcheck disable=SC2086
+            if ! "$ROOT/scripts/test_avd_graft.sh" $GRAFT_AVDS; then
+                overall_rc=1
+            fi
+        fi
+
+        if [ "$overall_rc" -eq 0 ]; then
             kh_section_end "avd-sdk-all" PASS
             kh_summary_line 1 0
             exit 0
         else
-            rc=$?
             kh_section_end "avd-sdk-all" FAIL
             kh_summary_line 0 1
-            exit "$rc"
+            exit "$overall_rc"
         fi
         ;;
     device)
