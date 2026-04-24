@@ -95,7 +95,7 @@ hook_chain: after callback, ret=...
 
 ## hook_wrap_args
 
-用 before 和 after 两个回调 kh_hook `do_sys_openat2`。before 回调检查所有参数，after 回调读取并覆盖返回值。
+用 before 和 after 两个回调 kh_hook `do_sys_openat2`。before 回调检查所有参数，after 回调观察返回值（并演示如何覆盖）。
 
 ```c
 static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
@@ -106,15 +106,18 @@ static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 
 static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
-    pr_info("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
-    fargs->ret = 0;
+    /* fargs->ret 可写 —— 但本 hook 会命中系统中每一次 openat，无条件覆盖会
+     * 瞬间瘫痪用户空间。生产环境必须按条件覆盖（按 pid / 文件名 /
+     * module_param 过滤）。详见 hook_wrap_args.c 的注释。 */
+    pr_info("AFTER original ret=%lld (observed, not overridden)",
+          (long long)fargs->ret);
 }
 ```
 
 **预期 dmesg 输出：**
 ```
 hook_wrap_args: BEFORE arg0(dfd)=... arg1(filename)=... arg2(how)=...
-hook_wrap_args: AFTER original ret=..., overriding with 0
+hook_wrap_args: AFTER original ret=... (observed, not overridden — see source)
 ```
 
 ## ksyms_lookup

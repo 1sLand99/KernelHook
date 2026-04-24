@@ -95,7 +95,7 @@ hook_chain: after callback, ret=...
 
 ## hook_wrap_args
 
-Hooks `do_sys_openat2` with both before and after callbacks. The before callback inspects all arguments; the after callback reads and overrides the return value.
+Hooks `do_sys_openat2` with both before and after callbacks. The before callback inspects all arguments; the after callback observes the return value (and demonstrates where you could override it).
 
 ```c
 static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
@@ -106,15 +106,18 @@ static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 
 static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
-    pr_info("AFTER original ret=%lld, overriding with 0", (long long)fargs->ret);
-    fargs->ret = 0;
+    /* fargs->ret is writable — overriding would affect EVERY openat in the
+     * system, which wedges userspace. Real overrides must be conditional
+     * (match pid / filename / module_param). See hook_wrap_args.c comments. */
+    pr_info("AFTER original ret=%lld (observed, not overridden)",
+          (long long)fargs->ret);
 }
 ```
 
 **Expected dmesg:**
 ```
 hook_wrap_args: BEFORE arg0(dfd)=... arg1(filename)=... arg2(how)=...
-hook_wrap_args: AFTER original ret=..., overriding with 0
+hook_wrap_args: AFTER original ret=... (observed, not overridden — see source)
 ```
 
 ## ksyms_lookup

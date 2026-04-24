@@ -63,13 +63,29 @@ static void openat2_before(kh_hook_fargs4_t *fargs, void *udata)
 	      (unsigned long long)fargs->arg3);
 }
 
-/* ---- After callback: inspect and override return value ---- */
-
+/* ---- After callback: inspect the return value ----
+ *
+ * AFTER runs after the original do_sys_openat2() returns. fargs->ret holds
+ * the original fd (or -errno). You CAN override it by writing to fargs->ret:
+ *
+ *     fargs->ret = -EACCES;   // make every open appear to fail with EACCES
+ *     fargs->ret = 0;         // replace real fd with 0 (stdin)
+ *
+ * We intentionally do NOT override here, because this hook fires on every
+ * openat(2) in the system — an unconditional override wedges userspace the
+ * instant the module loads (e.g. ret=0 makes every new process's libc.so
+ * mmap fail with EBADF, bricking `adb shell`, `init`, … everything).
+ *
+ * Real-world overrides must be conditional. Typical patterns:
+ *   - match current->pid against a target set at insmod
+ *   - match the filename (copy via kh_strncpy_from_user) against a sentinel
+ *   - gate behind a module_param default-off flag
+ * Pick the narrowest predicate that still demonstrates your override intent.
+ */
 static void openat2_after(kh_hook_fargs4_t *fargs, void *udata)
 {
-	pr_info("hook_wrap_args: AFTER original ret=%lld, overriding with 0",
+	pr_info("hook_wrap_args: AFTER original ret=%lld (observed, not overridden — see source)",
 	      (long long)fargs->ret);
-	fargs->ret = 0;
 }
 
 /* ---- Module init / exit ---- */
