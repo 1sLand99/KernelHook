@@ -379,18 +379,28 @@ test_avd() {
             load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
             load_rc=$?
 
-            sleep 2
             local marker
             marker="$(consumer_marker "$c")"
-            # Prefer live /dev/kmsg capture (callback-spam can evict the
-            # init line from the ring buffer before a fresh dmesg poll).
+            # Bounded polling — adb's `cat /dev/kmsg` pipe buffers until a
+            # line break lands at the far end, so a single `sleep 2 + grep`
+            # can miss a one-shot init line by up to ~5 s on slower AVDs
+            # (Pixel_31/32 observed). Poll both sources at 250 ms intervals
+            # up to ~6 s; stop at first hit. Dmesg ring-buffer eviction by
+            # callback spam (hook_wrap_args is a notable offender) is why
+            # we prefer live_dmesg, but fall back to dmesg if the pipe-drain
+            # lags the grep.
             local hook_line=""
-            if [ -s "$live_dmesg" ]; then
-                hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
-            fi
-            if [ -z "$hook_line" ]; then
+            local _i=0
+            while [ $_i -lt 24 ]; do
+                if [ -s "$live_dmesg" ]; then
+                    hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
+                    [ -n "$hook_line" ] && break
+                fi
                 hook_line=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
-            fi
+                [ -n "$hook_line" ] && break
+                sleep 0.25
+                _i=$((_i + 1))
+            done
 
             if [ -n "$hook_line" ]; then
                 printf "  ${KH_GREEN}PASS${KH_RESET} $avd/%s (API %s, kernel %s)\n" "$c" "$sdk" "$uname"
