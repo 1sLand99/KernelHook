@@ -26,14 +26,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # `set -u` would raise on an empty array re-expansion.
 KH_MODE="sdk"
 KH_CONSUMERS="hello_hook,fp_hook,hook_chain,hook_wrap_args,ksyms_lookup"
+KH_KEEP_EMULATOR=0
 NEW_ARGS=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --mode=*)      KH_MODE="${1#--mode=}"; shift ;;
-        --consumers=*) KH_CONSUMERS="${1#--consumers=}"; shift ;;
-        --)            shift; while [ "$#" -gt 0 ]; do NEW_ARGS+=("$1"); shift; done ;;
-        -*)            echo "unknown flag $1" >&2; exit 2 ;;
-        *)             NEW_ARGS+=("$1"); shift ;;
+        --mode=*)        KH_MODE="${1#--mode=}"; shift ;;
+        --consumers=*)   KH_CONSUMERS="${1#--consumers=}"; shift ;;
+        --keep-emulator) KH_KEEP_EMULATOR=1; shift ;;
+        --)              shift; while [ "$#" -gt 0 ]; do NEW_ARGS+=("$1"); shift; done ;;
+        -*)              echo "unknown flag $1" >&2; exit 2 ;;
+        *)               NEW_ARGS+=("$1"); shift ;;
     esac
 done
 set -- "${NEW_ARGS[@]+"${NEW_ARGS[@]}"}"
@@ -158,6 +160,11 @@ FAIL_COUNT=0
 SKIP_COUNT=0
 
 kill_emulator() {
+    # In --keep-emulator mode, we co-exist with running emulators (the user's
+    # parallel AVDs and any unrelated emulator like a kptest device). Skip
+    # any kill so we don't blow them away.
+    if [ "$KH_KEEP_EMULATOR" -eq 1 ]; then return 0; fi
+
     # Kill all emulators on all ports
     for serial in $(adb devices 2>/dev/null | grep 'emulator-' | awk '{print $1}'); do
         adb -s "$serial" emu kill >/dev/null 2>&1 || true
@@ -177,37 +184,59 @@ test_avd() {
     local avd="$1"
     printf "\n${KH_BOLD}======== Testing $avd ========${KH_RESET}\n"
 
-    # Kill any running emulator
-    kill_emulator
-
-    # Start emulator
-    "$EMULATOR" -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot-load -gpu swiftshader_indirect >/dev/null 2>&1 &
-    local emu_pid=$!
-
-    # Wait for boot (max 120s)
-    local booted=0
-    for i in $(seq 1 24); do
-        sleep 5
-        local boot=$(adb -s emulator-5554 shell "getprop sys.boot_completed" 2>/dev/null | tr -d '[:space:]')
-        if [ "$boot" = "1" ]; then booted=1; break; fi
-    done
-
-    if [ "$booted" -ne 1 ]; then
-        printf "  ${KH_RED}SKIP${KH_RESET} $avd: boot timeout\n"
-        RESULTS+=("SKIP|$avd|boot_timeout||")
-        SKIP_COUNT=$((SKIP_COUNT + 1))
+    # In --keep-emulator mode: scan running emulators for one whose AVD name
+    # matches; reuse that serial. Skip kill_emulator + emulator launch + boot
+    # loop. Lets multiple AVDs (or unrelated AVDs like kptest) coexist.
+    local SERIAL="emulator-5554"
+    if [ "$KH_KEEP_EMULATOR" -eq 1 ]; then
+        local _kept=""
+        local s
+        for s in $(adb devices 2>/dev/null | awk '/emulator-/{print $1}'); do
+            local name
+            name=$(adb -s "$s" emu avd name 2>/dev/null | head -1 | tr -d '\r')
+            if [ "$name" = "$avd" ]; then _kept="$s"; break; fi
+        done
+        if [ -z "$_kept" ]; then
+            printf "  ${KH_YELLOW}SKIP${KH_RESET} $avd: --keep-emulator set but no running emulator matches\n"
+            RESULTS+=("SKIP|$avd|not_running||")
+            SKIP_COUNT=$((SKIP_COUNT + 1))
+            return
+        fi
+        SERIAL="$_kept"
+        printf "  reusing $SERIAL (--keep-emulator)\n"
+    else
+        # Kill any running emulator
         kill_emulator
-        return
+
+        # Start emulator
+        "$EMULATOR" -avd "$avd" -no-window -no-audio -no-boot-anim -no-snapshot-load -gpu swiftshader_indirect >/dev/null 2>&1 &
+        local emu_pid=$!
+
+        # Wait for boot (max 120s)
+        local booted=0
+        for i in $(seq 1 24); do
+            sleep 5
+            local boot=$(adb -s "$SERIAL" shell "getprop sys.boot_completed" 2>/dev/null | tr -d '[:space:]')
+            if [ "$boot" = "1" ]; then booted=1; break; fi
+        done
+
+        if [ "$booted" -ne 1 ]; then
+            printf "  ${KH_RED}SKIP${KH_RESET} $avd: boot timeout\n"
+            RESULTS+=("SKIP|$avd|boot_timeout||")
+            SKIP_COUNT=$((SKIP_COUNT + 1))
+            kill_emulator
+            return
+        fi
     fi
 
     # Get root — must happen before any privileged operations.
     # adb root restarts adbd, so we re-establish the connection.
-    adb -s emulator-5554 root >/dev/null 2>&1
+    adb -s $SERIAL root >/dev/null 2>&1
     sleep 3
-    adb -s emulator-5554 wait-for-device >/dev/null 2>&1
+    adb -s $SERIAL wait-for-device >/dev/null 2>&1
 
-    local uname=$(adb -s emulator-5554 shell "uname -r" 2>/dev/null | tr -d '[:space:]')
-    local sdk=$(adb -s emulator-5554 shell "getprop ro.build.version.sdk" 2>/dev/null | tr -d '[:space:]')
+    local uname=$(adb -s $SERIAL shell "uname -r" 2>/dev/null | tr -d '[:space:]')
+    local sdk=$(adb -s $SERIAL shell "getprop ro.build.version.sdk" 2>/dev/null | tr -d '[:space:]')
     printf "  API: %s  Kernel: %s\n" "$sdk" "$uname"
 
     # Skip kernels before 4.4 — 3.18's ARM64 module loader hangs on large
@@ -223,7 +252,7 @@ test_avd() {
     fi
 
     # Check if modules are supported
-    local mod_support=$(adb -s emulator-5554 shell "zcat /proc/config.gz 2>/dev/null | grep '^CONFIG_MODULES=y'" 2>/dev/null | tr -d '[:space:]')
+    local mod_support=$(adb -s $SERIAL shell "zcat /proc/config.gz 2>/dev/null | grep '^CONFIG_MODULES=y'" 2>/dev/null | tr -d '[:space:]')
     if [ "$mod_support" != "CONFIG_MODULES=y" ]; then
         printf "  ${KH_YELLOW}SKIP${KH_RESET} $avd: CONFIG_MODULES not enabled\n"
         RESULTS+=("SKIP|$avd|no_modules|$sdk|$uname")
@@ -265,10 +294,10 @@ test_avd() {
     fi
 
     # Setup device — run all privileged ops in a single shell to avoid root loss
-    adb -s emulator-5554 shell "setenforce 0; echo 0 > /proc/sys/kernel/kptr_restrict; echo 0 > /proc/sys/kernel/panic_on_oops" >/dev/null 2>&1 || true
+    adb -s $SERIAL shell "setenforce 0; echo 0 > /proc/sys/kernel/kptr_restrict; echo 0 > /proc/sys/kernel/panic_on_oops" >/dev/null 2>&1 || true
 
     # Get kallsyms_lookup_name address
-    local kaddr=$(adb -s emulator-5554 shell "cat /proc/kallsyms" 2>/dev/null | grep -E ' [Tt] kallsyms_lookup_name$' | awk '{print $1}' | head -1)
+    local kaddr=$(adb -s $SERIAL shell "cat /proc/kallsyms" 2>/dev/null | grep -E ' [Tt] kallsyms_lookup_name$' | awk '{print $1}' | head -1)
     if [ -z "$kaddr" ] || [ "$kaddr" = "0000000000000000" ]; then
         kaddr="0"
     fi
@@ -278,7 +307,7 @@ test_avd() {
     # kmod_loader can auto-resolve CRCs from vendor modules on device, but older AVDs
     # (API <31) may lack vendor .ko files.
     local crc_args=""
-    local crc_output=$(python3 "$ROOT/scripts/extract_avd_crcs.py" -s emulator-5554 module_layout _printk printk memcpy memset 2>/dev/null || echo "")
+    local crc_output=$(python3 "$ROOT/scripts/extract_avd_crcs.py" -s $SERIAL module_layout _printk printk memcpy memset 2>/dev/null || echo "")
     if [ -n "$crc_output" ]; then
         crc_args=$(echo "$crc_output" | grep '^--crc' | tr '\n' ' ' || true)
     fi
@@ -299,16 +328,16 @@ test_avd() {
         #   ksymtab=24B               → abs64                (GKI 5.4..5.15)
         # Missing variants are silently skipped — the legacy single-.ko build
         # still works for developers who haven't run `make module-dual` yet.
-        adb -s emulator-5554 push "$ROOT/kmod/kernelhook.ko"                            /data/local/tmp/kernelhook.ko                  >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-prel32.ko" ]           && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-prel32.ko"           /data/local/tmp/kernelhook-prel32.ko           >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]            && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64.ko"            /data/local/tmp/kernelhook-abs64.ko            >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" ] && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" /data/local/tmp/kernelhook-abs64-legacy-u32.ko >/dev/null 2>&1 || true
-        [ -f "$ROOT/kmod/kernelhook-abs64-legacy.ko" ]     && adb -s emulator-5554 push "$ROOT/kmod/kernelhook-abs64-legacy.ko"     /data/local/tmp/kernelhook-abs64-legacy.ko     >/dev/null 2>&1 || true
+        adb -s $SERIAL push "$ROOT/kmod/kernelhook.ko"                            /data/local/tmp/kernelhook.ko                  >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-prel32.ko" ]           && adb -s $SERIAL push "$ROOT/kmod/kernelhook-prel32.ko"           /data/local/tmp/kernelhook-prel32.ko           >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64.ko" ]            && adb -s $SERIAL push "$ROOT/kmod/kernelhook-abs64.ko"            /data/local/tmp/kernelhook-abs64.ko            >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" ] && adb -s $SERIAL push "$ROOT/kmod/kernelhook-abs64-legacy-u32.ko" /data/local/tmp/kernelhook-abs64-legacy-u32.ko >/dev/null 2>&1 || true
+        [ -f "$ROOT/kmod/kernelhook-abs64-legacy.ko" ]     && adb -s $SERIAL push "$ROOT/kmod/kernelhook-abs64-legacy.ko"     /data/local/tmp/kernelhook-abs64-legacy.ko     >/dev/null 2>&1 || true
         for c in "${CONSUMER_ARR[@]}"; do
-            adb -s emulator-5554 push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1 || true
+            adb -s $SERIAL push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1 || true
         done
     else
-        adb -s emulator-5554 push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null 2>&1 || true
+        adb -s $SERIAL push "$ROOT/tests/kmod/kh_test.ko"             /data/local/tmp/kh_test.ko    >/dev/null 2>&1 || true
     fi
     # Pick kmod_loader variant by kernel version. Pre-5.10 kernels trip
     # the NDK-r30 static bionic's MADV_WIPEONFORK abort on arc4random init;
@@ -322,8 +351,8 @@ test_avd() {
             printf "  loader: kmod_loader_dyn (dynamic — pre-5.10 kernel)\n"
         fi
     fi
-    adb -s emulator-5554 push "$use_loader" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
-    adb -s emulator-5554 shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null 2>&1 || true
+    adb -s $SERIAL push "$use_loader" /data/local/tmp/kmod_loader >/dev/null 2>&1 || true
+    adb -s $SERIAL shell "chmod +x /data/local/tmp/kmod_loader" >/dev/null 2>&1 || true
 
     # Unload any stale modules from a previous run. In SDK mode consumers must
     # come off first (reverse-order) because each holds a refcount on
@@ -335,11 +364,11 @@ test_avd() {
             stale_cmd+="rmmod ${CONSUMER_ARR[$_i]} 2>/dev/null; "
         done
         stale_cmd+="rmmod kernelhook 2>/dev/null; true"
-        adb -s emulator-5554 shell "$stale_cmd" >/dev/null 2>&1 || true
+        adb -s $SERIAL shell "$stale_cmd" >/dev/null 2>&1 || true
     else
-        adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1 || true
+        adb -s $SERIAL shell "rmmod kh_test" >/dev/null 2>&1 || true
     fi
-    adb -s emulator-5554 shell "dmesg -c" >/dev/null 2>&1 || true
+    adb -s $SERIAL shell "dmesg -c" >/dev/null 2>&1 || true
 
     # Live kernel-log capture: survives emulator death so kernel panic
     # (BUG:/Oops/Call trace) is retrievable even when init_module aborts
@@ -347,7 +376,7 @@ test_avd() {
     # `dmesg -w` which pipes through userspace buffering.
     local live_dmesg="/tmp/kh_dmesg_${avd}.log"
     rm -f "$live_dmesg"
-    adb -s emulator-5554 shell "cat /dev/kmsg" > "$live_dmesg" 2>&1 &
+    adb -s $SERIAL shell "cat /dev/kmsg" > "$live_dmesg" 2>&1 &
     local dmesg_pid=$!
     sleep 1
 
@@ -356,7 +385,7 @@ test_avd() {
     if [ "$effective_mode" = "sdk" ]; then
         # Step 1: insmod kernelhook.ko (the SDK base). Host-side 60s timeout
         # since Android 'timeout' may not exist on old AVDs.
-        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
+        load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s $SERIAL shell "/data/local/tmp/kmod_loader /data/local/tmp/kernelhook.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
         load_rc=$?
         if ! echo "$load_output" | grep -qi "loaded"; then
             sleep 1
@@ -376,7 +405,7 @@ test_avd() {
         # makes per-consumer failures unambiguous (no chain cross-talk).
         local golden_captured=0
         for c in "${CONSUMER_ARR[@]}"; do
-            load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
+            load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s $SERIAL shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
             load_rc=$?
 
             local marker
@@ -396,7 +425,7 @@ test_avd() {
                     hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
                     [ -n "$hook_line" ] && break
                 fi
-                hook_line=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
+                hook_line=$(adb -s $SERIAL shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
                 [ -n "$hook_line" ] && break
                 sleep 0.25
                 _i=$((_i + 1))
@@ -422,20 +451,20 @@ test_avd() {
                     golden_captured=1
                     local golden_dir="$ROOT/tests/golden/strategy_matrix/values"
                     mkdir -p "$golden_dir"
-                    adb -s emulator-5554 root >/dev/null 2>&1 || true
+                    adb -s $SERIAL root >/dev/null 2>&1 || true
                     sleep 1
-                    adb -s emulator-5554 wait-for-device >/dev/null 2>&1 || true
+                    adb -s $SERIAL wait-for-device >/dev/null 2>&1 || true
                     # Snapshot lines emitted by kh_strategy_post_init() right
                     # before hello_hook's init returns. tail -N captures only
                     # the most recent dump (the module is loaded anew every
                     # AVD run so earlier snapshots are absent from this boot).
                     local strategies_dump
-                    strategies_dump=$(adb -s emulator-5554 shell 'dmesg 2>/dev/null' | tr -d '\r' \
+                    strategies_dump=$(adb -s $SERIAL shell 'dmesg 2>/dev/null' | tr -d '\r' \
                         | grep -E '\[kh_strategy\][^A-Z]*prio=' \
                         | sed -E 's/^.*\[kh_strategy\] //' | tail -200)
                     if [ -n "$strategies_dump" ]; then
                         local banner_sha
-                        banner_sha=$(adb -s emulator-5554 shell 'cat /proc/version' 2>/dev/null | tr -d '\r' | shasum -a 256 | awk '{print $1}')
+                        banner_sha=$(adb -s $SERIAL shell 'cat /proc/version' 2>/dev/null | tr -d '\r' | shasum -a 256 | awk '{print $1}')
                         local git_sha
                         git_sha=$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo nogit)
                         local kimage_voff memstart pgd thread_size pt_regs
@@ -508,7 +537,7 @@ test_avd() {
                 if [ -s "$live_dmesg" ]; then
                     grep -E "${c}:|kernelhook:" "$live_dmesg" | tail -10 | sed 's/^/       live: /'
                 fi
-                adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep -E "${c}:|kernelhook:" | tail -10 | sed 's/^/       poll: /'
+                adb -s $SERIAL shell "dmesg" 2>/dev/null | grep -E "${c}:|kernelhook:" | tail -10 | sed 's/^/       poll: /'
                 RESULTS+=("FAIL|$avd|sdk_consumer:$c|$sdk|$uname")
                 FAIL_COUNT=$((FAIL_COUNT + 1))
             fi
@@ -516,7 +545,7 @@ test_avd() {
             # rmmod this consumer before loading the next. Don't abort the
             # loop on a single failure — keep going so every consumer gets
             # its own PASS/FAIL line.
-            adb -s emulator-5554 shell "rmmod $c 2>/dev/null; true" >/dev/null 2>&1 || true
+            adb -s $SERIAL shell "rmmod $c 2>/dev/null; true" >/dev/null 2>&1 || true
         done
 
         # Let adb drain any in-flight kernel-log lines + check panic.
@@ -529,7 +558,7 @@ test_avd() {
         fi
 
         # Final cleanup: kernelhook.ko off last. Consumers already rmmod'd in-loop.
-        adb -s emulator-5554 shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
+        adb -s $SERIAL shell "rmmod kernelhook 2>/dev/null; true" >/dev/null 2>&1 || true
         kill_emulator
         return
     else
@@ -538,7 +567,7 @@ test_avd() {
         # 60s. Bump alarm to 300s; success is also inferred from dmesg having
         # the "=== Results:" summary (init completed even if loader output
         # was truncated by SIGALRM).
-        load_output=$(perl -e 'alarm 300; exec @ARGV' adb -s emulator-5554 shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
+        load_output=$(perl -e 'alarm 300; exec @ARGV' adb -s $SERIAL shell "/data/local/tmp/kmod_loader /data/local/tmp/kh_test.ko kallsyms_addr=0x${kaddr} ${crc_args} kh_consistency_check=1" 2>&1) || true
         load_rc=$?
     fi
 
@@ -568,8 +597,8 @@ test_avd() {
 
     # Wait for tests and capture results
     sleep 3
-    local dmesg=$(adb -s emulator-5554 shell "dmesg" 2>/dev/null | grep "kh_test:")
-    adb -s emulator-5554 shell "rmmod kh_test" >/dev/null 2>&1
+    local dmesg=$(adb -s $SERIAL shell "dmesg" 2>/dev/null | grep "kh_test:")
+    adb -s $SERIAL shell "rmmod kh_test" >/dev/null 2>&1
 
     # Parse results
     local summary=$(echo "$dmesg" | grep "Results:")
@@ -608,7 +637,7 @@ test_avd() {
         # wild can go either way — 5.4 android11 = abs64, 5.15 android13
         # = prel32, 6.1+ = prel32 — so probe at test time.
         local kh_layout="prel32"
-        if adb -s emulator-5554 shell 'su 0 sh -c "zcat /proc/config.gz 2>/dev/null | grep -q CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y"' 2>/dev/null; then
+        if adb -s $SERIAL shell 'su 0 sh -c "zcat /proc/config.gz 2>/dev/null | grep -q CONFIG_HAVE_ARCH_PREL32_RELOCATIONS=y"' 2>/dev/null; then
             kh_layout="prel32"
         else
             kh_layout="abs64"
@@ -633,7 +662,7 @@ test_avd() {
             FAIL_COUNT=$((FAIL_COUNT + 1))
         else
             if KADDR="0x${kaddr}" CRC_ARGS="${crc_args}" \
-               "$ROOT/tests/kmod/export_link_test/test_on_avd.sh" emulator-5554; then
+               "$ROOT/tests/kmod/export_link_test/test_on_avd.sh" $SERIAL; then
                 printf "  ${KH_GREEN}PASS${KH_RESET} $avd: export_link_test (Ring 3)\n"
                 RESULTS+=("PASS|$avd|export_link_test|$sdk|$uname")
             else
