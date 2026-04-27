@@ -39,7 +39,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # also runs the kh_root demo + Ring 3 sweep.
 KH_MODE="sdk"
 KH_SERIAL=""
-KH_CONSUMERS="hello_hook,fp_hook,hook_chain,hook_wrap_args,ksyms_lookup"
+# ksyms_lookup first: it installs no hook, so its init pr_info lines land
+# in dmesg before the four hook-installing consumers start spamming on
+# every do_sys_openat2. Same dmesg-eviction race as test_avd_kmod.sh —
+# arguably worse on real devices, where the openat rate is higher than
+# any AVD (more running apps).
+KH_CONSUMERS="ksyms_lookup,hello_hook,fp_hook,hook_chain,hook_wrap_args"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --mode=*)      KH_MODE="${1#--mode=}"; shift ;;
@@ -302,8 +307,19 @@ if [ "$KH_MODE" = "sdk" ]; then
     SDK_FAIL_NAMES=""
     for c in "${CONSUMER_ARR[@]}"; do
         printf "\n  ${BOLD}---- consumer: %s ----${RESET}\n" "$c"
+        MARKER="$(consumer_marker "$c")"
+
+        # Race fix (same as test_avd_kmod.sh): with [permanent] hooks
+        # cascading, the kernel ring buffer cycles in well under a
+        # second once 4 consumers are loaded. Run the loader and grep
+        # dmesg for the marker in the SAME adb-shell so the grep hits
+        # microseconds after finit_module returns — before the spam
+        # can evict the init line. Sentinel splits the two outputs.
+        _esc_marker=$(printf '%s' "$MARKER" | sed -e 's/[\\"`$]/\\&/g')
         LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
-            $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS}'" 2>&1) || true
+            $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} 2>&1; echo __KH_MARK_GREP__; dmesg 2>/dev/null | grep -F \"$_esc_marker\" | tail -1'" 2>&1) || true
+        _race_marker_line=$(echo "$LOAD_OUTPUT" | awk '/__KH_MARK_GREP__/{found=1; next} found' | tail -1)
+        LOAD_OUTPUT=$(echo "$LOAD_OUTPUT" | awk '/__KH_MARK_GREP__/{exit} {print}')
         if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
             printf "  ${RED}FAIL${RESET} %s.ko load failed\n" "$c"
             echo "$LOAD_OUTPUT" | sed 's/^/       /'
@@ -312,16 +328,19 @@ if [ "$KH_MODE" = "sdk" ]; then
             continue
         fi
 
-        sleep 2
-        MARKER="$(consumer_marker "$c")"
-        # Prefer fresh `dmesg`; fall back to /dev/kmsg live capture in case
-        # callback spam has evicted the init line from the ring buffer.
-        SETUP_DMESG=$(dsu "dmesg" 2>/dev/null)
-        SETUP_LINE=""
-        if echo "$SETUP_DMESG" | grep -q "$MARKER"; then
-            SETUP_LINE=$(echo "$SETUP_DMESG" | grep "$MARKER" | tail -1)
-        elif [ -s "$LIVE_KMSG" ]; then
-            SETUP_LINE=$(grep "$MARKER" "$LIVE_KMSG" | tail -1)
+        # Prefer the race-captured line; otherwise fall back to a fresh
+        # dmesg / live-kmsg sweep (race window may have missed; spam may
+        # have started before grep ran).
+        SETUP_LINE="$_race_marker_line"
+        SETUP_DMESG=""
+        if [ -z "$SETUP_LINE" ]; then
+            sleep 2
+            SETUP_DMESG=$(dsu "dmesg" 2>/dev/null)
+            if echo "$SETUP_DMESG" | grep -q "$MARKER"; then
+                SETUP_LINE=$(echo "$SETUP_DMESG" | grep "$MARKER" | tail -1)
+            elif [ -s "$LIVE_KMSG" ]; then
+                SETUP_LINE=$(grep "$MARKER" "$LIVE_KMSG" | tail -1)
+            fi
         fi
         if [ -z "$SETUP_LINE" ]; then
             printf "  ${RED}FAIL${RESET} %s: setup marker '%s' not found\n" "$c" "$MARKER"
