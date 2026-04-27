@@ -25,7 +25,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # `"${NEW_ARGS[@]+...}"` form avoids the "unbound variable" error that
 # `set -u` would raise on an empty array re-expansion.
 KH_MODE="sdk"
-KH_CONSUMERS="hello_hook,fp_hook,hook_chain,hook_wrap_args,ksyms_lookup"
+# Consumer order matters: hook-installing consumers (hello_hook, fp_hook,
+# hook_chain, hook_wrap_args) hook do_sys_openat2 and pr_info() on every
+# call.  Their callbacks are [permanent] under the kernelhook refcount, so
+# rmmod between consumers does NOT detach them.  By the time a 5th consumer
+# loads, four hooks are firing on every openat (~9 lines/call) — fast enough
+# to evict the kernel ring buffer (≈256 KB) and saturate the host-side
+# `cat /dev/kmsg` pipe before the marker check sees the new init pr_info.
+# Run ksyms_lookup (no hook installation, six lookup pr_info lines) FIRST so
+# its marker is captured cleanly before any hook spam starts.
+KH_CONSUMERS="ksyms_lookup,hello_hook,fp_hook,hook_chain,hook_wrap_args"
 KH_KEEP_EMULATOR=0
 NEW_ARGS=()
 while [ "$#" -gt 0 ]; do
@@ -405,11 +414,35 @@ test_avd() {
         # makes per-consumer failures unambiguous (no chain cross-talk).
         local golden_captured=0
         for c in "${CONSUMER_ARR[@]}"; do
-            load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s $SERIAL shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args}" 2>&1) || true
-            load_rc=$?
-
             local marker
             marker="$(consumer_marker "$c")"
+
+            # Race condition: hook-installing consumers (hello_hook /
+            # fp_hook / hook_chain / hook_wrap_args) [permanent]-pin under
+            # kernelhook so rmmod between consumers does not detach them.
+            # By the time the 4th or 5th consumer loads, every preceding
+            # hook fires on every do_sys_openat2 (dozens of pr_info lines
+            # per call). The kernel log_buf (≈256 KB) cycles in <1 s under
+            # that load, evicting the new consumer's init marker BEFORE a
+            # later `adb shell dmesg` poll can see it. /dev/kmsg cat over
+            # adb-shell hits pipe back-pressure even sooner (EPIPE at the
+            # writer) and stops capturing.
+            #
+            # Fix: run the loader AND grab the relevant dmesg slice in the
+            # SAME adb-shell invocation. The grep happens microseconds
+            # after finit_module returns (init's pr_info is synchronous
+            # under printk), so the marker is still in the ring buffer.
+            local _esc_marker
+            _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g')
+            load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s $SERIAL shell "
+                /data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args} 2>&1
+                echo '__KH_MARK_GREP__'
+                dmesg 2>/dev/null | grep -F \"$_esc_marker\" | tail -1
+            " 2>&1) || true
+            load_rc=$?
+            local _race_marker_line
+            _race_marker_line=$(echo "$load_output" | awk '/__KH_MARK_GREP__/{found=1; next} found' | tail -1)
+            load_output=$(echo "$load_output" | awk '/__KH_MARK_GREP__/{exit} {print}')
             # Bounded polling — adb's `cat /dev/kmsg` pipe buffers until a
             # line break lands at the far end, so a single `sleep 2 + grep`
             # can miss a one-shot init line by up to ~5 s on slower AVDs
@@ -418,18 +451,21 @@ test_avd() {
             # callback spam (hook_wrap_args is a notable offender) is why
             # we prefer live_dmesg, but fall back to dmesg if the pipe-drain
             # lags the grep.
-            local hook_line=""
-            local _i=0
-            while [ $_i -lt 24 ]; do
-                if [ -s "$live_dmesg" ]; then
-                    hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
+            # Prefer the race-captured marker line when the inline grep hit.
+            local hook_line="$_race_marker_line"
+            if [ -z "$hook_line" ]; then
+                local _i=0
+                while [ $_i -lt 24 ]; do
+                    if [ -s "$live_dmesg" ]; then
+                        hook_line=$(grep "$marker" "$live_dmesg" | tail -1)
+                        [ -n "$hook_line" ] && break
+                    fi
+                    hook_line=$(adb -s $SERIAL shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
                     [ -n "$hook_line" ] && break
-                fi
-                hook_line=$(adb -s $SERIAL shell "dmesg" 2>/dev/null | grep "$marker" | tail -1)
-                [ -n "$hook_line" ] && break
-                sleep 0.25
-                _i=$((_i + 1))
-            done
+                    sleep 0.25
+                    _i=$((_i + 1))
+                done
+            fi
 
             if [ -n "$hook_line" ]; then
                 printf "  ${KH_GREEN}PASS${KH_RESET} $avd/%s (API %s, kernel %s)\n" "$c" "$sdk" "$uname"
