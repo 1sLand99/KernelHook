@@ -2797,6 +2797,8 @@ static int do_load(int argc, char *argv[], int dry_run)
     }
 
     /* Step 5: Try finit_module with IGNORE flags (bypasses CRC/vermagic on supported kernels) */
+    int finit_errno = 0;
+    int finit_attempted = 0;
     {
         char tmppath[] = "/data/local/tmp/.kmod_XXXXXX";
         int tmpfd = mkstemp(tmppath);
@@ -2818,6 +2820,7 @@ static int do_load(int argc, char *argv[], int dry_run)
                     fflush(stderr);
                     int ret = (int)syscall(__NR_finit_module, tmpfd, params, flags_lax);
                     int err = errno;
+                    finit_attempted = 1;
                     fprintf(stderr, "kmod_loader: finit_module(lax) → ret=%d errno=%d (%s)\n",
                             ret, err, strerror(err));
                     fflush(stderr);
@@ -2838,6 +2841,7 @@ static int do_load(int argc, char *argv[], int dry_run)
                         free(mod);
                         return 0;
                     }
+                    finit_errno = err;
                     fprintf(stderr, "kmod_loader: finit_module: %s (errno=%d)\n",
                             strerror(err), err);
                 } else {
@@ -2850,7 +2854,27 @@ static int do_load(int argc, char *argv[], int dry_run)
         }
     }
 
-    /* Step 6: Fallback — init_module with patched binary */
+    /* Step 6: Fallback — init_module with patched binary.
+     *
+     * Safety guard: if finit_module was attempted and rejected the file with
+     * ENOEXEC, the kernel actively rejected the .ko format (struct module
+     * layout, CFI hash, ksymtab/__versions, etc.). Calling init_module on
+     * the same patched buffer is at best identical-fail and at worst
+     * accepted-then-panic-during-init — issue #13 reported a 4.19 OnePlus
+     * device hard-hanging here with no kmsg flush. Skip the fallback by
+     * default; KH_FORCE_INIT_MODULE=1 opts back into the legacy behaviour
+     * for diagnostics on kernels you've confirmed safe. Errors other than
+     * ENOEXEC (EPERM, ENOKEY, EBUSY, EAGAIN) still try init_module since
+     * those don't indicate a format rejection. */
+    if (finit_attempted && finit_errno == ENOEXEC && !getenv("KH_FORCE_INIT_MODULE")) {
+        fprintf(stderr,
+                "kmod_loader: finit_module returned ENOEXEC — kernel rejected the .ko format. "
+                "Skipping init_module fallback to avoid panic-on-bad-init "
+                "(set KH_FORCE_INIT_MODULE=1 to override).\n");
+        free(mod);
+        return 1;
+    }
+
     fprintf(stderr, "kmod_loader: trying init_module (size=%lu, alloc=%zu)\n",
             (unsigned long)st.st_size, mod_size);
     int ret = (int)syscall(__NR_init_module, mod, (unsigned long)st.st_size, params);
