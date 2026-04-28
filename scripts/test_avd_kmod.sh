@@ -433,7 +433,10 @@ test_avd() {
             # after finit_module returns (init's pr_info is synchronous
             # under printk), so the marker is still in the ring buffer.
             local _esc_marker
-            _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g')
+            # Escape for the `adb shell "…"` outer double-quote (\\, ", `, $)
+            # AND any single quote (defensive — none today, but a future
+            # marker like `it's hooked` would otherwise need a separate fix).
+            _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g' -e "s/'/'\\\\''/g")
             load_output=$(perl -e 'alarm 60; exec @ARGV' adb -s $SERIAL shell "
                 /data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${kaddr} ${crc_args} 2>&1
                 echo '__KH_MARK_GREP__'

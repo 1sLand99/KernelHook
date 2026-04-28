@@ -29,6 +29,8 @@ Verified on AVD emulators (Pixel_28..Pixel_37) and a Pixel USB device:
 
 `kmod_loader` introspects vendor .ko files on the device to auto-select the right layout; physical devices and AVDs share the same code path.
 
+> **Note**: AVD coverage is GKI-pinned (e.g. Pixel_34 = 6.1.23-android14-4). Real devices on later 6.1 sub-versions (e.g. Pixel 6 / 6.1.99-android14-11) inherit Android 15+ kCFI initcall checks and need the graft path even though their major.minor still says 6.1.
+
 ## Documentation
 
 - [Getting Started](docs/en/getting-started.md) · [API Reference](docs/en/api-reference.md) · [kh_root Demo](docs/en/kh-root-demo.md)

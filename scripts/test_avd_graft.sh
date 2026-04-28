@@ -186,7 +186,11 @@ test_avd() {
     local serial
     serial=$(start_avd "$avd")
     if [ -z "$serial" ]; then
-        printf "  ${KH_RED}SKIP${KH_RESET} %s: boot timeout\n" "$avd"
+        if [ "$KEEP_EMULATOR" -eq 1 ]; then
+            printf "  ${KH_RED}SKIP${KH_RESET} %s: --keep-emulator set but no running emulator matches\n" "$avd"
+        else
+            printf "  ${KH_RED}SKIP${KH_RESET} %s: boot timeout\n" "$avd"
+        fi
         return 1
     fi
     adb -s "$serial" root >/dev/null 2>&1
@@ -254,7 +258,8 @@ test_avd() {
         local marker
         marker=$(consumer_marker "$c")
         local _esc_marker
-        _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g')
+        # See test_avd_kmod.sh: escape outer-quote chars + single quote.
+        _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g' -e "s/'/'\\\\''/g")
         local _out
         _out=$(adb -s "$serial" shell "
             /data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x$kaddr >/dev/null 2>&1

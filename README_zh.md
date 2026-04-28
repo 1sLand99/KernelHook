@@ -29,6 +29,8 @@
 
 `kmod_loader` 在设备上解析 vendor .ko 自动选择布局；真机与 AVD 共用同一路径。
 
+> **注意**：AVD 覆盖范围按 GKI 镜像版本钉死（如 Pixel_34 = 6.1.23-android14-4）。真机如果跑的是更新的 6.1 sub-version（如 Pixel 6 / 6.1.99-android14-11），即便主次版本号还叫 6.1，也已带上 Android 15+ 的 kCFI initcall 检查，需要走 graft 路径。
+
 ## 文档
 
 - [快速上手](docs/zh/getting-started.md) · [API 参考](docs/zh/api-reference.md) · [kh_root Demo](docs/zh/kh-root-demo.md)

@@ -321,7 +321,12 @@ if [ "$KH_MODE" = "sdk" ]; then
         # dmesg for the marker in the SAME adb-shell so the grep hits
         # microseconds after finit_module returns — before the spam
         # can evict the init line. Sentinel splits the two outputs.
-        _esc_marker=$(printf '%s' "$MARKER" | sed -e 's/[\\"`$]/\\&/g')
+        # Escape backslash, double-quote, backtick, dollar (for the
+        # outer `adb shell "…"` double-quote layer) AND single-quote (for
+        # the inner `su -c '…'` layer this script wraps with). Markers
+        # today don't contain `'`, but a future marker like `it's hooked`
+        # would terminate the su payload prematurely without this.
+        _esc_marker=$(printf '%s' "$MARKER" | sed -e 's/[\\"`$]/\\&/g' -e "s/'/'\\\\''/g")
         LOAD_OUTPUT=$(perl -e 'alarm 60; exec @ARGV' \
             $ADB shell "su -c '/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x${KADDR} ${CRC_ARGS} 2>&1; echo __KH_MARK_GREP__; dmesg 2>/dev/null | grep -F \"$_esc_marker\" | tail -1'" 2>&1) || true
         _race_marker_line=$(echo "$LOAD_OUTPUT" | awk '/__KH_MARK_GREP__/{found=1; next} found' | tail -1)
