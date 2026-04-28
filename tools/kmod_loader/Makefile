@@ -21,16 +21,17 @@ CROSS_LD := $(KH_LD)
 #   HOSTCC     — real host compiler (native mac/linux). Used for graft_vendor_ko
 #                which runs on the developer machine.
 #   LOADER_CC  — cross-compiler producing aarch64-android binaries for
-#                kmod_loader / kmod_loader_dyn (target device).  Defaults to
-#                HOSTCC for legacy invocations; scripts set it explicitly via
-#                `make LOADER_CC=$KH_CC` to invoke the NDK.
+#                kmod_loader / kmod_loader_dyn (target device). Defaults to the
+#                detected NDK ($(KH_CC)) so a bare `make` works out-of-the-box.
 # Historically this Makefile overloaded HOSTCC to mean both; scripts passed
 # HOSTCC=$NDK-clang which then broke graft_vendor_ko (compiled for
 # aarch64-android) or, on macOS with HOSTCC=cc, broke kmod_loader (no <elf.h>
 # in macOS SDK for aarch64 output).  Splitting the two lets `make all` succeed
-# on macOS hosts too.
+# on macOS hosts too. Earlier this file defaulted LOADER_CC to HOSTCC, which
+# made `make` on glibc hosts try to build kmod_loader with system gcc — that
+# fails on `strlcat` (bionic-only) and produces a non-aarch64 binary anyway.
 HOSTCC    ?= cc
-LOADER_CC ?= $(HOSTCC)
+LOADER_CC ?= $(KH_CC)
 
 # Device database codegen (Plan 2 Milestone A).
 GEN_DEVICES := $(realpath ../gen_devices_table.py)
