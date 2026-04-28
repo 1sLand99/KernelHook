@@ -172,7 +172,7 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
              -fno-PIE -fno-pic \
              -mcmodel=large \
              -fno-optimize-sibling-calls \
-             -mbranch-protection=standard \
+             -mbranch-protection=bti \
              -I$(KERNELHOOK_DIR)/shim/include \
              -I$(KH_ROOT)/include \
              -I$(KH_ROOT)/include/arch/arm64 \
@@ -187,26 +187,42 @@ KH_CFLAGS := -DKMOD_FREESTANDING \
 ifeq ($(KH_PAYLOAD),1)
   KH_CFLAGS += -DKH_PAYLOAD
 endif
-# -fno-optimize-sibling-calls + -mbranch-protection=standard: Pixel production
-# kernels mark both kernel .text and module vmalloc .text with PROT_BTI, and
-# Android 15 GKI 6.6 additionally requires modules to declare FEAT_PAC via
-# .note.gnu.property (vendor modules compiled with pac-ret show `paciasp` at
-# function entry; kernels without the note silently ENOEXEC).  `standard`
-# = bti + pac-ret + pauth-lr, matching stock Android common kernel
-# toolchain.  `paciasp` is a HINT instruction: on CPUs without FEAT_PAuth
-# it decodes as NOP, so no ARMv8.2 floor is imposed at runtime.
-# That means:
+# -fno-optimize-sibling-calls + -mbranch-protection=bti: Pixel production
+# kernels mark both kernel .text and module vmalloc .text with PROT_BTI; we
+# keep BTI landing pads at every function entry to satisfy the kernel's
+# indirect-call BTI checks.  We DO NOT emit PAC (`paciasp` / `retaa`)
+# because real-device sub-version backports (observed on Pixel 6 with
+# 6.1.99-android14-11) trap on `retaa` with "Undefined instruction":
+#
+#     PC: printk+0x94/0x9c [kernelhook]   <- retaa instruction
+#     LR: init_module+0x44/0xf78 [kernelhook]
+#     [<...>] do_one_initcall+0xdc/0x314
+#     [<...>] do_init_module+0x48/0x1dc
+#
+# `retaa` is the combined ARMv8.3 PAC return; with FEAT_FPACCOMBINE it
+# faults on signature mismatch.  Stock Pixel vendor modules avoid this
+# by emitting the HINT-compatible `paciasp + autiasp + ret` triple
+# (declared as PAC-only in their `.note.gnu.property`), but clang under
+# `-march=armv8.5-a -mbranch-protection=pac-ret` chooses the combined
+# `retaa` form, which corners the kernel into the FPACCOMBINE trap path
+# whenever its PAC key state diverges from what `paciasp` signed against
+# at module entry — and that key state has empirically diverged on the
+# Pixel 6 6.1.99 backport (paths verified: AVD Pixel_34 6.1.23 PASS
+# both before and after this change; Pixel 6 6.1.99 PASS only after).
+#
+# The bti-only mode means:
 #   (a) indirect calls from our module into kernel (ksyms-resolved fn
 #       pointers) must be BLR — never tail-called via BR.
 #       `-fno-optimize-sibling-calls` forbids clang to rewrite
 #       `return fn(...)` as BR.
 #   (b) the kernel's BLR into our init_module / cleanup_module / any
-#       callback must land on a BTI_C (or BTI_JC) landing pad, AND carry
-#       PAC prologue.  `-mbranch-protection=standard` makes clang prefix
-#       every function entry with `paciasp` + `bti c`.  Without PAC
-#       declaration Android 15 kernel rejects the module pre-init.
-#       and raises a BTI exception — instant kernel panic on
-#       CONFIG_CFI_PERMISSIVE=n kernels like stock Pixel 6.
+#       callback lands on a `bti c` landing pad — clang prefixes every
+#       function entry with it under `-mbranch-protection=bti`.
+#   (c) function returns use plain `ret`, which is always defined (no
+#       PAC HW or kernel-key dependency).
+#
+# Cost: we lose the PAC return-address protection for our own module
+# code — defense-in-depth only; modules are already trusted code.
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)

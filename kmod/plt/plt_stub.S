@@ -81,11 +81,14 @@
 
 /*
  * arm64 GNU property note — declares FEAT_BTI + FEAT_PAC to the kernel
- * module loader.  Matches clang's auto-emitted note under
- * -mbranch-protection=standard (the flag the C translation units use).
- * Android 15 GKI 6.6 and newer silently reject modules that don't
- * declare FEAT_PAC in .note.gnu.property (finit_module → -ENOEXEC,
- * no dmesg), because stock vendor modules all declare it.
+ * module loader.  We compile the C translation units with
+ * -mbranch-protection=bti (no PAC, see kmod/mk/kmod.mk for why), so
+ * clang auto-emits a note for FEAT_BTI only; this hand-rolled note
+ * adds FEAT_PAC on top so we still match what stock Android 15 GKI 6.6
+ * vendor modules declare.  Declaring PAC without emitting `retaa` is
+ * harmless: the kernel maps our text with PAC enforcement on, we just
+ * never trigger a PAC check.  Without the FEAT_PAC bit, GKI 6.6 silently
+ * rejects with finit_module → -ENOEXEC (no dmesg).
  *
  * Layout per ELF64 GNU property note spec:
  *     uint32_t namesz   = 4            // "GNU\0"

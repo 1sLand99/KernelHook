@@ -17,8 +17,13 @@ SECTIONS
      *
      * .note.Linux carries per-module "OPEN"/"func" markers; the kernel
      * pre-load check rejects .ko's missing it with -ENOEXEC silently.
-     * .note.gnu.property declares FEAT_BTI + FEAT_PAC, matching the
-     * compile flag -mbranch-protection=standard. */
+     * .note.gnu.property still declares FEAT_BTI + FEAT_PAC even though
+     * we now compile with -mbranch-protection=bti only — declaring PAC
+     * support without emitting `retaa` is harmless (kernel maps our text
+     * with PAC enforcement on, we just never trigger a PAC check), and
+     * keeps stock Android 15 GKI 6.6 module-load happy where vendor
+     * modules all declare PAC.  See kmod/mk/kmod.mk for the rationale
+     * behind dropping `retaa`. */
     .note.gnu.property : ALIGN(8) {
         KEEP(*(.note.gnu.property))
     }

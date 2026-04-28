@@ -171,9 +171,16 @@ fi
 if [ "$KH_MODE" = "sdk" ]; then
     printf "  Building kernelhook.ko + %d consumers (SDK mode) for %s: %s\n" \
         "${#CONSUMER_ARR[@]}" "$UNAME" "${CONSUMER_ARR[*]}"
+    # Mirror test_avd_kmod.sh: module-dual produces every ksymtab variant
+    # (prel32 / abs64 / abs64-legacy / abs64-legacy-u32) so kmod_loader's
+    # runtime layout probe can redirect to the matching .ko.  `make module`
+    # alone only refreshes kernelhook.ko (= prel32 layout); stale variants
+    # from a prior build silently mask compile-flag changes — e.g. a PAC
+    # rebuild was bypassed for hours because kmod_loader on GKI 6.1 picked
+    # the day-old kernelhook-prel32.ko instead of today's kernelhook.ko.
     if ! ( cd "$ROOT/kmod" && \
            { make clean >/dev/null 2>&1 || true; } && \
-           make module \
+           make module-dual \
                KERNELRELEASE="$UNAME" \
                CC="$KH_CC" \
                LD="$KH_LD" \
