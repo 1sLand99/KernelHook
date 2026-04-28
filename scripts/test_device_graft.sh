@@ -271,14 +271,19 @@ dsu "$stale_cmd" >/dev/null 2>&1 || true
 # Live kmsg capture for post-mortem if grafted insmod panics the kernel.
 # /dev/kmsg dumps the entire ring buffer from the start, so the file ends
 # up with hours of unrelated boot/runtime messages — including any
-# historical Oops/panic that has nothing to do with our test. Snapshot
-# the byte offset before insmod so we can grep only the post-insmod tail.
+# historical Oops/panic that has nothing to do with our test.  Inject a
+# sentinel marker so the post-test scan skips pre-existing frames.
+# Sentinel beats `stat -f%z`-based offset because `cat /dev/kmsg` block-
+# buffers stdout to a file (no flush guarantee in 1s); a stat read can
+# return 0 bytes while a multi-KB pre-test history block sits queued in
+# the cat process buffer about to be flushed.
 LIVE_KMSG="/tmp/kh_graft_dmesg_${SERIAL}.log"
 rm -f "$LIVE_KMSG"
 $ADB shell "su -c 'cat /dev/kmsg'" > "$LIVE_KMSG" 2>&1 &
 KMSG_PID=$!
 sleep 1
-KMSG_OFFSET_BEFORE=$(stat -f%z "$LIVE_KMSG" 2>/dev/null || echo 0)
+KMSG_BOUNDARY="KH_GRAFT_BOUNDARY_$$"
+dsu "echo '$KMSG_BOUNDARY' > /dev/kmsg" >/dev/null 2>&1 || true
 
 # Stage 1: insmod grafted (carries kernelhook payload). The grafted .ko
 # was given the host module's kCFI initcall hash, so the kernel accepts
@@ -369,10 +374,11 @@ kill "$KMSG_PID" 2>/dev/null || true
 wait "$KMSG_PID" 2>/dev/null || true
 
 if [ -s "$LIVE_KMSG" ]; then
-    # Only inspect bytes added after our insmod — kmsg buffer may contain
-    # hours of unrelated history (vendor driver Oopses, etc.) that would
-    # otherwise produce false-positive panic dumps.
-    KMSG_TAIL=$(tail -c +$((KMSG_OFFSET_BEFORE + 1)) "$LIVE_KMSG" 2>/dev/null)
+    # Only inspect log lines after the sentinel — kmsg buffer may
+    # contain hours of unrelated history (vendor driver Oopses, etc.)
+    # that would otherwise produce false-positive panic dumps.
+    KMSG_TAIL=$(awk -v marker="$KMSG_BOUNDARY" \
+        '$0 ~ marker {p=1; next} p' "$LIVE_KMSG" 2>/dev/null)
     if echo "$KMSG_TAIL" | grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:"; then
         printf "\n  ${KH_YELLOW}Kernel panic during graft test:${KH_RESET}\n"
         echo "$KMSG_TAIL" | awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' \

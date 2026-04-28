@@ -289,17 +289,28 @@ dsu "dmesg -c" >/dev/null 2>&1 || true
 # /dev/kmsg dumps the entire ring buffer from the start, so the file
 # fills with hours of unrelated boot/runtime messages — including any
 # *historical* Oops/panic from prior unrelated crashes (e.g. Pixel 6
-# carries vh_sched stack traces from earlier sessions). Snapshot the
-# byte offset before insmod so the post-test panic scan only inspects
-# new bytes; otherwise old Oopses produce false-positive panic dumps
-# that look like our test caused them. AVD scripts don't need this
+# carries vh_sched stack traces from earlier sessions).  Without
+# disambiguation the post-test panic-grep would dump those old frames
+# and look like our test caused them.  AVD scripts don't need this
 # (fresh boot, empty ring buffer).
+#
+# Disambiguate via a sentinel marker injected into /dev/kmsg right
+# before insmod.  The kernel emits userspace writes to /dev/kmsg as
+# log entries inline with kernel messages, so the captured stream
+# becomes:
+#     ...history...
+#     <KH_KMOD_BOUNDARY_<pid>>          ← our marker
+#     ...post-insmod messages...
+# The post-test scan then runs `awk '/<marker>/{p=1} p' | grep BUG:...`.
+# Robust against `cat /dev/kmsg` block-buffering (a stat-of-file size
+# can read 0 bytes when the buffered chunk hasn't flushed yet).
 LIVE_KMSG="/tmp/kh_dmesg_${SERIAL}.log"
 rm -f "$LIVE_KMSG"
 $ADB shell "su -c 'cat /dev/kmsg'" > "$LIVE_KMSG" 2>&1 &
 KMSG_PID=$!
 sleep 1
-KMSG_OFFSET_BEFORE=$(stat -f%z "$LIVE_KMSG" 2>/dev/null || echo 0)
+KMSG_BOUNDARY="KH_KMOD_BOUNDARY_$$"
+dsu "echo '$KMSG_BOUNDARY' > /dev/kmsg" >/dev/null 2>&1 || true
 
 # Load. Host-side 60s timeout handles old BusyBox lacking `timeout`.
 # SDK mode: load kernelhook.ko once, then iterate every SDK consumer
@@ -407,13 +418,15 @@ if [ "$KH_MODE" = "sdk" ]; then
         dsu "rmmod $c 2>/dev/null; true" >/dev/null || true
     done
 
-    # Final cleanup + panic scan.  Use $KMSG_OFFSET_BEFORE to skip
-    # historical Oops/panic frames that pre-existed in the ring buffer.
+    # Final cleanup + panic scan.  Skip everything before the
+    # KMSG_BOUNDARY sentinel so historical Oopses from prior crashes
+    # don't surface as false-positive panic dumps.
     sleep 1
     kill "$KMSG_PID" 2>/dev/null || true
     wait "$KMSG_PID" 2>/dev/null || true
     if [ -s "$LIVE_KMSG" ]; then
-        KMSG_TAIL=$(tail -c +$((KMSG_OFFSET_BEFORE + 1)) "$LIVE_KMSG" 2>/dev/null)
+        KMSG_TAIL=$(awk -v marker="$KMSG_BOUNDARY" \
+            '$0 ~ marker {p=1; next} p' "$LIVE_KMSG" 2>/dev/null)
         if echo "$KMSG_TAIL" | grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:"; then
             printf "\n  ${YELLOW}Kernel panic captured during this test:${RESET}\n"
             echo "$KMSG_TAIL" | awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' \
@@ -441,7 +454,8 @@ kill "$KMSG_PID" 2>/dev/null || true
 wait "$KMSG_PID" 2>/dev/null || true
 
 if [ -s "$LIVE_KMSG" ]; then
-    KMSG_TAIL=$(tail -c +$((KMSG_OFFSET_BEFORE + 1)) "$LIVE_KMSG" 2>/dev/null)
+    KMSG_TAIL=$(awk -v marker="$KMSG_BOUNDARY" \
+        '$0 ~ marker {p=1; next} p' "$LIVE_KMSG" 2>/dev/null)
     if echo "$KMSG_TAIL" | grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:"; then
         printf "  ${YELLOW}Kernel panic captured during this test:${RESET}\n"
         echo "$KMSG_TAIL" | awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' \

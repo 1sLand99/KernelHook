@@ -202,13 +202,27 @@ endif
 # `retaa` is the combined ARMv8.3 PAC return; with FEAT_FPACCOMBINE it
 # faults on signature mismatch.  Stock Pixel vendor modules avoid this
 # by emitting the HINT-compatible `paciasp + autiasp + ret` triple
-# (declared as PAC-only in their `.note.gnu.property`), but clang under
-# `-march=armv8.5-a -mbranch-protection=pac-ret` chooses the combined
-# `retaa` form, which corners the kernel into the FPACCOMBINE trap path
-# whenever its PAC key state diverges from what `paciasp` signed against
-# at module entry — and that key state has empirically diverged on the
-# Pixel 6 6.1.99 backport (paths verified: AVD Pixel_34 6.1.23 PASS
-# both before and after this change; Pixel 6 6.1.99 PASS only after).
+# (clang produces it under `-march=armv8-a -mbranch-protection=pac-ret`
+# — empirically verified).  Our previous flags
+# `-march=armv8.5-a -mbranch-protection=standard` made clang choose the
+# combined `retaa` form instead, cornering the kernel into the
+# FPACCOMBINE trap path whenever PAC key state diverged from what
+# `paciasp` signed against at module entry — empirically diverged on
+# Pixel 6 6.1.99.  AVD Pixel_34 6.1.23 happened to keep keys consistent
+# so the same .ko PASSed there both before and after this change.
+#
+# Why drop PAC entirely instead of switching to `armv8-a + pac-ret`
+# (HINT form):
+#   * The HINT form would also work on Pixel 6 6.1.99 (verified by
+#     comparing /vendor/lib/modules/8021q.ko which uses paciasp+autiasp+ret).
+#   * But it requires keeping `-march=armv8-a` forever as a paired
+#     constraint — a future maintainer "upgrading" to `armv8.5-a` for
+#     unrelated reasons silently re-introduces `retaa` and the panic.
+#     `bti` alone is invariant under march changes.
+#   * PAC return-address protection on our shim functions is
+#     defense-in-depth only; freestanding kernel modules are already
+#     trusted code.  Trade-off favoured robustness over an extra
+#     defense layer here.
 #
 # The bti-only mode means:
 #   (a) indirect calls from our module into kernel (ksyms-resolved fn
@@ -218,11 +232,15 @@ endif
 #   (b) the kernel's BLR into our init_module / cleanup_module / any
 #       callback lands on a `bti c` landing pad — clang prefixes every
 #       function entry with it under `-mbranch-protection=bti`.
-#   (c) function returns use plain `ret`, which is always defined (no
-#       PAC HW or kernel-key dependency).
+#   (c) function returns use plain `ret`, which is always defined
+#       regardless of CPU PAC state or kernel key configuration.
 #
-# Cost: we lose the PAC return-address protection for our own module
-# code — defense-in-depth only; modules are already trusted code.
+# Why SDK consumer modules (examples/*/*.ko) were unaffected: they're
+# built via kbuild against the kernel's own toolchain flags, which on
+# Pixel 6 6.1.99 don't enable PAC for out-of-tree modules.  Verified
+# locally: hello_hook.ko has 0 retaa/paciasp instructions and a
+# BTI-only GNU property note.  Only this freestanding `kernelhook.ko`
+# build needed the fix.
 
 # Allow user to append extra flags
 KH_CFLAGS += $(EXTRA_CFLAGS)

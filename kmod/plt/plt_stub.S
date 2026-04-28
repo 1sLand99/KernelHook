@@ -80,26 +80,44 @@
 	.long 0                    /* descriptor */
 
 /*
- * arm64 GNU property note — declares FEAT_BTI + FEAT_PAC to the kernel
- * module loader.  We compile the C translation units with
- * -mbranch-protection=bti (no PAC, see kmod/mk/kmod.mk for why), so
- * clang auto-emits a note for FEAT_BTI only; this hand-rolled note
- * adds FEAT_PAC on top so we still match what stock Android 15 GKI 6.6
- * vendor modules declare.  Declaring PAC without emitting `retaa` is
- * harmless: the kernel maps our text with PAC enforcement on, we just
- * never trigger a PAC check.  Without the FEAT_PAC bit, GKI 6.6 silently
- * rejects with finit_module → -ENOEXEC (no dmesg).
+ * arm64 GNU property note: declares FEAT_BTI only (pr_data=1).
+ *
+ * Why hand-rolled at all:
+ *   `ld -r` (relocatable link, what kmod.mk uses to produce
+ *   kernelhook.ko.tmp) does NOT auto-merge GNU property notes from C
+ *   translation units into the output.  Empirically: removing this
+ *   note while leaving every C TU's clang-auto-emitted BTI note in
+ *   place caused the whole .note.gnu.property section to vanish from
+ *   kernelhook.ko.  Keeping at least one explicitly-emitted note in
+ *   an input object is what triggers the linker to write the section.
+ *
+ * Why pr_data=1 (BTI only) — and NOT pr_data=3 (BTI|PAC):
+ *   GNU_PROPERTY_AARCH64_FEATURE_1_AND is, per ELF spec, AND-merged
+ *   across all input objects at link time.  Clang under our current
+ *   `-mbranch-protection=bti` (see kmod/mk/kmod.mk) emits its own
+ *   note with pr_data=1.  Setting the FEAT_PAC bit here would
+ *   silently get masked out by the AND-merge — the previous version
+ *   of this file declared pr_data=3 and the resulting .ko ended up
+ *   with pr_data=1 anyway.  Match clang's intent exactly so the
+ *   declaration tracks the actual emitted instructions (no paciasp,
+ *   no retaa, no autiasp under bti-only mode).
+ *
+ * If a future kernel starts gating module-load on FEAT_PAC: change
+ * pr_data to 3 here AND switch kmod.mk to `-mbranch-protection=pac-ret`
+ * with `-march=armv8-a` so clang emits the HINT-form
+ * `paciasp+autiasp+ret` triple (verified on Pixel 6 6.1.99 via stock
+ * vendor 8021q.ko).  Declaring PAC without emitting PAC instructions
+ * is mismatched and rejected by some kernel verifiers.
  *
  * Layout per ELF64 GNU property note spec:
  *     uint32_t namesz   = 4            // "GNU\0"
  *     uint32_t descsz   = 16           // one property, aligned
  *     uint32_t type     = 5            // NT_GNU_PROPERTY_TYPE_0
  *     char     name[4]  = "GNU\0"
- *     -- property descriptor --
  *     uint32_t pr_type  = 0xc0000000   // GNU_PROPERTY_AARCH64_FEATURE_1_AND
  *     uint32_t pr_datasz= 4
- *     uint32_t pr_data  = 3            // FEAT_1_BTI (bit 0) | FEAT_1_PAC (bit 1)
- *     uint32_t pad      = 0            // align pr_data field to 8 bytes
+ *     uint32_t pr_data  = 1            // FEAT_1_BTI (bit 0) only
+ *     uint32_t pad      = 0            // align pr_data to 8 bytes
  */
 	.section .note.gnu.property, "a", %note
 	.align 3
@@ -109,5 +127,5 @@
 	.asciz "GNU"
 	.long 0xc0000000           /* pr_type = GNU_PROPERTY_AARCH64_FEATURE_1_AND */
 	.long 4                    /* pr_datasz */
-	.long 3                    /* pr_data: FEAT_1_BTI | FEAT_1_PAC */
+	.long 1                    /* pr_data: FEAT_1_BTI only */
 	.long 0                    /* padding */
