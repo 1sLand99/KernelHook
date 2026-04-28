@@ -177,8 +177,13 @@ pick_host_ko() {
     # name (basename without .ko) is NOT in /proc/modules.
     $ADB shell "su -c 'cat /proc/modules'" 2>/dev/null \
         | tr -d '\r' | awk '{print $1}' | sort > "$tmpd/loaded_mods.txt"
+    # Search order matches tools/kmod_loader/kmod_loader.c's vendor-ko probe.
+    # /vendor_dlkm is where Android 14+ devices using DLKM (Dynamic Loadable
+    # Kernel Modules) keep vendor modules; /odm is per-OEM customization;
+    # /lib/modules is the legacy GKI-on-host layout. AVD images put them
+    # in /system/lib/modules, real Pixel uses /vendor/lib/modules.
     local mod_dir
-    for mod_dir in /vendor/lib/modules /system/lib/modules; do
+    for mod_dir in /vendor_dlkm/lib/modules /vendor/lib/modules /system/lib/modules /odm/lib/modules /lib/modules; do
         local listing
         listing=$($ADB shell "su -c 'ls $mod_dir 2>/dev/null'" 2>/dev/null \
                   | tr -d '\r' | grep '\.ko$' | sort)

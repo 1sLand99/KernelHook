@@ -286,11 +286,20 @@ fi
 dsu "dmesg -c" >/dev/null 2>&1 || true
 
 # Live kmsg capture for post-mortem if module init crashes the kernel.
+# /dev/kmsg dumps the entire ring buffer from the start, so the file
+# fills with hours of unrelated boot/runtime messages — including any
+# *historical* Oops/panic from prior unrelated crashes (e.g. Pixel 6
+# carries vh_sched stack traces from earlier sessions). Snapshot the
+# byte offset before insmod so the post-test panic scan only inspects
+# new bytes; otherwise old Oopses produce false-positive panic dumps
+# that look like our test caused them. AVD scripts don't need this
+# (fresh boot, empty ring buffer).
 LIVE_KMSG="/tmp/kh_dmesg_${SERIAL}.log"
 rm -f "$LIVE_KMSG"
 $ADB shell "su -c 'cat /dev/kmsg'" > "$LIVE_KMSG" 2>&1 &
 KMSG_PID=$!
 sleep 1
+KMSG_OFFSET_BEFORE=$(stat -f%z "$LIVE_KMSG" 2>/dev/null || echo 0)
 
 # Load. Host-side 60s timeout handles old BusyBox lacking `timeout`.
 # SDK mode: load kernelhook.ko once, then iterate every SDK consumer
@@ -398,14 +407,18 @@ if [ "$KH_MODE" = "sdk" ]; then
         dsu "rmmod $c 2>/dev/null; true" >/dev/null || true
     done
 
-    # Final cleanup + panic scan.
+    # Final cleanup + panic scan.  Use $KMSG_OFFSET_BEFORE to skip
+    # historical Oops/panic frames that pre-existed in the ring buffer.
     sleep 1
     kill "$KMSG_PID" 2>/dev/null || true
     wait "$KMSG_PID" 2>/dev/null || true
-    if [ -s "$LIVE_KMSG" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$LIVE_KMSG"; then
-        printf "\n  ${YELLOW}Kernel panic captured in live kmsg:${RESET}\n"
-        awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$LIVE_KMSG" \
-            | sed 's/^/       /'
+    if [ -s "$LIVE_KMSG" ]; then
+        KMSG_TAIL=$(tail -c +$((KMSG_OFFSET_BEFORE + 1)) "$LIVE_KMSG" 2>/dev/null)
+        if echo "$KMSG_TAIL" | grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:"; then
+            printf "\n  ${YELLOW}Kernel panic captured during this test:${RESET}\n"
+            echo "$KMSG_TAIL" | awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' \
+                | sed 's/^/       /'
+        fi
     fi
     dsu "rmmod kernelhook 2>/dev/null; true" >/dev/null || true
 
@@ -427,10 +440,13 @@ sleep 1
 kill "$KMSG_PID" 2>/dev/null || true
 wait "$KMSG_PID" 2>/dev/null || true
 
-if [ -s "$LIVE_KMSG" ] && grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:" "$LIVE_KMSG"; then
-    printf "  ${YELLOW}Kernel panic captured in live kmsg:${RESET}\n"
-    awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' "$LIVE_KMSG" \
-        | sed 's/^/       /'
+if [ -s "$LIVE_KMSG" ]; then
+    KMSG_TAIL=$(tail -c +$((KMSG_OFFSET_BEFORE + 1)) "$LIVE_KMSG" 2>/dev/null)
+    if echo "$KMSG_TAIL" | grep -qE "BUG:|Unable to handle|Oops|Kernel panic|Call trace:"; then
+        printf "  ${YELLOW}Kernel panic captured during this test:${RESET}\n"
+        echo "$KMSG_TAIL" | awk '/BUG:|Unable to handle|Oops|Kernel panic|Call trace:/{p=1} p{print; if(++n>80) exit}' \
+            | sed 's/^/       /'
+    fi
 fi
 
 if ! echo "$LOAD_OUTPUT" | grep -qi "loaded"; then
