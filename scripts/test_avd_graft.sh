@@ -54,7 +54,20 @@ NM="$KH_NDK_BIN/llvm-nm"
 
 # Ensure build artifacts are present.
 [ -x "$GRAFT" ] || { echo "Missing $GRAFT — run 'make -C tools/kmod_loader graft_vendor_ko'" >&2; exit 1; }
-[ -f "$PAYLOAD" ] || { echo "Missing $PAYLOAD — run 'cd kmod && rm -f src/main.kmod.o && make payload'" >&2; exit 1; }
+
+# Auto-build kh_payload.o if missing. test_avd_kmod.sh's `make module-dual`
+# runs `make clean` which deletes this artifact, so a fresh kmod-then-graft
+# run sequence used to break with "Missing kh_payload.o". Build it inline
+# instead of failing.
+if [ ! -f "$PAYLOAD" ]; then
+    printf "${KH_BOLD}Building kh_payload.o (graft target)...${KH_RESET}\n"
+    ( cd "$ROOT/kmod" && rm -f src/main.kmod.o && make payload ) \
+        >/tmp/kh_graft_payload_build.log 2>&1 || {
+            echo "kh_payload.o build failed — see /tmp/kh_graft_payload_build.log" >&2
+            tail -20 /tmp/kh_graft_payload_build.log >&2
+            exit 1
+        }
+fi
 if [ ! -x "$LOADER" ]; then
     printf "${KH_BOLD}Building kmod_loader (aarch64)...${KH_RESET}\n"
     "$KH_CC" --target=aarch64-linux-android36 -DEMBED_PROBE_KO -DKH_RESOLVER_DEFINE_SPECS -static -O2 \
@@ -227,28 +240,48 @@ test_avd() {
     printf "  ${KH_GREEN}OK${KH_RESET}   grafted kernelhook loaded\n"
 
     # Stage 2: per-consumer load + marker check.
+    #
+    # Same dmesg-eviction race as test_avd_kmod.sh: with multiple
+    # hook-installing consumers, openat callbacks pr_info() faster than the
+    # kernel ring buffer can hold (~256 KB cycles in <1 s once 4 hooks are
+    # active). Run kmod_loader and grep for the marker in the SAME adb-shell
+    # so the grep hits microseconds after finit_module returns. Currently
+    # default KH_CONSUMERS="hello_hook" is single-consumer (no race), but
+    # this keeps the test robust if --consumers expands the set later.
     local all_pass=1
     for c in "${CONSUMER_ARR[@]}"; do
         adb -s "$serial" push "$ROOT/examples/$c/$c.ko" "/data/local/tmp/$c.ko" >/dev/null 2>&1
-        local ld_rc
-        ld_rc=$(adb -s "$serial" shell "/data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x$kaddr >/dev/null 2>&1; echo \$?" | tr -d '\r')
-        if [ "$ld_rc" != "0" ]; then
-            printf "  ${KH_RED}FAIL${KH_RESET} consumer %s load rc=%s\n" "$c" "$ld_rc"
-            all_pass=0; continue
-        fi
-        sleep 2
         local marker
         marker=$(consumer_marker "$c")
+        local _esc_marker
+        _esc_marker=$(printf '%s' "$marker" | sed -e 's/[\\"`$]/\\&/g')
+        local _out
+        _out=$(adb -s "$serial" shell "
+            /data/local/tmp/kmod_loader /data/local/tmp/$c.ko kallsyms_addr=0x$kaddr >/dev/null 2>&1
+            echo __KH_LD_RC__\$?
+            dmesg 2>/dev/null | grep -F \"$_esc_marker\" | tail -1
+        " 2>&1 | tr -d '\r')
+        local ld_rc
+        ld_rc=$(echo "$_out" | grep -oE '__KH_LD_RC__[0-9]+' | head -1 | sed 's/__KH_LD_RC__//')
+        local _race_marker_line
+        _race_marker_line=$(echo "$_out" | awk '/__KH_LD_RC__/{found=1; next} found' | tail -1)
+        if [ "$ld_rc" != "0" ]; then
+            printf "  ${KH_RED}FAIL${KH_RESET} consumer %s load rc=%s\n" "$c" "${ld_rc:-?}"
+            all_pass=0; continue
+        fi
+        if [ -n "$_race_marker_line" ]; then
+            printf "  ${KH_GREEN}OK${KH_RESET}   %s (marker '%s')\n" "$c" "$marker"
+            continue
+        fi
+        # Race-grep missed; fall back to a fresh dmesg sweep + KH/I prefix.
+        sleep 2
         if adb -s "$serial" shell 'dmesg' 2>/dev/null | grep -Fq "$marker"; then
             printf "  ${KH_GREEN}OK${KH_RESET}   %s (marker '%s')\n" "$c" "$marker"
+        elif adb -s "$serial" shell 'dmesg' 2>/dev/null | grep -Eq "\\[KH/I\\] $c:"; then
+            printf "  ${KH_GREEN}OK${KH_RESET}   %s (KH/I marker fallback)\n" "$c"
         else
-            # Hook-call markers (open called, etc) as secondary signal
-            if adb -s "$serial" shell 'dmesg' 2>/dev/null | grep -Eq "\\[KH/I\\] $c:"; then
-                printf "  ${KH_GREEN}OK${KH_RESET}   %s (KH/I marker fallback)\n" "$c"
-            else
-                printf "  ${KH_RED}FAIL${KH_RESET} %s: marker not seen\n" "$c"
-                all_pass=0
-            fi
+            printf "  ${KH_RED}FAIL${KH_RESET} %s: marker not seen\n" "$c"
+            all_pass=0
         fi
     done
 

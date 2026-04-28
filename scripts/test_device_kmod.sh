@@ -135,6 +135,12 @@ if [ "$SELINUX" = "Enforcing" ]; then
     printf "  ${YELLOW}WARN${RESET} SELinux is Enforcing — attempting setenforce 0 to avoid avc denials.\n"
     dsu "setenforce 0 2>&1 || true" >/dev/null || true
 fi
+# Keep the screen on while USB-tethered. On Pixel 6 (and other phones), once
+# the display sleeps the kernel descends into deep idle and adb's USB tunnel
+# disconnects mid-test ("device 'X' not found" partway through the consumer
+# loop). This is a no-op when stayon is already configured.
+$ADB shell svc power stayon usb >/dev/null 2>&1 || true
+$ADB shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
 
 # Build kmod_loader if missing.
 LOADER="$ROOT/tools/kmod_loader/kmod_loader"
