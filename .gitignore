@@ -17,6 +17,8 @@ kmod_loader
 kmod_loader_arm64
 kmod_loader_dyn
 graft_vendor_ko
+tools/kmod_loader/test_patch_this_module
+tools/kmod_loader/test_resolver
 !tools/kmod_loader/
 !tools/kmod_loader/README.md
 !tools/kmod_loader/graft_vendor_ko.c
