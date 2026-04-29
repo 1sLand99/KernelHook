@@ -8,7 +8,8 @@
  * Build modes: kernel
  * Depends on: kernelhook/kh_symvers.h (frozen CRCs), kh_hook.h, symbol.h
  * Notes: Core library NOT linked in — symbols resolved by kernel module
- *   loader against kernelhook.ko. KH_DECLARE_VERSIONS() emits __versions.
+ *   loader against kernelhook.ko. MODULE_VERSIONS() under KH_SDK_MODE
+ *   auto-emits the __versions entries for every kh_* export.
  */
 
 #include "shim.h"
@@ -48,7 +49,6 @@ static void __exit importer_exit(void)
 }
 
 MODULE_VERSIONS();
-KH_DECLARE_VERSIONS();
 MODULE_VERMAGIC();
 MODULE_THIS_MODULE();
 
